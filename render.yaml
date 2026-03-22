@@ -28,7 +28,6 @@ services:
   - type: web
     name: elearning-frontend
     runtime: static
-    plan: starter
     rootDir: ui_components
     buildCommand: npm install && npm run build
     staticPublishPath: ./dist
