@@ -25,9 +25,9 @@ services:
       - key: NODE_ENV
         value: production
 
+staticSites:
   # 2. Frontend Static Site
-  - type: static
-    name: elearning-frontend
+  - name: elearning-frontend
     plan: free
     rootDir: ui_components
     buildCommand: npm install && npm run build
