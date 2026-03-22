@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Học Tập - Anthropic Style</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        serif: ['Lora', 'serif'],
+                    },
+                    colors: {
+                        paper: '#F4F4F0',      /* Nền giấy kem */
+                        surface: '#FFFFFF',    /* Trắng tinh cho Card/Sidebar */
+                        charcoal: '#2D2D2A',   /* Chữ đen than */
+                        muted: '#6B6A65',      /* Chữ xám phụ */
+                        rust: '#D97757',       /* Cam gạch Anthropic */
+                        borderline: '#E5E4DE'  /* Viền xám nhạt */
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-paper text-charcoal font-sans antialiased selection:bg-rust selection:text-white overflow-hidden">
+
+    <div class="flex h-screen w-screen">
+        
+        <aside class="w-64 bg-surface border-r border-borderline flex flex-col flex-shrink-0 z-20">
+            <div class="h-16 px-6 border-b border-borderline flex items-center">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 bg-rust rounded flex items-center justify-center text-white font-serif font-bold text-lg">H</div>
+                    <div class="flex flex-col">
+                        <span class="font-serif font-bold text-base leading-tight">Learning Ops</span>
+                        <span class="text-[10px] text-muted tracking-widest uppercase">Hicado & Vạn Xuân</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto py-6 px-4">
+                <div class="text-[10px] font-bold text-muted uppercase tracking-widest mb-3 px-3">Bảng điều khiển</div>
+                <ul class="space-y-1">
+                    <li>
+                        <a href="#" class="flex items-center gap-3 px-3 py-2 text-sm text-muted rounded-md hover:bg-paper hover:text-charcoal transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            Điểm danh
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="flex items-center gap-3 px-3 py-2 text-sm text-muted rounded-md hover:bg-paper hover:text-charcoal transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                            Tài chính
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="flex items-center gap-3 px-3 py-2 text-sm text-muted rounded-md hover:bg-paper hover:text-charcoal transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                            Học sinh
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" class="flex items-center gap-3 px-3 py-2 text-sm text-rust font-medium bg-rust/5 rounded-md transition-colors relative">
+                            <div class="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-4 bg-rust rounded-r-full"></div>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                            Quản lý Lớp học
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="p-4 border-t border-borderline">
+                <div class="flex items-center gap-3">
+                    <span class="relative flex h-2.5 w-2.5">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <span class="text-xs text-muted">Hệ thống ổn định</span>
+                </div>
+            </div>
+        </aside>
+
+        <div class="flex-1 flex flex-col h-full overflow-hidden">
+            
+            <header class="h-16 bg-surface border-b border-borderline flex items-center justify-between px-8 shrink-0 z-10">
+                <div class="flex items-center gap-2 text-sm text-muted">
+                    <span>Hệ thống quản trị</span>
+                    <span>/</span>
+                    <span class="text-charcoal font-medium">Lớp học</span>
+                </div>
+                
+                <div class="flex items-center gap-6">
+                    <div class="flex flex-col items-end">
+                        <span class="text-sm font-semibold text-charcoal">Nguyễn Văn A</span>
+                        <span class="text-[10px] text-rust tracking-widest uppercase">Giảng viên</span>
+                    </div>
+                    <div class="w-px h-8 bg-borderline"></div>
+                    <button class="text-sm font-medium text-muted hover:text-charcoal transition-colors">Đăng xuất</button>
+                </div>
+            </header>
+
+            <main class="flex-1 overflow-y-auto p-8 lg:p-12">
+                <div class="max-w-7xl mx-auto">
+                    
+                    <div class="mb-10">
+                        <h2 class="text-4xl font-serif font-bold text-charcoal mb-2 tracking-tight">Danh sách Lớp học</h2>
+                        <p class="text-base text-muted">Quản lý sĩ số, thời khóa biểu và theo dõi chuyên cần của học viên.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        
+                        <div class="bg-surface border border-borderline rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow duration-300 flex flex-col">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 class="text-xl font-serif font-bold text-charcoal mb-2">Toán 10 - Nâng cao</h3>
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                        <span class="text-xs text-muted">Đang mở • 2/30 Học viên</span>
+                                    </div>
+                                </div>
+                                <button class="text-muted hover:text-rust transition-colors" title="Chuyên cần">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                                </button>
+                            </div>
+
+                            <div class="flex items-center gap-3 py-4 border-y border-borderline mb-4">
+                                <div class="w-10 h-10 rounded-full bg-paper border border-borderline flex items-center justify-center font-serif text-charcoal font-bold">N</div>
+                                <div class="flex flex-col">
+                                    <span class="text-sm font-medium text-charcoal">Nguyễn Văn A</span>
+                                    <span class="text-xs text-muted">Phòng 101 • Hicado</span>
+                                </div>
+                            </div>
+
+                            <div class="flex-1 space-y-4">
+                                <div>
+                                    <span class="text-[10px] uppercase tracking-widest text-muted block mb-2">Lịch học (12 buổi)</span>
+                                    <div class="flex flex-wrap gap-2">
+                                        <span class="px-2.5 py-1 bg-paper border border-borderline rounded text-xs text-charcoal">Thứ 2</span>
+                                        <span class="px-2.5 py-1 bg-paper border border-borderline rounded text-xs text-charcoal">Thứ 4</span>
+                                        <span class="px-2.5 py-1 bg-paper border border-borderline rounded text-xs text-charcoal">Thứ 6</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 text-rust">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                    <span class="text-sm font-medium">07:30 - 09:45</span>
+                                </div>
+                            </div>
+
+                            <button class="mt-6 w-full py-2.5 px-4 bg-transparent border border-borderline text-sm text-charcoal font-medium rounded-lg hover:border-rust hover:text-rust transition-colors">
+                                Quản lý lớp học
+                            </button>
+                        </div>
+
+                        <div class="bg-surface border border-borderline rounded-xl p-6 shadow-sm hover:shadow-md transition-shadow duration-300 flex flex-col">
+                            <div class="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 class="text-xl font-serif font-bold text-charcoal mb-2">Ngữ Văn 12 - Luyện thi</h3>
+                                    <div class="flex items-center gap-2">
+                                        <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+                                        <span class="text-xs text-muted">Đang mở • 1/25 Học viên</span>
+                                    </div>
+                                </div>
+                                <button class="text-muted hover:text-rust transition-colors" title="Chuyên cần">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                                </button>
+                            </div>
+
+                            <div class="flex items-center gap-3 py-4 border-y border-borderline mb-4">
+                                <div class="w-10 h-10 rounded-full bg-paper border border-borderline flex items-center justify-center font-serif text-charcoal font-bold">L</div>
+                                <div class="flex flex-col">
+                                    <span class="text-sm font-medium text-charcoal">Trần Thị Lộc</span>
+                                    <span class="text-xs text-muted">Phòng 102 • Hicado</span>
+                                </div>
+                            </div>
+
+                            <div class="flex-1 space-y-4">
+                                <div>
+                                    <span class="text-[10px] uppercase tracking-widest text-muted block mb-2">Lịch học (12 buổi)</span>
+                                    <div class="flex flex-wrap gap-2">
+                                        <span class="px-2.5 py-1 bg-paper border border-borderline rounded text-xs text-charcoal">Thứ 2</span>
+                                        <span class="px-2.5 py-1 bg-paper border border-borderline rounded text-xs text-charcoal">Thứ 4</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 text-rust">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                                    <span class="text-sm font-medium">18:15 - 20:30</span>
+                                </div>
+                            </div>
+
+                            <button class="mt-6 w-full py-2.5 px-4 bg-transparent border border-borderline text-sm text-charcoal font-medium rounded-lg hover:border-rust hover:text-rust transition-colors">
+                                Quản lý lớp học
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+            </main>
+
+        </div>
+    </div>
+
+</body>
+</html>

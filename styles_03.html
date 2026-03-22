@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quản lý Lớp học - Anthropic Style</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Lora:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        serif: ['Lora', 'serif'],
+                    },
+                    colors: {
+                        bg100: '#F4F4F0',      /* Nền xám giấy - Background chính */
+                        bg200: '#EBEBE6',      /* Nền xám đậm hơn - Hover/Sidebar */
+                        bg000: '#FFFFFF',      /* Trắng tinh - Card surface */
+                        text100: '#2D2D2A',    /* Chữ đen than (Heading) */
+                        text300: '#4A4A46',    /* Chữ xám đậm (Body) */
+                        text400: '#6B6A65',    /* Chữ xám nhạt (Muted/Meta) */
+                        accent: '#D97757',     /* Cam gạch đặc trưng của Claude */
+                        borderline: '#E5E4DE'  /* Viền siêu nhạt */
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-bg100 text-text100 font-sans antialiased selection:bg-accent selection:text-white overflow-hidden">
+
+    `<div class="flex h-screen w-screen">`
+
+    `<aside class="w-64 bg-[#F0F0EB] border-r border-borderline flex flex-col flex-shrink-0 z-20">`
+            `<div class="h-14 px-6 border-b border-borderline flex items-center gap-2">`
+                `<div class="w-6 h-6 bg-accent rounded flex items-center justify-center text-white font-serif font-bold text-xs">`H`</div>`
+                `<span class="font-serif font-semibold text-text100">`Learning Ops
+            `</div>`
+
+    `<div class="px-4 pt-6 pb-2">`
+                `<div class="text-[11px] font-semibold text-text400 uppercase tracking-wider mb-2 px-2">`Danh mục chính`</div>`
+            `</div>`
+
+    `<nav class="flex-1 overflow-y-auto px-3 space-y-0.5">`
+                `<a href="#" class="flex items-center gap-3 px-3 py-1.5 text-sm text-text300 rounded-lg hover:bg-bg200 transition-colors">`
+                    `<svg class="w-4 h-4 text-text400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z">``</path></svg>`
+                    Quản lý Điểm danh
+                `</a>`
+                `<a href="#" class="flex items-center gap-3 px-3 py-1.5 text-sm text-text300 rounded-lg hover:bg-bg200 transition-colors">`
+                    `<svg class="w-4 h-4 text-text400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z">``</path></svg>`
+                    Lương thưởng
+                `</a>`
+                `<a href="#" class="flex items-center gap-3 px-3 py-1.5 text-sm text-text300 rounded-lg hover:bg-bg200 transition-colors">`
+                    `<svg class="w-4 h-4 text-text400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z">``</path></svg>`
+                    Học sinh
+                `</a>`
+                `<a href="#" class="flex items-center gap-3 px-3 py-1.5 text-sm text-text100 font-medium bg-bg000 border border-borderline shadow-sm rounded-lg transition-colors">`
+                    `<svg class="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253">``</path></svg>`
+                    Quản lý Lớp học
+                `</a>`
+                `<a href="#" class="flex items-center gap-3 px-3 py-1.5 text-sm text-text300 rounded-lg hover:bg-bg200 transition-colors">`
+                    `<svg class="w-4 h-4 text-text400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6">``</path></svg>`
+                    Quản lý Phòng học
+                `</a>`
+            `</nav>`
+
+    `<div class="p-4 border-t border-borderline flex items-center justify-between text-xs text-text400">`
+                `<div class="flex items-center gap-2">`
+                    `<span class="w-2 h-2 rounded-full bg-emerald-500">`
+                    `<span>`System Normal
+                `</div>`
+                `<span class="font-serif">`v2.4.1
+            `</div>`
+        `</aside>`
+
+    `<div class="flex-1 flex flex-col h-full overflow-hidden">`
+
+    `<header class="h-14 bg-bg100 border-b border-borderline flex items-center justify-between px-6 md:px-10 shrink-0 z-10 sticky top-0">`
+                `<div class="flex items-center gap-2 text-sm text-text400 font-medium">`
+                    `<span class="hover:text-text100 cursor-pointer">`Hệ thống quản trị
+                    `<span>`/
+                    `<span class="text-text100">`Lớp học
+                `</div>`
+
+    `<div class="flex items-center gap-4 text-sm">`
+                    `<div class="flex items-center gap-3">`
+                        `<div class="w-7 h-7 rounded bg-bg200 border border-borderline flex items-center justify-center font-serif text-text300 text-xs">`A`</div>`
+                        `<div class="hidden md:flex flex-col">`
+                            `<span class="font-medium text-text100 leading-tight">`Nguyễn Văn A
+                            `<span class="text-[10px] text-text400">`Giảng viên
+                        `</div>`
+                    `</div>`
+                    `<div class="w-px h-5 bg-borderline mx-2"></div>`
+                    `<button class="text-text400 hover:text-text100 transition-colors">`
+                        `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1">``</path></svg>`
+                    `</button>`
+                `</div>`
+            `</header>`
+
+    `<main class="flex-1 overflow-y-auto px-6 py-8 md:px-12 md:py-10 lg:px-16">`
+                `<div class="max-w-6xl mx-auto">`
+
+    `<div class="mb-10 max-w-2xl">`
+                        `<div class="mb-2 text-sm text-text400">`Academic Management`</div>`
+                        `<h1 class="text-3xl md:text-4xl font-serif font-bold text-text100 mb-3 tracking-tight">`Quản lý Lớp học`</h1>`
+                        `<p class="text-base text-text300 leading-relaxed">`
+                            Quản lý sĩ số, theo dõi thời khóa biểu và kiểm soát chuyên cần của học viên trên toàn hệ thống.
+                        `</p>`
+                    `</div>`
+
+    `<div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-5">`
+
+    `<a href="#" class="group flex flex-col bg-bg000 border border-borderline rounded-xl overflow-hidden hover:bg-bg200 transition-colors duration-200 min-h-[160px]">`
+                            `<div class="p-5 flex flex-col gap-4 flex-1">`
+                                `<div>`
+                                    `<div class="flex items-start justify-between mb-1">`
+                                        `<h3 class="font-serif font-medium text-lg text-text100 group-hover:text-accent transition-colors">`Toán 10 - Nâng cao`</h3>`
+                                        `<span class="inline-flex items-center justify-center px-2 py-1 text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 rounded">`
+                                            Active
+                                      
+                                    `</div>`
+                                    `<div class="text-xs text-text400">`2/30 Học viên`</div>`
+                                `</div>`
+
+    `<div class="flex items-center gap-3">`
+                                    `<div class="w-8 h-8 rounded bg-bg100 border border-borderline flex items-center justify-center font-serif text-text300 text-sm">`A`</div>`
+                                    `<div class="flex flex-col">`
+                                        `<span class="text-sm font-medium text-text100">`Nguyễn Văn A
+                                        `<span class="text-xs text-text400">`Phòng 101 • Hicado
+                                    `</div>`
+                                `</div>`
+
+    `<div class="mt-auto pt-4 border-t border-borderline">`
+                                    `<div class="flex items-center justify-between text-xs">`
+                                        `<div class="flex gap-1.5">`
+                                            `<span class="px-1.5 py-0.5 bg-bg100 text-text300 border border-borderline rounded">`T2
+                                            `<span class="px-1.5 py-0.5 bg-bg100 text-text300 border border-borderline rounded">`T4
+                                            `<span class="px-1.5 py-0.5 bg-bg100 text-text300 border border-borderline rounded">`T6
+                                        `</div>`
+                                        `<span class="text-text400">`07:30 - 09:45
+                                    `</div>`
+                                `</div>`
+                            `</div>`
+                        `</a>`
+
+    `<a href="#" class="group flex flex-col bg-bg000 border border-borderline rounded-xl overflow-hidden hover:bg-bg200 transition-colors duration-200 min-h-[160px]">`
+                            `<div class="p-5 flex flex-col gap-4 flex-1">`
+                                `<div>`
+                                    `<div class="flex items-start justify-between mb-1">`
+                                        `<h3 class="font-serif font-medium text-lg text-text100 group-hover:text-accent transition-colors">`Ngữ Văn 12`</h3>`
+                                        `<span class="inline-flex items-center justify-center px-2 py-1 text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 rounded">`
+                                            Active
+                                      
+                                    `</div>`
+                                    `<div class="text-xs text-text400">`1/25 Học viên`</div>`
+                                `</div>`
+
+    `<div class="flex items-center gap-3">`
+                                    `<div class="w-8 h-8 rounded bg-bg100 border border-borderline flex items-center justify-center font-serif text-text300 text-sm">`L`</div>`
+                                    `<div class="flex flex-col">`
+                                        `<span class="text-sm font-medium text-text100">`Trần Thị Lộc
+                                        `<span class="text-xs text-text400">`Phòng 102 • Hicado
+                                    `</div>`
+                                `</div>`
+
+    `<div class="mt-auto pt-4 border-t border-borderline">`
+                                    `<div class="flex items-center justify-between text-xs">`
+                                        `<div class="flex gap-1.5">`
+                                            `<span class="px-1.5 py-0.5 bg-bg100 text-text300 border border-borderline rounded">`T2
+                                            `<span class="px-1.5 py-0.5 bg-bg100 text-text300 border border-borderline rounded">`T4
+                                        `</div>`
+                                        `<span class="text-text400">`18:15 - 20:30
+                                    `</div>`
+                                `</div>`
+                            `</div>`
+                        `</a>`
+
+    `<a href="#" class="group flex flex-col bg-bg000 border border-borderline rounded-xl overflow-hidden hover:bg-bg200 transition-colors duration-200 min-h-[160px]">`
+                            `<div class="p-5 flex flex-col gap-4 flex-1">`
+                                `<div>`
+                                    `<div class="flex items-start justify-between mb-1">`
+                                        `<h3 class="font-serif font-medium text-lg text-text100 group-hover:text-accent transition-colors">`Hóa học 11`</h3>`
+                                        `<span class="inline-flex items-center justify-center px-2 py-1 text-[10px] font-medium bg-emerald-50 text-emerald-600 border border-emerald-200 rounded">`
+                                            Active
+                                      
+                                    `</div>`
+                                    `<div class="text-xs text-text400">`2/35 Học viên`</div>`
+                                `</div>`
+
+    `<div class="flex items-center gap-3">`
+                                    `<div class="w-8 h-8 rounded bg-bg100 border border-borderline flex items-center justify-center font-serif text-text300 text-sm">`C`</div>`
+                                    `<div class="flex flex-col">`
+                                        `<span class="text-sm font-medium text-text100">`Lê Công Cấp
+                                        `<span class="text-xs text-text400">`Phòng A2 • Vạn Xuân
+                                    `</div>`
+                                `</div>`
+
+    `<div class="mt-auto pt-4 border-t border-borderline">`
+                                    `<div class="flex items-center justify-between text-xs">`
+                                        `<div class="flex gap-1.5">`
+                                            `<span class="px-1.5 py-0.5 bg-bg100 text-text300 border border-borderline rounded">`T3
+                                            `<span class="px-1.5 py-0.5 bg-bg100 text-text300 border border-borderline rounded">`T6
+                                        `</div>`
+                                        `<span class="text-text400">`19:00 - 21:00
+                                    `</div>`
+                                `</div>`
+                            `</div>`
+                        `</a>`
+
+    `</div>`
+
+    `<div class="mt-10 flex w-full rounded-lg px-4 py-3 gap-3 items-start text-sm border border-borderline bg-bg200">`
+                        `<svg class="w-5 h-5 text-text400 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z">``</path></svg>`
+                        `<div class="text-text300 leading-relaxed">`
+                            `<p>`Đây là giao diện chuẩn mực theo phong cách Tài liệu Kỹ thuật. Dữ liệu được thể hiện rõ ràng, loại bỏ toàn bộ hiệu ứng thị giác dư thừa (như shadow đậm, màu sắc chói lóa) để tăng cường tối đa khả năng đọc và tập trung.`</p>`
+                        `</div>`
+                    `</div>`
+
+    `</div>`
+            `</main>`
+
+    `</div>`
+    `</div>`
+
+</body>
+</html>
