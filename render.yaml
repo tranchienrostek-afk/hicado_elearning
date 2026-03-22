@@ -5,7 +5,7 @@ databases:
     plan: free
 
 services:
-  # 1. Backend Web Service
+  # Backend API (Node.js)
   - type: web
     name: elearning-backend
     runtime: node
@@ -25,13 +25,14 @@ services:
       - key: NODE_ENV
         value: production
 
-staticSites:
-  # 2. Frontend Static Site
-  - name: elearning-frontend
+  # Frontend (Static Site)
+  - type: web
+    name: elearning-frontend
+    runtime: static
     plan: free
     rootDir: ui_components
     buildCommand: npm install && npm run build
-    publishDir: dist
+    staticPublishPath: ./dist
     routes:
       - type: rewrite
         source: /api/*
