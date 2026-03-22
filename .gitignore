@@ -17,6 +17,11 @@ backend/.env
 ui_components/.env
 *.local
 
+# Sensitive data
+data_real.json
+backend/data_real.json
+ui_components/src/store/modules/center/mockData.json
+
 # IDE and OS files
 .DS_Store
 .vscode/
