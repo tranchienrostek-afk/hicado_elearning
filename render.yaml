@@ -1,7 +1,6 @@
 databases:
   - name: elearning-db
     databaseName: elearning
-    user: postgres
     plan: free
 
 services:
