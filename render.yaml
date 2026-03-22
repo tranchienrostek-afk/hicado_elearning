@@ -1,12 +1,10 @@
-services:
-  # 1. PostgreSQL Database
-  - type: database
-    name: elearning-db
+databases:
+  - name: elearning-db
     databaseName: elearning
     user: postgres
-    plan: free # Change to starter for production
+    plan: free
 
-  # 2. Backend Web Service (Node.js + Prisma)
+services:
   - type: web
     name: elearning-backend
     env: node
@@ -26,7 +24,6 @@ services:
       - key: NODE_ENV
         value: production
 
-  # 3. Frontend Static Site (Vite)
   - type: web
     name: elearning-frontend
     env: static
@@ -35,11 +32,9 @@ services:
     buildCommand: npm install && npm run build
     publishDir: dist
     routes:
-      # Proxy /api requests to the backend service
       - type: rewrite
         source: /api/*
         destination: https://elearning-backend.onrender.com/api/*
-      # Single Page Application (SPA) routing
       - type: rewrite
         source: /*
         destination: /index.html
