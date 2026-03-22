@@ -5,9 +5,10 @@ databases:
     plan: free
 
 services:
+  # 1. Backend Web Service
   - type: web
     name: elearning-backend
-    env: node
+    runtime: node
     plan: starter
     rootDir: backend
     buildCommand: npm install && npm run build
@@ -24,9 +25,9 @@ services:
       - key: NODE_ENV
         value: production
 
-  - type: web
+  # 2. Frontend Static Site
+  - type: static
     name: elearning-frontend
-    env: static
     plan: free
     rootDir: ui_components
     buildCommand: npm install && npm run build
