@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  TEACHER
+  STUDENT
+}
+
+enum Gender {
+  Nam
+  Nu
+  Khac
+}
+
+enum TuitionStatus {
+  PAID
+  PENDING
+  DEBT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LEAVE_REQUEST
+}
+
+enum TransactionStatus {
+  SUCCESS
+  FAILED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String   // In production, this will be hashed
+  role      Role
+  name      String
+  
+  // Relations to Profiles (A user is either a Teacher, Student, or Staff)
+  teacherId String?  @unique
+  teacher   Teacher? @relation(fields: [teacherId], references: [id])
+  
+  studentId String?  @unique
+  student   Student? @relation(fields: [studentId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Teacher {
+  id               String   @id @default(uuid())
+  name             String
+  specialization   String?
+  workplace        String?
+  dob              DateTime?
+  gender           Gender?
+  cccd             String?
+  phone            String
+  bankAccount      String
+  bankName         String
+  salaryRate       Float    // Percentage (e.g., 0.8)
+  notes            String?  @db.Text
+
+  user             User?
+  classes          Class[]
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Student {
+  id             String   @id @default(uuid())
+  name           String
+  birthYear      Int
+  address        String
+  schoolName     String?
+  schoolClass    String?
+  cccd           String?
+  tuitionStatus  TuitionStatus @default(PENDING)
+
+  user           User?
+  classes        ClassStudent[]
+  attendances    Attendance[]
+  transactions   Transaction[]
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Room {
+  id       String  @id @default(uuid())
+  name     String
+  center   String  // Hicado or Vạn Xuân
+  capacity Int
+  notes    String? @db.Text
+
+  classes  Class[]
+}
+
+model Class {
+  id                String   @id @default(uuid())
+  name              String
+  tuitionPerSession Int
+  totalSessions     Int
+  teacherShare      Float?   // Override teacher's default salaryRate
+  scheduleDays      String[] // e.g. ["Thứ 2", "Thứ 4"]
+  scheduleTime      String?  // e.g. "18:00 - 20:00"
+
+  roomId            String?
+  room              Room?    @relation(fields: [roomId], references: [id])
+  
+  teacherId         String
+  teacher           Teacher  @relation(fields: [teacherId], references: [id])
+
+  students          ClassStudent[]
+  attendances       Attendance[]
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+// Many-to-Many relation table between Class and Student
+model ClassStudent {
+  classId   String
+  studentId String
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([classId, studentId])
+}
+
+model Attendance {
+  id             String           @id @default(uuid())
+  date           DateTime
+  status         AttendanceStatus
+  note           String?          @db.Text
+  markedByUserId String?          // Reference to User ID who marked this
+  markedByName   String?
+  markedByRole   String?
+  markedAt       DateTime         @default(now())
+
+  classId        String
+  class          Class    @relation(fields: [classId], references: [id])
+  studentId      String
+  student        Student  @relation(fields: [studentId], references: [id])
+
+  @@unique([classId, studentId, date])
+}
+
+model Transaction {
+  id        String            @id @default(uuid())
+  amount    Int
+  date      DateTime          @default(now())
+  status    TransactionStatus @default(SUCCESS)
+
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+}

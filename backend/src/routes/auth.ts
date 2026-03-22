@@ -1,0 +1,49 @@
+import { Router } from 'express';
+import jwt from 'jsonwebtoken';
+import prisma from '../lib/prisma';
+
+const router = Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+router.post('/login', async (req, res) => {
+  const { username, password } = req.body;
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { username },
+    });
+
+    if (!user || user.password !== password) {
+      return res.status(401).json({ message: 'Tên đăng nhập hoặc mật khẩu không đúng' });
+    }
+
+    const token = jwt.sign(
+      { 
+        id: user.id, 
+        username: user.username, 
+        role: user.role,
+        teacherId: user.teacherId,
+        studentId: user.studentId
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.json({
+      token,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+        name: user.name,
+        teacherId: user.teacherId,
+        studentId: user.studentId
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+    res.status(500).json({ message: 'Lỗi máy chủ' });
+  }
+});
+
+export default router;
