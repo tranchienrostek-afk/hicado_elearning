@@ -3,32 +3,37 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg100: '#F4F4F0',
-        bg200: '#EBEBE6',
+        // Core Palette (UI/UX Design Pro)
+        'hicado-navy': '#1A2332',
+        'hicado-emerald': '#10B981',
+        'hicado-obsidian': '#0A0A0B',
+        'hicado-slate': '#F1F5F9',
+        'hicado-parchment': '#FBFBF9',
+        'hicado-amber': '#F59E0B',
+        
+        // Semantic Layer
+        bg100: '#FBFBF9', // Parchment light
+        bg200: '#F1F5F9', // Slate subtle
         bg000: '#FFFFFF',
-        text100: '#2D2D2A',
-        text300: '#4A4A46',
-        text400: '#6B6A65',
-        accent: '#D97757',
-        'accent-dark': '#C96A4D',
-        borderline: '#E5E4DE',
-        heading: '#2D2D2A',
-        'body-text': '#4A4A46',
-        'app-bg': '#F4F4F0',
-        'management-dark': '#2D2D2A',
-        'management-blue': '#D97757',
-        'management-bg': '#F4F4F0',
-        'management-border': '#E5E4DE',
-        primary: '#D97757',
-        success: '#059669',
-        error: '#dc2626',
-        'ant-paper': '#F4F4F0',
-        'ant-surface': '#FFFFFF',
-        'ant-charcoal': '#2D2D2A',
-        'ant-muted': '#6B6A65',
-        'ant-rust': '#D97757',
-        'ant-border': '#E5E4DE',
+        text100: '#1A2332', // Navy dark
+        text300: '#475569', // Slate muted
+        text400: '#64748B', // Slate very muted
+        accent: '#10B981', // Emerald growth
+        'accent-dark': '#059669',
+        borderline: '#E2E8F0',
+        heading: '#1A2332',
+        'body-text': '#475569',
+        'app-bg': '#FBFBF9',
+        'management-dark': '#1A2332',
+        'management-blue': '#10B981',
+        'management-bg': '#F1F5F9',
+        'management-border': '#E2E8F0',
+        primary: '#1A2332',
+        success: '#10B981',
+        error: '#EF4444',
+        'ant-border': '#E2E8F0',
       },
+
       boxShadow: {
         soft: '0 2px 6px rgba(45, 45, 42, 0.04)',
         premium: '0 4px 12px rgba(45, 45, 42, 0.06)',

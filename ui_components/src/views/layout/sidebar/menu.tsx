@@ -26,22 +26,17 @@ export const SidebarMenu = () => {
                 title={resolveMenuText(id, menu?.text || '')}
                 className={({ isActive }) =>
                   clsx(
-                    'flex items-center gap-3 px-3 py-2 text-sm rounded-lg border transition-colors',
+                    'flex items-center gap-3 px-4 py-2.5 text-xs font-bold uppercase tracking-widest rounded-xl transition-all duration-300',
                     {
-                      'text-text100 font-medium bg-bg000 border-borderline shadow-soft': isActive,
-                      'text-text300 border-transparent hover:bg-bg200': !isActive,
+                      'text-hicado-navy bg-hicado-emerald shadow-lg shadow-hicado-emerald/20': isActive,
+                      'text-white/50 hover:text-white hover:bg-white/5': !isActive,
                     }
                   )
                 }
               >
-                {({ isActive }) => (
+                {() => (
                   <>
-                    <span
-                      className={clsx('w-4 h-4 flex items-center justify-center', {
-                        'text-accent': isActive,
-                        'text-text400': !isActive,
-                      })}
-                    >
+                    <span className="w-4 h-4 flex items-center justify-center opacity-80 group-hover:opacity-100 transition-opacity">
                       {menu.icon}
                     </span>
                     <span>{resolveMenuText(id, menu?.text || '')}</span>

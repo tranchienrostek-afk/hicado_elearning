@@ -7,7 +7,7 @@ const router = Router();
 // Get attendance for a class on a specific date
 router.get('/:classId', authenticateToken, async (req, res) => {
   const { date } = req.query;
-  const { classId } = req.params;
+  const classId = req.params.classId as string;
 
   try {
     const records = await prisma.attendance.findMany({

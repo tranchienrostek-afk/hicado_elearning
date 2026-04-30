@@ -23,6 +23,22 @@ services:
         value: 5000
       - key: NODE_ENV
         value: production
+      - key: SEPAY_API_KEY
+        sync: false
+      - key: BANK_BIN
+        sync: false
+      - key: BANK_ACC
+        sync: false
+      - key: BANK_NAME
+        sync: false
+      - key: BANK_LABEL
+        sync: false
+      - key: SEPAY_ACCOUNT_NUMBER
+        sync: false
+      - key: ZALO_OA_ID
+        sync: false
+      - key: ZALO_ACCESS_TOKEN
+        sync: false
 
   # Frontend (Static Site)
   - type: web

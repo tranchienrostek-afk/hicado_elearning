@@ -81,6 +81,8 @@ export interface CenterStore {
   rooms: Room[];
   attendance: Attendance[];
   transactions: Transaction[];
+  isLoading: boolean;
+
   
   initialize: () => Promise<void>;
   fetchTeachers: () => Promise<void>;

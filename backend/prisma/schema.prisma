@@ -64,6 +64,7 @@ model Teacher {
   gender           Gender?
   cccd             String?
   phone            String
+  zaloUserId       String?
   bankAccount      String
   bankName         String
   salaryRate       Float    // Percentage (e.g., 0.8)
@@ -85,11 +86,16 @@ model Student {
   schoolClass    String?
   cccd           String?
   tuitionStatus  TuitionStatus @default(PENDING)
+  studentCode    String?       @unique
+  studentPhone   String?
+  parentPhone    String?
+  zaloUserId     String?
 
   user           User?
   classes        ClassStudent[]
   attendances    Attendance[]
   transactions   Transaction[]
+  zaloMessageLogs ZaloMessageLog[]
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -110,6 +116,7 @@ model Class {
   name              String
   tuitionPerSession Int
   totalSessions     Int
+  classCode         String?  @unique
   teacherShare      Float?   // Override teacher's default salaryRate
   scheduleDays      String[] // e.g. ["Thứ 2", "Thứ 4"]
   scheduleTime      String?  // e.g. "18:00 - 20:00"
@@ -161,6 +168,45 @@ model Transaction {
   date      DateTime          @default(now())
   status    TransactionStatus @default(SUCCESS)
 
+  // SePay specific fields
+  sepayId        Int?      @unique
+  gateway        String?
+  content        String?
+  transferDate   DateTime?
+  referenceCode  String?
+
   studentId String
   student   Student @relation(fields: [studentId], references: [id])
+}
+
+model ZaloTemplate {
+  id           String   @id @default(uuid())
+  templateId   String   @unique
+  templateName String
+  status       String   // e.g. "APPROVED", "PENDING"
+  previewUrl   String?
+  price        Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ZaloMessageLog {
+  id           String   @id @default(uuid())
+  phone        String
+  zaloUserId   String?
+  templateId   String
+  trackingId   String   @unique
+  status       String   // "SENT", "DELIVERED", "READ", "FAILED"
+  errorReason  String?
+  sentAt       DateTime @default(now())
+  readAt       DateTime?
+
+  studentId    String?
+  student      Student? @relation(fields: [studentId], references: [id])
+}
+
+model SystemConfig {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
 }

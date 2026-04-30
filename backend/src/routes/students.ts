@@ -4,9 +4,18 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth';
 
 const router = Router();
 
-// Get all students
-router.get('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER', 'TEACHER'), async (req, res) => {
+// Get students - STUDENT role only sees their own record
+router.get('/', authenticateToken, async (req: any, res) => {
   try {
+    if (req.user.role === 'STUDENT') {
+      const students = await prisma.student.findMany({
+        where: { id: req.user.studentId }
+      });
+      return res.json(students);
+    }
+    if (!['ADMIN', 'MANAGER', 'TEACHER'].includes(req.user.role)) {
+      return res.status(403).json({ message: 'Insufficient permissions' });
+    }
     const students = await prisma.student.findMany();
     res.json(students);
   } catch (error) {
@@ -30,7 +39,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 router.put('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const student = await prisma.student.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: req.body
     });
     res.json(student);

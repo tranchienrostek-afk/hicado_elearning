@@ -11,10 +11,17 @@ router.get('/', authenticateToken, async (req, res) => {
       include: {
         teacher: { select: { name: true } },
         room: { select: { name: true } },
-        _count: { select: { students: true } }
+        students: { select: { studentId: true } }
       }
     });
-    res.json(classes);
+
+    const transformed = classes.map(c => ({
+      ...c,
+      studentIds: c.students.map(s => s.studentId)
+    }));
+
+    res.json(transformed);
+
   } catch (error) {
     res.status(500).json({ message: 'Lỗi khi lấy danh sách lớp học' });
   }
@@ -24,7 +31,7 @@ router.get('/', authenticateToken, async (req, res) => {
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const cls = await prisma.class.findUnique({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       include: {
         teacher: true,
         room: true,
@@ -33,7 +40,14 @@ router.get('/:id', authenticateToken, async (req, res) => {
       }
     });
     if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp học' });
-    res.json(cls);
+    
+    const transformed = {
+      ...cls,
+      studentIds: cls.students.map(s => s.studentId)
+    };
+
+    res.json(transformed);
+
   } catch (error) {
     res.status(500).json({ message: 'Lỗi máy chủ' });
   }

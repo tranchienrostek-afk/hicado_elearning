@@ -20,7 +20,7 @@ router.get('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (re
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const teacher = await prisma.teacher.findUnique({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       include: { classes: true }
     });
     if (!teacher) return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
@@ -46,7 +46,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN'), async (req, res) =>
 router.put('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const teacher = await prisma.teacher.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id as string },
       data: req.body
     });
     res.json(teacher);

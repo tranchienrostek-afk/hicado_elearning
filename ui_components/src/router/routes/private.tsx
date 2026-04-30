@@ -1,7 +1,7 @@
 import { lazily } from 'react-lazily';
 import { RouteType } from '@/router';
 
-const { Home, Users, AttendancePage, FinancialPage, Classes, Rooms, StudentPage } = lazily(() => import('@/views/pages'));
+const { Home, Users, AttendancePage, FinancialPage, Classes, Rooms, StudentPage, ZaloCampaignPage, SettingsPage } = lazily(() => import('@/views/pages'));
 
 export const privateRoutes: RouteType[] = [
   {
@@ -72,6 +72,26 @@ export const privateRoutes: RouteType[] = [
     menu: {
       icon: <i className="icon-home"></i>,
       text: 'Quản lý Phòng học',
+    },
+  },
+  {
+    id: 'zalo-campaign',
+    path: 'zalo-campaign',
+    Element: ZaloCampaignPage,
+    roles: ['ADMIN', 'MANAGER'],
+    menu: {
+      icon: <i className="icon-send"></i>,
+      text: 'Chiến dịch Zalo',
+    },
+  },
+  {
+    id: 'settings',
+    path: 'settings',
+    Element: SettingsPage,
+    roles: ['ADMIN', 'MANAGER'],
+    menu: {
+      icon: <i className="icon-settings"></i>,
+      text: 'Cài đặt hệ thống',
     },
   },
 ];

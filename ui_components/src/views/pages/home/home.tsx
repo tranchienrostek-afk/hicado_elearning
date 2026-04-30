@@ -1,6 +1,10 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCenterStore } from '@/store';
+import { LearningPlant } from '@/views/components/learning-plant';
+import { SkeletonHero, SkeletonCard } from '@/views/components/skeleton';
+
+
 
 type CenterFilter = 'ALL' | 'Hicado' | 'Van Xuan';
 
@@ -13,7 +17,8 @@ const formatMoney = (value: number) => value.toLocaleString('vi-VN');
 
 export const Home = () => {
   const navigate = useNavigate();
-  const { teachers, classes, rooms, attendance, transactions } = useCenterStore();
+  const { teachers, classes, rooms, attendance, transactions, isLoading } = useCenterStore();
+
 
   const [monthFilter, setMonthFilter] = useState(getCurrentMonth());
   const [centerFilter, setCenterFilter] = useState<CenterFilter>('ALL');
@@ -100,14 +105,6 @@ export const Home = () => {
     };
   }, [classSessionsByMonth, monthFilter, scopedClasses, scopedStudentIds, transactions]);
 
-  const attendanceSummary = useMemo(() => {
-    const present = monthAttendance.filter((item) => item.status === 'PRESENT').length;
-    const absent = monthAttendance.filter((item) => item.status === 'ABSENT').length;
-    const leave = monthAttendance.filter((item) => item.status === 'LEAVE_REQUEST').length;
-    const total = monthAttendance.length;
-    const attendanceRate = total > 0 ? (present / total) * 100 : 0;
-    return { present, absent, leave, total, attendanceRate };
-  }, [monthAttendance]);
 
   const roomRiskRows = useMemo(() => {
     return scopedClasses
@@ -201,150 +198,189 @@ export const Home = () => {
     },
   ];
 
-  return (
-    <div className="space-y-6 md:space-y-12 pb-10">
-      <div className="bg-white rounded-container border border-slate-100 shadow-premium p-6 md:p-12 space-y-6 md:space-y-10">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 md:gap-8">
-          <div>
-            <p className="text-[12px] font-black text-accent uppercase tracking-[0.4em] mb-3 px-1 border-l-4 border-accent pl-4">
-              Management Dashboard
-            </p>
-            <h2 className="text-3xl md:text-4xl font-black text-heading uppercase tracking-tight italic leading-none">
-              Tổng quan vận hành
-            </h2>
-          </div>
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4 md:gap-6">
-            <div className="flex justify-center bg-slate-50 p-2 rounded-2xl border border-slate-100 shadow-inner">
-              {(['ALL', 'Hicado', 'Van Xuan'] as const).map((center) => (
-                <button
-                  key={center}
-                  onClick={() => setCenterFilter(center)}
-                  className={`px-4 sm:px-6 md:px-8 py-2 md:py-3 rounded-xl text-[10px] md:text-[11px] font-black uppercase tracking-widest transition-all duration-300 ${
-                    centerFilter === center
-                      ? 'bg-white text-accent shadow-soft'
-                      : 'text-slate-400 hover:text-heading hover:bg-white/50'
-                  }`}
-                >
-                  {center === 'ALL' ? 'Tất cả' : center}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center justify-center gap-4 bg-white border border-slate-100 rounded-2xl px-6 py-3 shadow-soft">
-              <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Tháng</span>
-              <input
-                type="month"
-                value={monthFilter}
-                onChange={(event) => setMonthFilter(event.target.value)}
-                className="bg-transparent text-sm font-black text-heading outline-none cursor-pointer focus:text-accent transition-colors"
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 md:gap-8">
-          {[
-            { label: 'Học sinh', value: scopedStudentIds.size, color: 'text-heading' },
-            { label: 'Giáo viên', value: scopedTeacherIds.size, color: 'text-heading' },
-            { label: 'Lớp học', value: scopedClasses.length, color: 'text-heading' },
-            { label: 'Phòng học', value: scopedRoomIds.size, color: 'text-heading' },
-            { label: 'Chuyên cần', value: `${attendanceSummary.attendanceRate.toFixed(0)}%`, color: 'text-accent' },
-            { label: 'Nợ học phí', value: formatMoney(financeSummary.debt), color: 'text-rose-500' },
-          ].map((stat, idx) => (
-            <div key={idx} className="bg-white border border-slate-100 rounded-card p-5 md:p-8 shadow-soft hover:shadow-premium hover:-translate-y-2 transition-all duration-300 group">
-              <p className="text-[9px] md:text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] md:tracking-[0.25em] mb-2 md:mb-4 group-hover:text-accent transition-colors">{stat.label}</p>
-              <p className={`text-xl md:text-2xl font-black tracking-tighter ${stat.color}`}>{stat.value}</p>
-            </div>
-          ))}
+  if (isLoading) {
+    return (
+      <div className="space-y-10 pb-20">
+        <SkeletonHero />
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
+          {[...Array(5)].map((_, i) => <SkeletonCard key={i} />)}
         </div>
       </div>
+    );
+  }
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-12">
-        <div className="lg:col-span-2 bg-white rounded-container border border-slate-100 shadow-premium p-6 md:p-12 space-y-6 md:space-y-10">
-          <div className="flex items-center justify-between border-b border-slate-50 pb-8">
-            <h3 className="text-xl font-black text-heading uppercase tracking-[0.05em] italic">
-               <span className="text-accent mr-3">#</span> Truy cập nhanh
-            </h3>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-8">
-            {quickActions.map((action) => (
+  return (
+    <div className="space-y-10 pb-20 animate-in fade-in duration-700">
+      {/* Cinematic Hero Section */}
+      <div className="relative h-[450px] rounded-[3rem] overflow-hidden shadow-2xl border border-white/10 group">
+        <img 
+          src="/assets/images/hero.png" 
+          alt="Hicado Hero" 
+          className="absolute inset-0 w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105"
+        />
+
+        <div className="absolute inset-0 bg-gradient-to-r from-hicado-navy via-hicado-navy/60 to-transparent"></div>
+        <div className="absolute inset-0 bg-gradient-to-t from-hicado-navy/40 to-transparent"></div>
+        
+        <div className="relative h-full z-10 p-12 md:p-20 flex flex-col justify-center max-w-3xl">
+          <p className="text-hicado-emerald text-[10px] font-black uppercase tracking-[0.6em] mb-6 animate-in slide-in-from-left duration-700">
+            Intelligence & Excellence
+          </p>
+          <h2 className="text-5xl md:text-7xl font-serif font-black text-white tracking-tighter leading-none mb-8 drop-shadow-2xl">
+            Kiến tạo <span className="text-hicado-emerald italic text-glow">Tương lai</span> <br/> 
+            Học thuật
+          </h2>
+          <div className="flex flex-wrap gap-4 mt-4">
+            {(['ALL', 'Hicado', 'Van Xuan'] as const).map((center) => (
               <button
-                key={action.id}
-                onClick={() => navigate(action.to)}
-                className="group relative overflow-hidden text-left bg-slate-50/50 border border-slate-100 rounded-card p-6 md:p-10 transition-all duration-500 hover:bg-white hover:shadow-premium hover:border-accent/20"
+                key={center}
+                onClick={() => setCenterFilter(center)}
+                className={`btn-premium ${
+                  centerFilter === center
+                    ? 'bg-hicado-emerald text-hicado-navy shadow-hicado-emerald/30'
+                    : 'bg-white/10 backdrop-blur-md text-white/60 hover:bg-white/20'
+                }`}
               >
-                <div className="absolute top-0 right-0 w-32 h-32 bg-accent/5 rounded-full -mr-16 -mt-16 transition-all duration-700 group-hover:scale-[2] group-hover:bg-accent/10"></div>
-                <p className="text-[11px] md:text-[12px] font-black text-heading uppercase tracking-[0.2em] mb-2 md:mb-3 relative z-10 group-hover:text-accent transition-colors">{action.label}</p>
-                <p className="text-xs md:text-sm text-slate-500 font-medium relative z-10 leading-relaxed">{action.description}</p>
-                <div className="mt-4 md:mt-8 flex items-center text-[9px] md:text-[10px] font-black text-accent uppercase tracking-[0.3em] opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-500 transform md:translate-x-[-10px] md:group-hover:translate-x-0 relative z-10">
-                  Khám phá thêm
-                  <svg className="w-3 h-3 md:w-4 md:h-4 ml-2 md:ml-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-                  </svg>
-                </div>
+                {center === 'ALL' ? 'Toàn hệ thống' : center}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="bg-white rounded-container border border-slate-100 shadow-premium p-6 md:p-12 space-y-6 md:space-y-10 flex flex-col">
-          <h3 className="text-xl font-black text-heading uppercase tracking-[0.05em] italic border-b border-slate-50 pb-8">
-            Tài chính tháng
-          </h3>
-          <div className="space-y-6 flex-1">
-            <div className="bg-slate-50/80 rounded-card p-8 border border-slate-100 border-l-[6px] border-l-emerald-600 shadow-soft transition-all hover:bg-white">
-              <p className="text-[11px] font-black text-emerald-600 uppercase tracking-[0.3em] mb-3">Cần thu hệ thống</p>
-              <p className="text-3xl font-black text-heading tracking-tighter">{formatMoney(financeSummary.expected)}đ</p>
+        {/* Floating Month Selector */}
+        <div className="absolute bottom-10 right-10 glass-card p-6 rounded-[2rem] flex items-center gap-6 animate-in zoom-in duration-1000">
+          <div className="w-12 h-12 bg-hicado-navy rounded-2xl flex items-center justify-center shadow-xl">
+             <svg className="w-6 h-6 text-hicado-emerald" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+          </div>
+          <div>
+            <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Dữ liệu tháng</p>
+            <input
+              type="month"
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="bg-transparent text-lg font-black text-hicado-navy outline-none cursor-pointer focus:text-hicado-emerald transition-colors"
+            />
+          </div>
+        </div>
+      </div>
+
+
+      {/* Stats Bento Grid */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-6">
+        {[
+          { label: 'Học sinh', value: scopedStudentIds.size, sub: 'Enrollment', icon: '👤', color: 'bg-indigo-500' },
+          { label: 'Lớp học', value: scopedClasses.length, sub: 'Operations', icon: '📚', color: 'bg-emerald-500' },
+          { label: 'Phòng học', value: scopedRoomIds.size, sub: 'Resource', icon: '🏢', color: 'bg-amber-500' },
+          { label: 'Nhân sự', value: scopedTeacherIds.size, sub: 'Faculty', icon: '🎓', color: 'bg-hicado-navy' },
+          { label: 'Dư nợ', value: formatMoney(financeSummary.debt), sub: 'VNĐ', icon: '⚠️', highlight: true, color: 'bg-rose-500' },
+        ].map((stat, idx) => (
+          <div key={idx} className="glass-card rounded-[2.5rem] p-8 hover:translate-y-[-8px] transition-all duration-500 group relative overflow-hidden">
+            <div className={`absolute top-0 right-0 w-24 h-24 ${stat.color} opacity-[0.03] rounded-full -mr-12 -mt-12 transition-all duration-700 group-hover:scale-150`}></div>
+            <div className="flex justify-between items-start mb-6">
+              <div className={`w-12 h-12 rounded-2xl ${stat.color} bg-opacity-10 flex items-center justify-center text-xl`}>
+                {stat.icon}
+              </div>
+              <span className="w-2 h-2 rounded-full bg-hicado-slate group-hover:bg-hicado-emerald transition-colors" />
             </div>
-            <div className="bg-slate-50/80 rounded-card p-8 border border-slate-100 border-l-[6px] border-l-accent shadow-soft transition-all hover:bg-white">
-              <p className="text-[11px] font-black text-accent uppercase tracking-[0.3em] mb-3">Thực thu (Đã nộp)</p>
-              <p className="text-3xl font-black text-heading tracking-tighter">{formatMoney(financeSummary.paid)}đ</p>
+            <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-[0.2em] mb-2">{stat.label}</p>
+            <p className={`text-2xl font-black tracking-tight ${stat.highlight ? 'text-rose-500 text-glow' : 'text-hicado-navy'}`}>{stat.value}</p>
+            <p className="text-[9px] font-black text-hicado-navy/20 uppercase tracking-widest mt-2">{stat.sub}</p>
+          </div>
+        ))}
+      </div>
+
+
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-10">
+        <div className="lg:col-span-3 space-y-10">
+          {/* Quick Actions */}
+          <div className="glass-card rounded-[3rem] p-12 space-y-10">
+            <div className="flex items-center justify-between border-b border-hicado-slate pb-8">
+              <h3 className="text-2xl font-serif font-black text-hicado-navy tracking-tight">
+                <span className="text-hicado-emerald mr-4 italic font-black">/</span> Điều hướng nhanh
+              </h3>
             </div>
-            <div className="bg-slate-50/80 rounded-card p-8 border border-slate-100 border-l-[6px] border-l-rose-500 shadow-soft transition-all hover:bg-white">
-              <p className="text-[11px] font-black text-rose-500 uppercase tracking-[0.3em] mb-3">Dư nợ học phí</p>
-              <p className="text-3xl font-black text-rose-500 tracking-tighter">{formatMoney(financeSummary.debt)}đ</p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {quickActions.map((action) => (
+                <button
+                  key={action.id}
+                  onClick={() => navigate(action.to)}
+                  className="group relative overflow-hidden text-left bg-hicado-slate/30 border border-transparent rounded-[2rem] p-8 transition-all duration-500 hover:bg-white hover:shadow-premium hover:border-hicado-slate hover:-translate-y-1"
+                >
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-hicado-emerald/5 rounded-full -mr-16 -mt-16 transition-all duration-700 group-hover:scale-[2] group-hover:bg-hicado-emerald/10"></div>
+                  <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-[0.3em] mb-2 relative z-10 group-hover:text-hicado-emerald transition-colors">{action.label}</p>
+                  <p className="text-sm text-hicado-navy font-bold relative z-10 leading-relaxed">{action.description}</p>
+                  <div className="mt-6 flex items-center text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] opacity-0 group-hover:opacity-100 transition-all duration-500 transform translate-x-[-10px] group-hover:translate-x-0 relative z-10">
+                    Khám phá ngay
+                    <svg className="w-4 h-4 ml-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </div>
+                </button>
+              ))}
             </div>
           </div>
-          <button
-            onClick={() => navigate('/finance')}
-            className="w-full bg-heading text-white px-8 py-6 rounded-button text-[12px] font-black uppercase tracking-[0.3em] shadow-xl shadow-heading/20 hover:scale-[1.02] active:scale-95 transition-all mt-10"
-          >
-            Chi tiết tài chính
-          </button>
+
+          {/* Finance Overview */}
+          <div className="glass-card rounded-[3rem] p-12 space-y-10">
+            <h3 className="text-2xl font-serif font-black text-hicado-navy tracking-tight border-b border-hicado-slate pb-8">
+              <span className="text-hicado-emerald mr-4 italic font-black">/</span> Tài chính hệ thống
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="bg-hicado-emerald/5 rounded-[2rem] p-8 border border-hicado-emerald/10 transition-all hover:bg-white hover:shadow-premium">
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-3">Dự thu</p>
+                <p className="text-3xl font-black text-hicado-navy tracking-tighter">{formatMoney(financeSummary.expected)}đ</p>
+              </div>
+              <div className="bg-hicado-navy/5 rounded-[2rem] p-8 border border-hicado-navy/10 transition-all hover:bg-white hover:shadow-premium">
+                <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-[0.4em] mb-3">Thực thu</p>
+                <p className="text-3xl font-black text-hicado-navy tracking-tighter">{formatMoney(financeSummary.paid)}đ</p>
+              </div>
+              <div className="bg-rose-500/5 rounded-[2rem] p-8 border border-rose-500/10 transition-all hover:bg-white hover:shadow-premium">
+                <p className="text-[9px] font-black text-rose-500 uppercase tracking-[0.4em] mb-3">Công nợ</p>
+                <p className="text-3xl font-black text-rose-500 tracking-tighter">{formatMoney(financeSummary.debt)}đ</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Focal Point Sidebar */}
+        <div className="lg:col-span-1 space-y-10">
+          <LearningPlant />
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-12">
-        <div className="bg-white rounded-container border border-slate-100 shadow-premium overflow-hidden">
-          <div className="p-6 md:p-12 border-b border-slate-50 bg-slate-50/30">
-            <h3 className="text-lg md:text-xl font-black text-heading uppercase tracking-[0.05em] italic">
-              <span className="text-accent mr-2 md:mr-3">!</span> Cảnh báo sử dụng phòng
+        <div className="glass-card rounded-[2.5rem] overflow-hidden">
+          <div className="p-6 md:p-10 border-b border-hicado-slate/50">
+            <h3 className="text-lg font-black text-hicado-navy uppercase tracking-tight italic">
+              <span className="text-rose-500 mr-3">!</span> Cảnh báo sử dụng phòng
             </h3>
-            <p className="text-[10px] md:text-[11px] text-slate-400 font-black mt-2 md:mt-3 uppercase tracking-widest pl-4 md:pl-6">
+            <p className="text-[10px] text-hicado-navy/30 font-black mt-2 uppercase tracking-widest pl-5">
               Lớp có mật độ sĩ số cao nhất hệ thống
             </p>
           </div>
-          <div className="p-4 md:p-8 space-y-3 md:space-y-4">
+          <div className="p-4 md:p-6 space-y-3">
             {roomRiskRows.map((row) => {
               const ratio = row.ratio * 100;
               const ratioLabel = ratio >= 100 ? 'Quá tải' : ratio >= 85 ? 'Cảnh báo' : 'Ổn định';
               const ratioClass =
                 ratio >= 100
-                  ? 'text-rose-500 bg-rose-50 border-rose-100 shadow-rose-100'
+                  ? 'text-rose-500 bg-rose-50 border-rose-100'
                   : ratio >= 85
-                    ? 'text-amber-500 bg-amber-50 border-amber-100 shadow-amber-100'
-                    : 'text-emerald-500 bg-emerald-50 border-emerald-100 shadow-emerald-100';
+                    ? 'text-amber-500 bg-amber-50 border-amber-100'
+                    : 'text-hicado-emerald bg-hicado-emerald/5 border-hicado-emerald/20';
 
               return (
-                <div key={row.classId} className="p-4 md:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 md:gap-8 bg-white rounded-card hover:bg-slate-50 hover:shadow-soft transition-all border border-slate-50 hover:border-accent/10 group">
-                  <div className="flex flex-col gap-1 md:gap-2">
-                    <p className="text-xs md:text-sm font-black text-heading uppercase tracking-widest group-hover:text-accent transition-colors">{row.className}</p>
-                    <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">
-                      {row.roomName} <span className="mx-1 md:mx-2 text-slate-200">/</span> {row.teacherName}
+                <div key={row.classId} className="p-4 md:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white rounded-2xl hover:shadow-premium transition-all border border-hicado-slate/50 group">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-sm font-black text-hicado-navy uppercase tracking-widest group-hover:text-hicado-emerald transition-colors">{row.className}</p>
+                    <p className="text-[9px] text-hicado-navy/30 font-black uppercase tracking-[0.2em]">
+                      {row.roomName} · {row.teacherName}
                     </p>
                   </div>
-                  <div className="text-left sm:text-right mt-2 sm:mt-0">
-                    <p className="text-xs md:text-sm font-black text-heading mb-2 md:mb-3">{row.occupancy} học sinh</p>
-                    <span className={`px-3 md:px-5 py-1.5 md:py-2 rounded-full border text-[8px] md:text-[9px] font-black uppercase tracking-widest shadow-sm inline-block ${ratioClass}`}>
+                  <div className="text-left sm:text-right">
+                    <p className="text-sm font-black text-hicado-navy mb-2">{row.occupancy} học sinh</p>
+                    <span className={`px-4 py-1.5 rounded-full border text-[9px] font-black uppercase tracking-widest inline-block ${ratioClass}`}>
                       {ratioLabel} {ratio.toFixed(0)}%
                     </span>
                   </div>
@@ -352,47 +388,61 @@ export const Home = () => {
               );
             })}
             {roomRiskRows.length === 0 && (
-              <div className="p-10 md:p-20 text-center text-xs md:text-sm text-slate-400 font-black italic uppercase tracking-widest">
+              <div className="py-16 text-center text-sm text-hicado-navy/20 font-black italic uppercase tracking-widest">
                 Chưa có dữ liệu lớp học
               </div>
             )}
           </div>
         </div>
 
-        <div className="bg-white rounded-container border border-slate-100 shadow-premium overflow-hidden">
-          <div className="p-6 md:p-12 border-b border-slate-50 bg-slate-50/30">
-            <h3 className="text-lg md:text-xl font-black text-heading uppercase tracking-[0.05em] italic">
-              <span className="text-accent mr-2 md:mr-3">#</span> Khối lượng giáo viên
+        <div className="glass-card rounded-[2.5rem] overflow-hidden">
+          <div className="p-6 md:p-10 border-b border-hicado-slate/50">
+            <h3 className="text-lg font-black text-hicado-navy uppercase tracking-tight italic">
+              <span className="text-hicado-emerald mr-3">#</span> Khối lượng giáo viên
             </h3>
-            <p className="text-[10px] md:text-[11px] text-slate-400 font-black mt-2 md:mt-3 uppercase tracking-widest pl-4 md:pl-6">
+            <p className="text-[10px] text-hicado-navy/30 font-black mt-2 uppercase tracking-widest pl-5">
               Phân bổ nhân sự và hiệu suất giảng dạy
             </p>
           </div>
-          <div className="p-4 md:p-8 space-y-3 md:space-y-4">
+          <div className="p-4 md:p-6 space-y-3">
             {teacherWorkloadRows.map((row) => (
-              <div key={row.teacherName} className="p-4 md:p-8 flex items-center justify-between gap-4 md:gap-8 bg-white rounded-card hover:bg-slate-50 hover:shadow-soft transition-all border border-slate-50 hover:border-accent/10 group">
-                <div className="flex flex-col gap-1 md:gap-2">
-                  <p className="text-xs md:text-sm font-black text-heading uppercase tracking-widest group-hover:text-accent transition-colors">{row.teacherName}</p>
-                  <p className="text-[9px] md:text-[10px] text-slate-400 font-black uppercase tracking-[0.2em]">
-                    {row.classes} lớp <span className="mx-1 md:mx-2 text-slate-200">/</span> {row.students} học sinh
+              <div key={row.teacherName} className="p-4 md:p-6 flex items-center justify-between gap-4 bg-white rounded-2xl hover:shadow-premium transition-all border border-hicado-slate/50 group">
+                <div className="flex flex-col gap-1">
+                  <p className="text-sm font-black text-hicado-navy uppercase tracking-widest group-hover:text-hicado-emerald transition-colors">{row.teacherName}</p>
+                  <p className="text-[9px] text-hicado-navy/30 font-black uppercase tracking-[0.2em]">
+                    {row.classes} lớp · {row.students} học sinh
                   </p>
-                  <div className="md:hidden mt-2 px-3 py-1.5 rounded-lg bg-accent/10 text-accent text-[9px] font-black uppercase tracking-[0.2em] inline-block w-fit">
-                    {row.sessions} buổi dạy
-                  </div>
                 </div>
-                <div className="hidden md:block px-6 py-4 rounded-xl bg-accent text-white text-[10px] font-black uppercase tracking-[0.2em] shadow-lg shadow-accent/20 whitespace-nowrap">
+                <div className="px-5 py-3 rounded-xl bg-hicado-navy text-hicado-emerald text-[10px] font-black uppercase tracking-[0.2em] shadow-lg whitespace-nowrap">
                   {row.sessions} buổi dạy
                 </div>
               </div>
             ))}
             {teacherWorkloadRows.length === 0 && (
-              <div className="p-20 text-center text-sm text-slate-400 font-black italic uppercase tracking-widest">
+              <div className="py-16 text-center text-sm text-hicado-navy/20 font-black italic uppercase tracking-widest">
                 Chưa có dữ liệu giáo viên
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {/* Subtle Support Area */}
+      <div className="glass-card rounded-[3rem] p-12 flex flex-col md:flex-row items-center justify-between gap-8 border border-hicado-emerald/20">
+        <div className="flex items-center gap-8">
+          <div className="w-16 h-16 bg-hicado-navy rounded-3xl flex items-center justify-center text-2xl shadow-xl">
+            🎧
+          </div>
+          <div>
+            <h4 className="text-xl font-serif font-black text-hicado-navy">Trung tâm Hỗ trợ Kỹ thuật</h4>
+            <p className="text-xs text-hicado-navy/40 font-bold uppercase tracking-widest mt-1">Đội ngũ Hicado luôn sẵn sàng đồng hành cùng bạn 24/7</p>
+          </div>
+        </div>
+        <button className="btn-premium bg-hicado-navy text-white px-10 py-4 rounded-2xl">
+          Gửi yêu cầu hỗ trợ
+        </button>
+      </div>
     </div>
+
   );
 };

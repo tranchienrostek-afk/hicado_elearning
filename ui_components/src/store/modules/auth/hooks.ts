@@ -12,6 +12,7 @@ export const useAuthStore = create<AuthStore>()(
       isManager: false,
       isTeacher: false,
       isStudent: false,
+      accounts: [],
 
       login: async (username, password) => {
         const response = await fetch('/api/auth/login', {
@@ -64,6 +65,81 @@ export const useAuthStore = create<AuthStore>()(
           isTeacher: auth?.role === 'TEACHER',
           isStudent: auth?.role === 'STUDENT',
         }),
+
+      fetchAccounts: async () => {
+        const { auth } = useAuthStore.getState();
+        if (!auth?.token) return;
+
+        console.log('Fetching accounts...');
+        const response = await fetch('/api/users', {
+          headers: { 'Authorization': `Bearer ${auth.token}` },
+        });
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Fetched accounts:', data.length);
+          set({ accounts: data });
+        } else {
+          console.error('Failed to fetch accounts:', response.status);
+        }
+      },
+
+      addAccount: async (account) => {
+        const { auth } = useAuthStore.getState();
+        console.log('Creating account:', account.username);
+        const response = await fetch('/api/users', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${auth?.token}`
+          },
+          body: JSON.stringify(account),
+        });
+
+        if (response.ok) {
+          const newUser = await response.json();
+          console.log('Account created successfully:', newUser.username);
+          set((state) => ({ accounts: [...state.accounts, newUser] }));
+        } else {
+          const error = await response.json();
+          console.error('Account creation failed:', error.message);
+          throw new Error(error.message || 'Lỗi khi tạo tài khoản');
+        }
+      },
+
+
+      updateAccount: async (id, data) => {
+        const { auth } = useAuthStore.getState();
+        const response = await fetch(`/api/users/${id}`, {
+          method: 'PATCH',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${auth?.token}`
+          },
+          body: JSON.stringify(data),
+        });
+
+        if (response.ok) {
+          const updatedUser = await response.json();
+          set((state) => ({
+            accounts: state.accounts.map(a => a.id === id ? updatedUser : a)
+          }));
+        }
+      },
+
+      deleteAccount: async (id) => {
+        const { auth } = useAuthStore.getState();
+        const response = await fetch(`/api/users/${id}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${auth?.token}` },
+        });
+
+        if (response.ok) {
+          set((state) => ({
+            accounts: state.accounts.filter(a => a.id !== id)
+          }));
+        }
+      },
+
     }),
     {
       name: 'auth-v4',

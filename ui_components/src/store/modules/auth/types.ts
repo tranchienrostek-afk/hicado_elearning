@@ -23,12 +23,18 @@ export interface Auth {
 export interface AuthStore {
   auth: Auth | null;
   role: UserRole | null;
+  accounts: Account[];
   setAuth: (auth: Auth | null) => void;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
+  fetchAccounts: () => Promise<void>;
+  addAccount: (account: Omit<Account, 'id'>) => Promise<void>;
+  updateAccount: (id: string, data: Partial<Account>) => Promise<void>;
+  deleteAccount: (id: string) => Promise<void>;
   isAuth: boolean;
   isAdmin: boolean;
   isManager: boolean;
   isTeacher: boolean;
   isStudent: boolean;
 }
+

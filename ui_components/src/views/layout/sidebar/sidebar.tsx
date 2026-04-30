@@ -3,33 +3,37 @@ import { SidebarMenu } from '.';
 export const Sidebar = () => {
   return (
     <aside
-      className="hidden md:flex w-64 bg-[#F0F0EB] border-r border-borderline flex-col flex-shrink-0 z-20"
+      className="hidden md:flex w-64 bg-hicado-navy border-r border-hicado-obsidian/20 flex-col flex-shrink-0 z-20 shadow-2xl"
       role="sidebar"
     >
-      <div className="h-14 px-6 border-b border-borderline flex items-center gap-2">
-        <div className="w-6 h-6 bg-accent rounded flex items-center justify-center text-white font-serif font-bold text-xs">
+      <div className="h-16 px-6 border-b border-white/5 flex items-center gap-3">
+        <div className="w-8 h-8 bg-hicado-emerald rounded-lg flex items-center justify-center text-hicado-navy font-sans font-black text-sm shadow-lg shadow-hicado-emerald/20">
           H
         </div>
-        <span className="font-serif font-semibold text-text100">Learning Ops</span>
-      </div>
-
-      <div className="px-4 pt-6 pb-2">
-        <div className="text-[11px] font-semibold text-text400 uppercase tracking-wider px-2">
-          Danh muc chinh
+        <div className="flex flex-col">
+          <span className="font-sans font-bold text-white leading-none">HICADO</span>
+          <span className="text-[10px] font-bold text-hicado-emerald uppercase tracking-widest mt-1">E-Learning</span>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 pb-4">
+      <div className="px-6 pt-8 pb-3">
+        <div className="text-[10px] font-black text-white/10 uppercase tracking-[0.4em]">
+          Operational Context
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 pb-4 custom-scrollbar">
         <SidebarMenu />
       </div>
 
-      <div className="p-4 border-t border-borderline flex items-center justify-between text-xs text-text400">
+      <div className="p-6 border-t border-white/5 flex items-center justify-between text-[10px] font-bold text-white/40 uppercase tracking-widest">
         <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500" />
-          <span>System Normal</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-hicado-emerald animate-pulse" />
+          <span>Operational</span>
         </div>
-        <span className="font-serif">v2.4.1</span>
+        <span className="font-mono">v3.0.0</span>
       </div>
+
     </aside>
   );
 };

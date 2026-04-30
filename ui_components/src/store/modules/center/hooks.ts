@@ -2,6 +2,14 @@ import { create } from 'zustand';
 import { CenterStore } from './types';
 import { useAuthStore } from '../auth';
 
+const fetchWithAuth = (url: string, options: RequestInit = {}): Promise<Response> => {
+  const token = useAuthStore.getState().auth?.token;
+  return fetch(url, {
+    ...options,
+    headers: { ...options.headers, 'Authorization': `Bearer ${token}` },
+  });
+};
+
 export const useCenterStore = create<CenterStore>()((set, get) => ({
   teachers: [],
   students: [],
@@ -9,56 +17,65 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
   rooms: [],
   attendance: [],
   transactions: [],
+  isLoading: false,
+
 
   initialize: async () => {
+    const { role } = useAuthStore.getState().auth || {};
     const { fetchTeachers, fetchStudents, fetchClasses, fetchRooms } = get();
-    await Promise.all([
-      fetchTeachers(),
-      fetchStudents(),
-      fetchClasses(),
-      fetchRooms(),
-    ]);
+
+    set({ isLoading: true });
+    try {
+      if (role === 'ADMIN' || role === 'MANAGER' || role === 'TEACHER') {
+        await Promise.all([fetchTeachers(), fetchStudents(), fetchClasses(), fetchRooms()]);
+      } else if (role === 'STUDENT') {
+        await Promise.all([fetchStudents(), fetchClasses(), fetchRooms()]);
+      }
+    } finally {
+      set({ isLoading: false });
+    }
   },
 
   fetchTeachers: async () => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/teachers', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) set({ teachers: await response.json() });
+    try {
+      const res = await fetchWithAuth('/api/teachers');
+      if (res.ok) set({ teachers: await res.json() });
+    } catch (error) {
+      console.error('Failed to fetch teachers:', error);
+    }
   },
 
   fetchStudents: async () => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/students', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) set({ students: await response.json() });
+    try {
+      const res = await fetchWithAuth('/api/students');
+      if (res.ok) set({ students: await res.json() });
+    } catch (error) {
+      console.error('Failed to fetch students:', error);
+    }
   },
 
   fetchClasses: async () => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/classes', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) set({ classes: await response.json() });
+    try {
+      const res = await fetchWithAuth('/api/classes');
+      if (res.ok) set({ classes: await res.json() });
+    } catch (error) {
+      console.error('Failed to fetch classes:', error);
+    }
   },
 
   fetchRooms: async () => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/rooms', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) set({ rooms: await response.json() });
+    try {
+      const res = await fetchWithAuth('/api/rooms');
+      if (res.ok) set({ rooms: await res.json() });
+    } catch (error) {
+      console.error('Failed to fetch rooms:', error);
+    }
   },
 
   fetchAttendance: async (classId) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/attendance/${classId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) {
-      const records = await response.json();
+    const res = await fetchWithAuth(`/api/attendance/${classId}`);
+    if (res.ok) {
+      const records = await res.json();
       set((state) => ({
         attendance: [
           ...state.attendance.filter(a => a.classId !== classId),
@@ -69,13 +86,9 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
   },
 
   addAttendance: async (record) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/attendance/mark', {
+    const response = await fetchWithAuth('/api/attendance/mark', {
       method: 'POST',
-      headers: { 
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(record)
     });
     if (response.ok) {
@@ -118,118 +131,62 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
   })),
 
   addStudent: async (student) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/students', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(student)
-    });
-    if (response.ok) await get().fetchStudents();
+    const res = await fetchWithAuth('/api/students', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(student) });
+    if (res.ok) await get().fetchStudents();
   },
 
   updateStudent: async (id, updates) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/students/${id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-    if (response.ok) await get().fetchStudents();
+    const res = await fetchWithAuth(`/api/students/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+    if (res.ok) await get().fetchStudents();
   },
 
   deleteStudent: async (id) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/students/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) await get().fetchStudents();
+    const res = await fetchWithAuth(`/api/students/${id}`, { method: 'DELETE' });
+    if (res.ok) await get().fetchStudents();
   },
 
   addTeacher: async (teacher) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/teachers', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(teacher)
-    });
-    if (response.ok) await get().fetchTeachers();
+    const res = await fetchWithAuth('/api/teachers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(teacher) });
+    if (res.ok) await get().fetchTeachers();
   },
 
   updateTeacher: async (id, updates) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/teachers/${id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-    if (response.ok) await get().fetchTeachers();
+    const res = await fetchWithAuth(`/api/teachers/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+    if (res.ok) await get().fetchTeachers();
   },
 
   deleteTeacher: async (id) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/teachers/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) await get().fetchTeachers();
+    const res = await fetchWithAuth(`/api/teachers/${id}`, { method: 'DELETE' });
+    if (res.ok) await get().fetchTeachers();
   },
 
   addClass: async (cls) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/classes', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(cls)
-    });
-    if (response.ok) await get().fetchClasses();
+    const res = await fetchWithAuth('/api/classes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cls) });
+    if (res.ok) await get().fetchClasses();
   },
 
   updateClass: async (id, updates) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/classes/${id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-    if (response.ok) await get().fetchClasses();
+    const res = await fetchWithAuth(`/api/classes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+    if (res.ok) await get().fetchClasses();
   },
 
   deleteClass: async (id) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/classes/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) await get().fetchClasses();
+    const res = await fetchWithAuth(`/api/classes/${id}`, { method: 'DELETE' });
+    if (res.ok) await get().fetchClasses();
   },
 
   addRoom: async (room) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch('/api/rooms', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(room)
-    });
-    if (response.ok) await get().fetchRooms();
+    const res = await fetchWithAuth('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(room) });
+    if (res.ok) await get().fetchRooms();
   },
-  
+
   updateRoom: async (id, updates) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/rooms/${id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-    if (response.ok) await get().fetchRooms();
+    const res = await fetchWithAuth(`/api/rooms/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
+    if (res.ok) await get().fetchRooms();
   },
 
   deleteRoom: async (id) => {
-    const token = useAuthStore.getState().auth?.token;
-    const response = await fetch(`/api/rooms/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    });
-    if (response.ok) await get().fetchRooms();
+    const res = await fetchWithAuth(`/api/rooms/${id}`, { method: 'DELETE' });
+    if (res.ok) await get().fetchRooms();
   },
 }));

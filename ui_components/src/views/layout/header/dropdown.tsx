@@ -37,7 +37,7 @@ export const Dropdown = ({ show }: DropdownProps) => {
         >
           <li className="relative mx-4 flex flex-col items-center gap-1 py-4">
             <h3>{auth?.name}</h3>
-            <h6>{auth?.email}</h6>
+            <h6>{auth?.username}</h6>
             <span className="absolute bottom-0 w-full border-b border-slate-400"></span>
           </li>
           <li>
