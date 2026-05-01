@@ -24,7 +24,7 @@ router.put('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async 
   try {
     const { name, center, capacity, notes } = req.body;
     const room = await prisma.room.update({
-      where: { id: req.params.id },
+      where: { id: String(req.params.id) },
       data: { name, center, capacity: Number(capacity), notes },
     });
     res.json(room);
@@ -35,7 +35,7 @@ router.put('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async 
 
 router.delete('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    await prisma.room.delete({ where: { id: req.params.id } });
+    await prisma.room.delete({ where: { id: String(req.params.id) } });
     res.json({ message: 'Đã xóa phòng học' });
   } catch (err: any) {
     res.status(500).json({ message: err.message || 'Lỗi xóa phòng học' });
