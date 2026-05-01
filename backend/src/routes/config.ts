@@ -126,7 +126,7 @@ router.get('/zalo/test', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
   try {
     const cfg = await getConfigs(['ZALO_ACCESS_TOKEN']);
     if (!cfg.ZALO_ACCESS_TOKEN) return res.status(400).json({ success: false, message: 'Chưa có Access Token!' });
-    const response = await zaloApiClient.get('https://openapi.zalo.me/v2.0/oa/getoa', {
+    const response = await zaloApiClient.get<any>('https://openapi.zalo.me/v2.0/oa/getoa', {
       headers: { access_token: cfg.ZALO_ACCESS_TOKEN }
     });
     if (response.data.error === 0) {
