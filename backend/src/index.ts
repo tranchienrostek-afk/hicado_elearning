@@ -2,6 +2,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 import express from 'express';
+import path from 'path';
 import cors from 'cors';
 import authRoutes from './routes/auth';
 import teacherRoutes from './routes/teachers';
@@ -33,18 +34,17 @@ app.use('/api/users', userRoutes);
 app.use('/api/zalo', zaloRoutes);
 app.use('/api/config', configRoutes);
 
-app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Welcome to Hicado E-learning API',
-    status: 'running',
-    health: '/health'
-  });
-});
-
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Serve React frontend in production
+const publicPath = path.join(__dirname, '../public');
+app.use(express.static(publicPath));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(publicPath, 'index.html'));
+});
+
 app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
+  console.log(`🚀 Server running on port ${PORT}`);
 });
