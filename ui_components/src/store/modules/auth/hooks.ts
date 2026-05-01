@@ -2,6 +2,13 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { AuthStore, Auth } from './types';
 
+export const jwtExpired = (token: string): boolean => {
+  try {
+    const { exp } = JSON.parse(atob(token.split('.')[1]));
+    return exp * 1000 < Date.now();
+  } catch { return true; }
+};
+
 export const useAuthStore = create<AuthStore>()(
   persist(
     (set) => ({
@@ -144,6 +151,22 @@ export const useAuthStore = create<AuthStore>()(
     {
       name: 'auth-v4',
       partialize: (state) => ({ auth: state.auth }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        const token = state.auth?.token;
+        if (token && !jwtExpired(token)) {
+          state.isAuth = true;
+          state.role = state.auth!.role;
+          state.isAdmin   = state.auth!.role === 'ADMIN';
+          state.isManager = state.auth!.role === 'MANAGER';
+          state.isTeacher = state.auth!.role === 'TEACHER';
+          state.isStudent = state.auth!.role === 'STUDENT';
+        } else {
+          state.auth = null;
+          state.isAuth = false;
+          state.role = null;
+        }
+      },
     }
   )
 );
