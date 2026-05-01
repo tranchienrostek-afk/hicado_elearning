@@ -4,14 +4,11 @@ databases:
     plan: free
 
 services:
-  # Backend API (Node.js)
+  # Backend API (Docker)
   - type: web
     name: elearning-backend
-    runtime: node
+    env: docker
     plan: starter
-    rootDir: backend
-    buildCommand: npm install && npm run build
-    startCommand: npm run start
     envVars:
       - key: DATABASE_URL
         fromDatabase:
