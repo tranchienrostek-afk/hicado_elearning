@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '@/store';
 
+type ZaloStatus = { success: boolean; message: string } | null;
+
 const BANKS = [
   { bin: '970436', name: 'Vietcombank (VCB)' },
   { bin: '970415', name: 'Vietinbank (CTG)' },
@@ -46,7 +48,7 @@ export const SettingsPage = () => {
   const { auth } = useAuthStore();
   const token = auth?.token;
 
-  const [activeTab, setActiveTab] = useState<'bank' | 'log'>('bank');
+  const [activeTab, setActiveTab] = useState<'bank' | 'zalo' | 'log'>('bank');
   const [cfg, setCfg] = useState<BankConfig>(empty);
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
@@ -57,6 +59,13 @@ export const SettingsPage = () => {
   const [serverUrl, setServerUrl] = useState(() => window.location.origin.replace('5173', '5000'));
   const [saveMsg, setSaveMsg] = useState('');
   const copyTimeout = useRef<ReturnType<typeof setTimeout>>();
+
+  // Zalo OA state
+  const [zaloStatus, setZaloStatus] = useState<ZaloStatus>(null);
+  const [isTestingZalo, setIsTestingZalo] = useState(false);
+  const [zaloAuthMsg, setZaloAuthMsg] = useState('');
+  const [callbackUrl, setCallbackUrl] = useState('');
+  const oauthHandlerRef = useRef<((e: MessageEvent) => void) | null>(null);
 
   const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -77,8 +86,60 @@ export const SettingsPage = () => {
     } catch {} finally { setTxLoading(false); }
   }, [token]);
 
+  const testZaloConnection = useCallback(async () => {
+    if (!token) return;
+    setIsTestingZalo(true);
+    setZaloStatus(null);
+    try {
+      const r = await fetch('/api/config/zalo/test', { headers: { 'Authorization': `Bearer ${token}` } });
+      setZaloStatus(await r.json());
+    } catch { setZaloStatus({ success: false, message: 'Không thể kết nối server' }); }
+    finally { setIsTestingZalo(false); }
+  }, [token]);
+
+  const startZaloAuth = async () => {
+    setZaloAuthMsg('');
+    try {
+      const r = await fetch('/api/config/zalo/oauth-url', { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await r.json();
+      if (!data.authUrl) { setZaloAuthMsg('Lỗi: ' + (data.message || 'Không lấy được URL')); return; }
+      if (data.callbackUrl) setCallbackUrl(data.callbackUrl);
+
+      if (oauthHandlerRef.current) window.removeEventListener('message', oauthHandlerRef.current);
+
+      oauthHandlerRef.current = (e: MessageEvent) => {
+        if (e.data === 'zalo_auth_success') {
+          setZaloAuthMsg('Kết nối thành công! Đang kiểm tra...');
+          testZaloConnection();
+          window.removeEventListener('message', oauthHandlerRef.current!);
+          oauthHandlerRef.current = null;
+        } else if (typeof e.data === 'string' && e.data.startsWith('zalo_auth_error:')) {
+          setZaloAuthMsg('Lỗi: ' + e.data.slice(16));
+          window.removeEventListener('message', oauthHandlerRef.current!);
+          oauthHandlerRef.current = null;
+        }
+      };
+      window.addEventListener('message', oauthHandlerRef.current);
+
+      const popup = window.open(data.authUrl, 'zalo_auth', 'width=620,height=720,top=80,left=200');
+      if (!popup) setZaloAuthMsg('Trình duyệt chặn popup — vui lòng cho phép popup cho trang này');
+    } catch { setZaloAuthMsg('Lỗi khởi tạo OAuth'); }
+  };
+
+  useEffect(() => {
+    return () => {
+      if (oauthHandlerRef.current) window.removeEventListener('message', oauthHandlerRef.current);
+    };
+  }, []);
+
   useEffect(() => { fetchConfig(); }, [fetchConfig]);
   useEffect(() => { if (activeTab === 'log') fetchTransactions(); }, [activeTab, fetchTransactions]);
+  useEffect(() => {
+    if (activeTab === 'zalo') {
+      testZaloConnection();
+      setCallbackUrl(`${window.location.origin.replace('5173', '5000')}/api/config/zalo/oauth-callback`);
+    }
+  }, [activeTab, testZaloConnection]);
 
   const save = async () => {
     setIsSaving(true); setSaveMsg('');
@@ -117,6 +178,8 @@ export const SettingsPage = () => {
     >{label}</button>
   );
 
+  const zaloConnected = zaloStatus?.success === true;
+
   return (
     <div className="p-6 min-h-screen bg-hicado-slate/30">
       {/* Header */}
@@ -129,6 +192,7 @@ export const SettingsPage = () => {
       {/* Tabs */}
       <div className="flex gap-2 mb-6 bg-white p-1.5 rounded-2xl inline-flex shadow-sm border border-gray-100">
         {TAB('bank', 'Ngân hàng & SePay')}
+        {TAB('zalo', zaloConnected ? '✓ Zalo OA' : 'Zalo OA')}
         {TAB('log', 'Nhật ký Webhook')}
       </div>
 
@@ -301,6 +365,100 @@ export const SettingsPage = () => {
             {saveMsg && (
               <div className="text-center py-2 px-4 bg-green-50 text-green-700 rounded-xl text-sm font-semibold">{saveMsg}</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ TAB: ZALO OA ══════════════════════════════════════════════════ */}
+      {activeTab === 'zalo' && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+          {/* Connection status + auth button */}
+          <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+            <div className={`px-6 py-4 ${zaloConnected ? 'bg-blue-500' : 'bg-slate-400'}`}>
+              <h2 className="text-white font-bold text-base">Trạng thái Zalo OA</h2>
+              <p className="text-white/60 text-xs mt-0.5">Kết nối tài khoản OA để gửi tin nhắn tự động</p>
+            </div>
+            <div className="p-6 space-y-5">
+
+              {/* Status indicator */}
+              {isTestingZalo ? (
+                <div className="text-center py-8 text-gray-400 text-sm">Đang kiểm tra kết nối...</div>
+              ) : zaloStatus ? (
+                <div className={`flex items-center gap-3 p-4 rounded-2xl ${zaloStatus.success ? 'bg-blue-50 border border-blue-100' : 'bg-red-50 border border-red-100'}`}>
+                  <span className="text-3xl">{zaloStatus.success ? '✅' : '❌'}</span>
+                  <div>
+                    <p className={`font-bold text-sm ${zaloStatus.success ? 'text-blue-700' : 'text-red-600'}`}>
+                      {zaloStatus.success ? 'Đang kết nối' : 'Chưa kết nối'}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-0.5">{zaloStatus.message}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-6 text-center text-gray-400 text-sm">Chưa kiểm tra</div>
+              )}
+
+              {/* Auth button */}
+              <button
+                onClick={startZaloAuth}
+                className={`w-full py-3.5 font-black rounded-2xl transition text-sm tracking-wider uppercase ${zaloConnected ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-blue-600 text-white hover:bg-blue-700'} shadow-sm`}
+              >
+                {zaloConnected ? '🔄 Ủy quyền lại' : '🔗 Kết nối Zalo OA'}
+              </button>
+
+              {zaloAuthMsg && (
+                <div className={`text-center py-2.5 px-4 rounded-xl text-sm font-medium ${zaloAuthMsg.startsWith('Lỗi') ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-700'}`}>
+                  {zaloAuthMsg}
+                </div>
+              )}
+
+              <button onClick={testZaloConnection} disabled={isTestingZalo}
+                className="w-full py-2.5 border-2 border-gray-100 text-gray-500 font-semibold rounded-2xl hover:border-blue-200 hover:text-blue-600 transition text-xs">
+                {isTestingZalo ? 'Đang kiểm tra...' : '↻ Kiểm tra lại kết nối'}
+              </button>
+            </div>
+          </div>
+
+          {/* Setup guide + callback URL */}
+          <div className="space-y-5">
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="bg-hicado-navy px-6 py-4">
+                <h2 className="text-white font-bold text-sm">Cấu hình tại Zalo Developer</h2>
+                <p className="text-white/50 text-xs mt-0.5">Đăng ký Redirect URI trước khi ủy quyền</p>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="bg-hicado-slate/30 rounded-2xl p-4">
+                  <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest mb-2">Redirect URI cần đăng ký</p>
+                  <p className="font-mono text-xs text-hicado-navy break-all leading-relaxed">{callbackUrl}</p>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(callbackUrl); }}
+                    className="mt-2 w-full py-1.5 bg-hicado-navy text-white text-xs font-bold rounded-xl hover:bg-hicado-emerald hover:text-hicado-navy transition"
+                  >Sao chép</button>
+                </div>
+
+                <ol className="space-y-3">
+                  {[
+                    ['Vào developers.zalo.me', 'Chọn ứng dụng OA của bạn → Cài đặt'],
+                    ['Thêm Redirect URI', 'Tab "Đăng nhập với Zalo" → dán URL ở trên'],
+                    ['Nhấn "Kết nối Zalo OA"', 'Đăng nhập bằng tài khoản quản lý OA'],
+                    ['Xác nhận quyền truy cập', 'Cho phép ứng dụng gửi tin nhắn OA'],
+                  ].map(([title, desc], i) => (
+                    <li key={i} className="flex gap-3">
+                      <div className="w-6 h-6 rounded-full bg-blue-500 text-white font-black text-xs flex items-center justify-center flex-shrink-0 mt-0.5">{i + 1}</div>
+                      <div>
+                        <p className="text-xs font-bold text-hicado-navy">{title}</p>
+                        <p className="text-[11px] text-gray-400 mt-0.5">{desc}</p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3">
+                  <p className="text-[10px] font-black text-amber-700 uppercase tracking-wider mb-1">Lưu ý</p>
+                  <p className="text-[11px] text-amber-700 leading-relaxed">Token Zalo có hiệu lực <strong>1 giờ</strong>. Refresh token sẽ tự động lấy token mới khi hết hạn (nếu còn hợp lệ). Nếu cả hai đều hết hạn, cần ủy quyền lại.</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
