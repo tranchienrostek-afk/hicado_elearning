@@ -90,7 +90,7 @@ export const Classes = () => {
       tuitionPerSession: cls.tuitionPerSession,
       totalSessions: cls.totalSessions,
       studentIds: cls.studentIds,
-      teacherShare: cls.teacherShare ?? 80,
+      teacherShare: cls.teacherShare != null ? Math.round(cls.teacherShare * 100) : 80,
       schedule: cls.schedule || { days: [], time: '18:00 - 20:00' }
     });
     setIsModalOpen(true);
