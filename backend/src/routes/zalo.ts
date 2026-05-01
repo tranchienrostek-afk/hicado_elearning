@@ -1,20 +1,9 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
-import axios from 'axios';
+import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 
 const router = Router();
-const ZALO_OA_API = 'https://openapi.zalo.me';
-
-const getZaloConfig = async () => {
-  const configs = await prisma.systemConfig.findMany({
-    where: { key: { in: ['ZALO_ACCESS_TOKEN', 'ZALO_APP_ID'] } }
-  });
-  return configs.reduce((acc, curr) => {
-    acc[curr.key] = curr.value;
-    return acc;
-  }, {} as Record<string, string>);
-};
 
 // 1. Sync Zalo Templates
 router.get('/templates/sync', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
@@ -25,7 +14,7 @@ router.get('/templates/sync', authenticateToken, authorizeRoles('ADMIN', 'MANAGE
     // Try to fetch from Zalo API
     let templates: any[] = [];
     try {
-      const r = await axios.get<any>('https://business.openapi.zalo.me/template/all?offset=0&limit=100&status=1', {
+      const r = await zaloApiClient.get<any>('https://business.openapi.zalo.me/template/all?offset=0&limit=100&status=1', {
         headers: { access_token: cfg.ZALO_ACCESS_TOKEN }
       });
       if (r.data.error === 0 && Array.isArray(r.data.data)) {
@@ -80,7 +69,7 @@ router.get('/followers', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
     const headers = { access_token: cfg.ZALO_ACCESS_TOKEN };
 
     // Get follower list
-    const follRes = await axios.get<any>(
+    const follRes = await zaloApiClient.get<any>(
       `${ZALO_OA_API}/v2.0/oa/getfollowers?data=${encodeURIComponent(JSON.stringify({ offset: 0, count: 50 }))}`,
       { headers }
     );
@@ -95,7 +84,7 @@ router.get('/followers', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
     const profiles = await Promise.all(
       followerIds.map(async ({ user_id }) => {
         try {
-          const pr = await axios.get<any>(
+          const pr = await zaloApiClient.get<any>(
             `${ZALO_OA_API}/v2.0/oa/getprofile?data=${encodeURIComponent(JSON.stringify({ user_id }))}`,
             { headers }
           );
@@ -162,7 +151,7 @@ router.post('/send/cs', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), a
 
   for (const userId of userIds) {
     try {
-      const r = await axios.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`, {
+      const r = await zaloApiClient.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`, {
         recipient: { user_id: userId },
         message: { text: message }
       }, { headers });
@@ -210,7 +199,7 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
       // Prefer OA CS (via zaloUserId) over ZNS (phone)
       if (student.zaloUserId) {
         try {
-          const r = await axios.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`, {
+          const r = await zaloApiClient.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`, {
             recipient: { user_id: student.zaloUserId },
             message: { text: `Xin chào ${student.name}! Trung tâm Hicado thông báo học phí của bạn cần được thanh toán. Vui lòng liên hệ để biết thêm chi tiết. Trân trọng!` }
           }, { headers: { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' } });
@@ -232,7 +221,7 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
       const trackingId = `TUITION_${student.id}_${Date.now()}`;
 
       try {
-        const r = await axios.post<any>('https://business.openapi.zalo.me/message/template', {
+        const r = await zaloApiClient.post<any>('https://business.openapi.zalo.me/message/template', {
           phone: formattedPhone,
           template_id: templateId,
           template_data: { student_name: student.name, amount: '150,000đ', due_date: '30/06/2026' },

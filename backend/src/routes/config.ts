@@ -3,6 +3,7 @@ import { randomBytes, createHash } from 'node:crypto';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import axios from 'axios';
+import { zaloApiClient } from '../lib/zaloAuth';
 
 const router = Router();
 
@@ -125,7 +126,6 @@ router.get('/zalo/test', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
   try {
     const cfg = await getConfigs(['ZALO_ACCESS_TOKEN']);
     if (!cfg.ZALO_ACCESS_TOKEN) return res.status(400).json({ success: false, message: 'Chưa có Access Token!' });
-    const { zaloApiClient } = require('../lib/zaloAuth');
     const response = await zaloApiClient.get('https://openapi.zalo.me/v2.0/oa/getoa', {
       headers: { access_token: cfg.ZALO_ACCESS_TOKEN }
     });
