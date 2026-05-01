@@ -35,7 +35,7 @@ interface TeacherTuitionSnapshot {
 
 export const Users = () => {
   const { students, teachers, classes, attendance, transactions, importStudents, addStudent, updateStudent, deleteStudent, addTeacher, updateTeacher, deleteTeacher, isLoading } = useCenterStore();
-  const { role, auth, accounts, fetchAccounts, addAccount, updateAccount, deleteAccount } = useAuthStore();
+  const { role, auth, accounts, fetchAccounts, addAccount, deleteAccount } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'STUDENTS' | 'TEACHERS'>('STUDENTS');
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -360,7 +360,6 @@ export const Users = () => {
           return;
         }
         await addAccount({
-          id: `U-${Date.now()}`,
           username: accountForm.username,
           password: accountForm.password,
           role: 'TEACHER',
@@ -374,7 +373,6 @@ export const Users = () => {
           return;
         }
         await addAccount({
-          id: `U-${Date.now()}`,
           username: accountForm.username,
           password: accountForm.password,
           role: 'STUDENT',
