@@ -5,29 +5,29 @@ const prisma = new PrismaClient();
 
 async function main() {
   console.log('Seeding basic data...');
-  const hashedPassword = await bcrypt.hash('password', 10);
+  const hash123 = await bcrypt.hash('123', 10);
 
-  // 1. Create Teacher
+  // Teacher record for thaychien
   const teacher = await prisma.teacher.upsert({
-    where: { id: 'teacher-1' },
+    where: { id: 'teacher-chien' },
     update: {},
     create: {
-      id: 'teacher-1',
-      name: 'Master Yoda',
-      phone: '0909000999',
+      id: 'teacher-chien',
+      name: 'Trần Chiến',
+      phone: '0965389247',
       bankAccount: '123456789',
       bankName: 'Vietcombank',
       salaryRate: 0.8
     }
   });
 
-  // 2. Create Class
+  // Demo class
   const cls = await prisma.class.upsert({
     where: { classCode: 'TOAN' },
     update: {},
     create: {
       id: 'class-toan-1',
-      name: 'Toan hoc 12 - Nang cao',
+      name: 'Toán học 12 - Nâng cao',
       classCode: 'TOAN',
       tuitionPerSession: 150000,
       totalSessions: 10,
@@ -35,70 +35,75 @@ async function main() {
     }
   });
 
-  // 3. Create Student
+  // Demo student
   const student = await prisma.student.upsert({
     where: { studentCode: 'HS001' },
     update: {},
     create: {
       id: 'student-1',
-      name: 'Nguyen Van A',
+      name: 'Nguyễn Văn A',
       studentCode: 'HS001',
       birthYear: 2008,
-      address: 'Ha Noi',
+      address: 'Hà Nội',
       tuitionStatus: 'PENDING'
     }
   });
 
-  // 4. Enroll Student in Class
   await prisma.classStudent.upsert({
     where: { classId_studentId: { classId: cls.id, studentId: student.id } },
     update: {},
     create: { classId: cls.id, studentId: student.id }
   });
 
-  // 5. Create Users
-  // Admin
+  // ── User accounts ──────────────────────────────────────────────────
   await prisma.user.upsert({
     where: { username: 'admin' },
-    update: { password: hashedPassword },
-    create: {
-      username: 'admin',
-      password: hashedPassword,
-      role: 'ADMIN',
-      name: 'Administrator'
-    }
+    update: { password: hash123 },
+    create: { username: 'admin', password: hash123, role: 'ADMIN', name: 'Hicado Admin' }
   });
 
-  // Student Account
   await prisma.user.upsert({
-    where: { username: 'student' },
-    update: { password: hashedPassword },
-    create: {
-      username: 'student',
-      password: hashedPassword,
-      role: 'STUDENT',
-      name: 'Nguyen Van A',
-      studentId: student.id
-    }
+    where: { username: 'ketoan' },
+    update: { password: hash123 },
+    create: { username: 'ketoan', password: hash123, role: 'MANAGER', name: 'Kế toán Hicado' }
   });
 
-  // Teacher Account
   await prisma.user.upsert({
-    where: { username: 'teacher' },
-    update: { password: hashedPassword },
+    where: { username: 'manager' },
+    update: { password: hash123 },
+    create: { username: 'manager', password: hash123, role: 'MANAGER', name: 'Quản lý Hicado' }
+  });
+
+  await prisma.user.upsert({
+    where: { username: 'thaychien' },
+    update: { password: hash123 },
     create: {
-      username: 'teacher',
-      password: hashedPassword,
+      username: 'thaychien',
+      password: hash123,
       role: 'TEACHER',
-      name: 'Master Yoda',
+      name: 'Trần Chiến',
       teacherId: teacher.id
     }
   });
 
-  console.log('Seed completed successfully!');
-  console.log('Admin account: admin / password');
-  console.log('Teacher account: teacher / password');
-  console.log('Student account: student / password');
+  await prisma.user.upsert({
+    where: { username: 'student' },
+    update: { password: hash123 },
+    create: {
+      username: 'student',
+      password: hash123,
+      role: 'STUDENT',
+      name: 'Nguyễn Văn A',
+      studentId: student.id
+    }
+  });
+
+  console.log('✅ Seed completed');
+  console.log('   admin / 123       → ADMIN');
+  console.log('   ketoan / 123      → MANAGER');
+  console.log('   manager / 123     → MANAGER');
+  console.log('   thaychien / 123   → TEACHER');
+  console.log('   student / 123     → STUDENT');
 }
 
 main()
