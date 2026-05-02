@@ -141,52 +141,22 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     // ── Branch: OA CS message (requires zaloUserId) ──
     if (!student.zaloUserId) { failedCount++; continue; }
 
-    let messageText = '';
-
-    if (type === 'TUITION_REMINDER') {
-      const lines: string[] = [
-        `Kính gửi phụ huynh em ${student.name}!`,
-        `Trung tâm Hicado xin thông báo học phí:\n`,
-      ];
-      for (const cs of student.classes) {
-        const cls = cs.class;
-        const attended = student.attendances.filter((a: any) => a.classId === cls.id).length;
-        const amount = cls.tuitionPerSession * attended;
-        lines.push(
-          `• Lớp ${cls.name}${cls.classCode ? ` (${cls.classCode})` : ''}\n` +
-          `  Đã học: ${attended} buổi × ${cls.tuitionPerSession.toLocaleString('vi-VN')}đ\n` +
-          `  Tạm tính: ${amount.toLocaleString('vi-VN')}đ`
-        );
-      }
-      const primaryClass = student.classes[0]?.class;
-      const memo = `${student.studentCode ?? ''} ${primaryClass?.classCode ?? ''} ${student.name}`.toUpperCase().trim().slice(0, 50);
-      lines.push(`\n💰 Tổng: ${totalDue.toLocaleString('vi-VN')}đ`);
-      lines.push(`📱 Quét QR nộp tiền: ${appBaseUrl}/pay/${student.id}`);
-      lines.push(`📝 Nội dung CK: ${memo}`);
-      messageText = lines.join('\n');
-    } else {
-      messageText = filters.message || 'Thông báo từ Trung tâm Hicado';
-    }
+    // TUITION_REMINDER → single image message (payment slip PNG with QR embedded)
+    // GENERAL → text message
+    const primaryAttended = student.attendances.filter((a: any) => a.classId === primaryClassId).length;
+    const message = type === 'TUITION_REMINDER' && primaryClassId
+      ? { attachment: { type: 'image', payload: { url: `${appBaseUrl}/api/finance/qr-png/${student.id}/${primaryClassId}?attended=${primaryAttended}` } } }
+      : { text: filters.message || 'Thông báo từ Trung tâm Hicado' };
 
     const trackingId = `CAMP_${campaign.id}_${student.id}_${Date.now()}`;
     try {
       const r = await zaloApiClient.post<any>(
         `${ZALO_OA_API}/v3.0/oa/message/cs`,
-        { recipient: { user_id: student.zaloUserId }, message: { text: messageText } },
+        { recipient: { user_id: student.zaloUserId }, message },
         { headers }
       );
       const success = r.data?.error === 0;
       const zaloMsgId: string | null = success ? (r.data?.data?.msg_id ?? r.data?.data?.message_id ?? null) : null;
-
-      // Send payment-slip image (QR + info) as a follow-up Zalo attachment
-      if (success && primaryClassId && type === 'TUITION_REMINDER') {
-        const primaryAttended = student.attendances.filter((a: any) => a.classId === primaryClassId).length;
-        const qrUrl = `${appBaseUrl}/api/finance/qr-png/${student.id}/${primaryClassId}?attended=${primaryAttended}`;
-        zaloApiClient.post(`${ZALO_OA_API}/v3.0/oa/message/cs`, {
-          recipient: { user_id: student.zaloUserId },
-          message: { attachment: { type: 'image', payload: { url: qrUrl } } },
-        }, { headers }).catch(() => {});
-      }
 
       await (prisma as any).zaloMessageLog.create({
         data: {
