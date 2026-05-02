@@ -619,7 +619,7 @@ export const ZaloCampaignPage = () => {
                 <table className="w-full text-sm text-left min-w-[600px]">
                   <thead className="bg-hicado-slate/20">
                     <tr>
-                      {['Học sinh', 'Mã HS', 'Trạng thái', 'Giờ gửi', 'Giờ đọc'].map(h => (
+                      {['Học sinh', 'Mã HS', 'Trạng thái', 'Lý do lỗi', 'Giờ gửi', 'Giờ đọc'].map(h => (
                         <th key={h} className="px-5 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
                       ))}
                     </tr>
@@ -632,12 +632,13 @@ export const ZaloCampaignPage = () => {
                         <td className="px-5 py-4">
                           <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest ${statusBadge(log.status)}`}>{log.status}</span>
                         </td>
+                        <td className="px-5 py-4 text-xs text-rose-600 max-w-[220px] break-words">{log.errorReason ?? '—'}</td>
                         <td className="px-5 py-4 text-xs text-hicado-navy/40">{new Date(log.sentAt).toLocaleString('vi-VN')}</td>
                         <td className="px-5 py-4 text-xs text-hicado-navy/40">{log.readAt ? new Date(log.readAt).toLocaleString('vi-VN') : '—'}</td>
                       </tr>
                     ))}
                     {campaignDetail.logs.length === 0 && (
-                      <tr><td colSpan={5} className="px-5 py-8 text-center text-hicado-navy/30 font-bold">Không có bản ghi.</td></tr>
+                      <tr><td colSpan={6} className="px-5 py-8 text-center text-hicado-navy/30 font-bold">Không có bản ghi.</td></tr>
                     )}
                   </tbody>
                 </table>

@@ -235,6 +235,42 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   });
 });
 
+// Debug endpoint — tests each step of the image-send pipeline
+router.get('/debug/image-send', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const steps: Record<string, any> = {};
+  try {
+    // Step 1: Zalo config
+    const cfg = await getZaloConfig();
+    steps.step1_config = { hasToken: !!cfg.ZALO_ACCESS_TOKEN, tokenPreview: cfg.ZALO_ACCESS_TOKEN?.slice(0, 10) + '...' };
+
+    // Step 2: Build PNG
+    const { buildPaymentSlipPNG: bsp } = await import('../lib/paymentSlip');
+    const { generateVietQRString: gvqs } = await import('../lib/vietqr');
+    const qrData = gvqs('970436', '123456789', 100000, 'HS001 TOAN TEST');
+    const pngBuffer = await bsp({ studentName: 'Test Student', studentCode: 'HS001', className: 'Toan Hoc', classCode: 'TOAN', attended: 5, tuitionPerSession: 200000, amount: 1000000, memo: 'HS001 TOAN TEST', qrData });
+    steps.step2_png = { ok: true, bytes: pngBuffer.length };
+
+    // Step 3: Upload to Zalo
+    const FormDataLib = require('form-data');
+    const axiosLib = require('axios');
+    const form = new FormDataLib();
+    form.append('file', pngBuffer, { filename: 'payment.png', contentType: 'image/png' });
+    const uploadRes = await axiosLib.post(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
+      headers: { ...form.getHeaders(), access_token: cfg.ZALO_ACCESS_TOKEN },
+    });
+    steps.step3_upload = { error: uploadRes.data?.error, message: uploadRes.data?.message, data: uploadRes.data?.data };
+
+    if (uploadRes.data?.error !== 0) {
+      return res.json({ ok: false, steps, verdict: 'Upload to Zalo failed — check Zalo token or OA permissions' });
+    }
+
+    steps.verdict = 'All steps OK — image pipeline works';
+    res.json({ ok: true, steps });
+  } catch (err: any) {
+    res.json({ ok: false, steps, error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
+  }
+});
+
 router.delete('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const id = String(req.params.id);
