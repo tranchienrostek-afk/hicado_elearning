@@ -632,7 +632,21 @@ export const ZaloCampaignPage = () => {
                         <td className="px-5 py-4">
                           <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-widest ${statusBadge(log.status)}`}>{log.status}</span>
                         </td>
-                        <td className="px-5 py-4 text-xs text-rose-600 max-w-[220px] break-words">{log.errorReason ?? '—'}</td>
+                        <td className="px-5 py-4 max-w-[280px]">
+                          {log.errorReason ? (
+                            <div className="flex flex-wrap gap-1">
+                              {log.errorReason.split(' → ').map((step, i) => {
+                                const ok = step.includes('_OK') || step.includes('CS_OK');
+                                const fail = step.includes('_FAIL') || step.includes('EXCEPTION') || step.includes('FALLBACK');
+                                return (
+                                  <span key={i} title={step} className={`px-2 py-0.5 rounded text-[10px] font-bold truncate max-w-[160px] ${ok ? 'bg-emerald-100 text-emerald-700' : fail ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-500'}`}>
+                                    {step}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          ) : <span className="text-hicado-navy/30 text-xs">—</span>}
+                        </td>
                         <td className="px-5 py-4 text-xs text-hicado-navy/40">{new Date(log.sentAt).toLocaleString('vi-VN')}</td>
                         <td className="px-5 py-4 text-xs text-hicado-navy/40">{log.readAt ? new Date(log.readAt).toLocaleString('vi-VN') : '—'}</td>
                       </tr>

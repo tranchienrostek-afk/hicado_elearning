@@ -156,32 +156,41 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     // ── Branch: OA CS message (requires zaloUserId) ──
     if (!student.zaloUserId) { failedCount++; continue; }
 
-    // TUITION_REMINDER → generate payment slip PNG, upload to Zalo, send as image
-    // GENERAL → plain text message
+    // Build message + capture step-by-step trace (stored in errorReason for full UI visibility)
     const primaryAttended = student.attendances.filter((a: any) => a.classId === primaryClassId).length;
+    const trace: string[] = [];
     let message: any;
+
     if (type === 'TUITION_REMINDER' && primaryClassId) {
       const primaryClass = student.classes.find((cs: any) => cs.class.id === primaryClassId)?.class;
       const memo = `${student.studentCode ?? student.id} ${primaryClass?.classCode ?? ''} ${student.name}`.toUpperCase().trim().slice(0, 50);
       const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo);
+
+      // Step 1: Build PNG
+      trace.push('①PNG...');
       try {
-        console.log(`[Campaign] Building PNG for ${student.name}...`);
         const pngBuffer = await buildPaymentSlipPNG({
           studentName: student.name, studentCode: student.studentCode ?? student.id,
           className: primaryClass?.name ?? '', classCode: primaryClass?.classCode ?? '',
           attended: primaryAttended, tuitionPerSession: primaryClass?.tuitionPerSession ?? 0,
           amount: primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo, qrData,
         });
-        console.log(`[Campaign] PNG built (${pngBuffer.length} bytes), uploading to Zalo...`);
+        trace[trace.length - 1] = `①PNG_OK(${Math.round(pngBuffer.length / 1024)}KB)`;
+
+        // Step 2: Upload to Zalo
+        trace.push('②UPLOAD...');
         const token = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
-        console.log(`[Campaign] Upload OK, token=${token}`);
+        trace[trace.length - 1] = `②UPLOAD_OK`;
         message = { attachment: { type: 'image', payload: { token } } };
+        trace.push('③MSG=IMAGE');
       } catch (imgErr: any) {
-        console.error(`[Campaign] Image pipeline failed for ${student.name}:`, imgErr.message);
-        message = { text: `Hicado thong bao hoc phi ${student.name}: ${(primaryAttended * (primaryClass?.tuitionPerSession ?? 0)).toLocaleString('vi-VN')}d. Chi tiet: ${appBaseUrl}/pay/${student.id}` };
+        trace[trace.length - 1] += `_FAIL:${imgErr.message}`;
+        trace.push('③FALLBACK=TEXT');
+        message = { text: `Hicado: Hoc phi ${student.name} - ${(primaryAttended * (primaryClass?.tuitionPerSession ?? 0)).toLocaleString('vi-VN')}d. QR: ${appBaseUrl}/pay/${student.id}` };
       }
     } else {
       message = { text: filters.message || 'Thông báo từ Trung tâm Hicado' };
+      trace.push('①MSG=TEXT');
     }
 
     const trackingId = `CAMP_${campaign.id}_${student.id}_${Date.now()}`;
@@ -193,7 +202,9 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       );
       const success = r.data?.error === 0;
       const zaloMsgId: string | null = success ? (r.data?.data?.msg_id ?? r.data?.data?.message_id ?? null) : null;
-      if (!success) console.error(`[Campaign] CS send FAILED for ${student.name}: error=${r.data?.error} msg=${r.data?.message} body=${JSON.stringify(r.data)}`);
+      trace.push(success ? `④CS_OK` : `④CS_FAIL[${r.data?.error}]:${r.data?.message}`);
+      const traceStr = trace.join(' → ');
+      console.log(`[Campaign] ${student.name}: ${traceStr}`);
 
       await (prisma as any).zaloMessageLog.create({
         data: {
@@ -202,7 +213,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           templateId: `CAMPAIGN_${type}`,
           trackingId,
           status: success ? 'SENT' : 'FAILED',
-          errorReason: success ? null : `[${r.data?.error}] ${r.data?.message ?? 'Unknown'}`,
+          errorReason: traceStr,
           studentId: student.id,
           campaignId: campaign.id,
           zaloMsgId,
@@ -211,6 +222,9 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       });
       if (success) sentCount++; else failedCount++;
     } catch (err: any) {
+      trace.push(`④CS_EXCEPTION:${err.message}`);
+      const traceStr = trace.join(' → ');
+      console.error(`[Campaign] ${student.name}: ${traceStr}`);
       failedCount++;
       await (prisma as any).zaloMessageLog.create({
         data: {
@@ -219,7 +233,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           templateId: `CAMPAIGN_${type}`,
           trackingId,
           status: 'FAILED',
-          errorReason: err.message,
+          errorReason: traceStr,
           studentId: student.id,
           campaignId: campaign.id,
           classId: primaryClassId,
