@@ -178,9 +178,10 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       const success = r.data?.error === 0;
       const zaloMsgId: string | null = success ? (r.data?.data?.msg_id ?? r.data?.data?.message_id ?? null) : null;
 
-      // Send QR image as a follow-up attachment
+      // Send payment-slip image (QR + info) as a follow-up Zalo attachment
       if (success && primaryClassId && type === 'TUITION_REMINDER') {
-        const qrUrl = `${appBaseUrl}/api/finance/qr-png/${student.id}/${primaryClassId}`;
+        const primaryAttended = student.attendances.filter((a: any) => a.classId === primaryClassId).length;
+        const qrUrl = `${appBaseUrl}/api/finance/qr-png/${student.id}/${primaryClassId}?attended=${primaryAttended}`;
         zaloApiClient.post(`${ZALO_OA_API}/v3.0/oa/message/cs`, {
           recipient: { user_id: student.zaloUserId },
           message: { attachment: { type: 'image', payload: { url: qrUrl } } },
