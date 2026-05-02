@@ -35,6 +35,8 @@ export interface Student {
   schoolName?: string;
   schoolClass?: string;
   cccd?: string;
+  parentPhone?: string;
+  studentPhone?: string;
   tuitionStatus: 'PAID' | 'PENDING' | 'DEBT';
 }
 

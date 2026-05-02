@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuthStore, useCenterStore } from '@/store';
 import { toast } from 'react-hot-toast';
 import { SkeletonTable } from '@/views/components/skeleton';
@@ -6,6 +6,11 @@ import { ConfirmModal } from '@/views/components/confirm-modal';
 import FocusLock from 'react-focus-lock';
 import { z } from 'zod';
 import clsx from 'clsx';
+import {
+  exportProfileWorkbook,
+  normalizeProfileImportRows,
+  readSpreadsheetRows,
+} from '@/utils/user-spreadsheet';
 
 const studentSchema = z.object({
   name: z.string().min(2, 'Tên quá ngắn'),
@@ -52,6 +57,7 @@ export const Users = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sheetUrl, setSheetUrl] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [search, setSearch] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState(() => {
@@ -330,6 +336,62 @@ export const Users = () => {
     }, 1500);
   };
 
+  const handleExportExcel = () => {
+    const rows = activeTab === 'STUDENTS' ? filteredStudents : filteredTeachers;
+    exportProfileWorkbook(activeTab, rows);
+    toast.success(rows.length === 0 ? 'Đã xuất file template Excel' : 'Đã xuất danh sách Excel');
+  };
+
+  const handleImportExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setIsSyncing(true);
+    try {
+      let importedCount = 0;
+      if (activeTab === 'STUDENTS') {
+        const rows = await readSpreadsheetRows(file);
+        const result = normalizeProfileImportRows('STUDENTS', rows);
+        if (result.validRows.length === 0) {
+          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          return;
+        }
+        for (const row of result.validRows) {
+          await addStudent(row);
+          importedCount += 1;
+        }
+        if (result.errors.length > 0) {
+          toast.success(`Đã nhập ${importedCount} dòng. Bỏ qua ${result.errors.length} dòng lỗi.`);
+        } else {
+          toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
+        }
+      } else if (activeTab === 'TEACHERS') {
+        const rows = await readSpreadsheetRows(file);
+        const result = normalizeProfileImportRows('TEACHERS', rows);
+        if (result.validRows.length === 0) {
+          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          return;
+        }
+        for (const row of result.validRows) {
+          await addTeacher(row);
+          importedCount += 1;
+        }
+        if (result.errors.length > 0) {
+          toast.success(`Đã nhập ${importedCount} dòng. Bỏ qua ${result.errors.length} dòng lỗi.`);
+        } else {
+          toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
+        }
+      }
+      setIsImportOpen(false);
+    } catch (error) {
+      console.error('Excel import failed:', error);
+      toast.error('Không thể đọc file Excel');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const availableTeacherTargets = teachers.filter(t => !accounts.some(a => a.teacherId === t.id));
   const availableStudentTargets = students.filter(s => !accounts.some(a => a.studentId === s.id));
   const accountList = accounts.filter(a => activeTab === 'TEACHERS' ? a.role === 'TEACHER' : a.role === 'STUDENT');
@@ -581,7 +643,13 @@ export const Users = () => {
                   onClick={() => setIsImportOpen(!isImportOpen)}
                   className="flex-1 sm:flex-none bg-hicado-emerald/10 text-hicado-emerald px-5 py-2.5 rounded-xl font-black border border-hicado-emerald/20 text-[10px] uppercase tracking-widest"
                 >
-                  Import Sheets
+                  Nhập Excel
+                </button>
+                <button
+                  onClick={handleExportExcel}
+                  className="flex-1 sm:flex-none bg-white text-hicado-navy px-5 py-2.5 rounded-xl font-black border border-hicado-slate text-[10px] uppercase tracking-widest"
+                >
+                  Xuất Excel
                 </button>
                 <button 
                   onClick={() => { setIsAddModalOpen(true); setIsEditMode(false); setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 }); }}
@@ -635,6 +703,27 @@ export const Users = () => {
         </div>
 
         {isImportOpen && (
+          <div className="bg-emerald-900/5 border border-emerald-200 p-8 rounded-2xl flex flex-col md:flex-row gap-6 items-center justify-between animate-in fade-in slide-in-from-top-4">
+            <div className="flex-1 space-y-2">
+              <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Import Excel</p>
+              <p className="text-xs font-bold text-hicado-navy/50">
+                Dùng file Excel .xls đã xuất từ nút Xuất Excel. Nếu danh sách đang trống, file xuất ra sẽ là template mẫu.
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xls,.csv"
+                onChange={handleImportExcel}
+                className="hidden"
+              />
+            </div>
+            <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold uppercase text-xs">
+              {isSyncing ? 'Đang nhập...' : 'Chọn file Excel'}
+            </button>
+          </div>
+        )}
+
+        {false && isImportOpen && (
           <div className="bg-emerald-900/5 border border-emerald-200 p-8 rounded-2xl flex flex-col md:flex-row gap-6 items-end animate-in fade-in slide-in-from-top-4">
             <div className="flex-1 space-y-2">
               <label className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">URL Sheets</label>
