@@ -1,8 +1,28 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAuthStore, useCenterStore } from '@/store';
 import { toast } from 'react-hot-toast';
 import { SkeletonTable, SkeletonCard } from '@/views/components/skeleton';
 import clsx from 'clsx';
+
+interface FinanceStats {
+  totalCollected: number;
+  totalExpected: number;
+  collectionRate: number;
+  monthlyRevenue: { month: string; amount: number }[];
+  collectionByClass: {
+    classId: string; className: string;
+    expected: number; collected: number; gap: number; rate: number;
+    studentCount: number; paidCount: number;
+  }[];
+  pendingStudents: {
+    id: string; name: string; studentCode: string | null; tuitionStatus: string;
+    totalDebt: number; classes: { id: string; name: string }[];
+  }[];
+  recentTransactions: {
+    id: string; amount: number; date: string; status: string; content: string;
+    studentName: string; studentCode: string; classes: string;
+  }[];
+}
 
 interface FinanceRow {
   classId: string;
@@ -44,6 +64,19 @@ export const FinancialPage = () => {
   const [targetStudentId, setTargetStudentId] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
+  const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
+  const [statsLoading, setStatsLoading] = useState(false);
+
+  useEffect(() => {
+    if (isTeacher) return;
+    const token = auth?.token;
+    if (!token) return;
+    setStatsLoading(true);
+    fetch('/api/finance/stats', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setFinanceStats(data); })
+      .finally(() => setStatsLoading(false));
+  }, [auth?.token, isTeacher]);
 
   const scopedClasses = useMemo(
     () =>
@@ -431,6 +464,192 @@ export const FinancialPage = () => {
           </div>
         )}
       </div>
+
+      {/* ── Payment Dashboard (Bank Webhook Stats) ── */}
+      {statsLoading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          {[...Array(2)].map((_, i) => <SkeletonCard key={i} />)}
+        </div>
+      )}
+
+      {financeStats && !statsLoading && (
+        <>
+          {/* Row 1: Collection Gauge + Monthly Bar Chart */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            {/* Collection Gauge */}
+            <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate flex flex-col items-center gap-6">
+              <div>
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1 text-center">Tỷ lệ thu học phí</p>
+                <h3 className="text-xl font-black text-hicado-navy text-center">Gauge Thu Tiền</h3>
+              </div>
+              <div className="relative flex items-center justify-center" style={{ width: 160, height: 160 }}>
+                <div
+                  className="rounded-full"
+                  style={{
+                    width: 160, height: 160,
+                    background: `conic-gradient(#10b981 ${financeStats.collectionRate}%, #e2e8f0 0%)`,
+                  }}
+                />
+                <div className="absolute inset-[16px] rounded-full bg-white flex flex-col items-center justify-center">
+                  <span className="text-3xl font-black text-hicado-emerald text-glow">{financeStats.collectionRate}%</span>
+                  <span className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mt-0.5">đã thu</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 w-full">
+                <div className="text-center">
+                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Đã thu</p>
+                  <p className="font-black text-hicado-navy">{(financeStats.totalCollected / 1_000_000).toFixed(1)}M đ</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Cần thu</p>
+                  <p className="font-black text-hicado-navy">{(financeStats.totalExpected / 1_000_000).toFixed(1)}M đ</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Monthly Bar Chart */}
+            <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate">
+              <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Doanh thu</p>
+              <h3 className="text-xl font-black text-hicado-navy mb-6">12 tháng gần nhất</h3>
+              {financeStats.monthlyRevenue.length === 0 ? (
+                <p className="text-sm text-hicado-navy/30 italic text-center py-8">Chưa có giao dịch nào</p>
+              ) : (() => {
+                const maxAmt = Math.max(...financeStats.monthlyRevenue.map(m => m.amount), 1);
+                return (
+                  <div className="flex items-end gap-2 h-40">
+                    {financeStats.monthlyRevenue.map(m => {
+                      const pct = Math.round((m.amount / maxAmt) * 100);
+                      return (
+                        <div key={m.month} className="flex flex-col items-center gap-1 flex-1 min-w-0" title={`${m.month}: ${m.amount.toLocaleString('vi-VN')}đ`}>
+                          <div className="w-full rounded-t-lg bg-hicado-emerald/20 relative" style={{ height: `${Math.max(pct, 4)}%` }}>
+                            <div className="absolute bottom-0 w-full rounded-t-lg bg-hicado-emerald transition-all" style={{ height: `${pct}%` }} />
+                          </div>
+                          <span className="text-[8px] font-black text-hicado-navy/30 truncate w-full text-center">
+                            {m.month.slice(5)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+
+          {/* Row 2: Per-class Collection Table */}
+          <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+            <div className="p-8 border-b border-hicado-slate">
+              <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Theo lớp học</p>
+              <h3 className="text-xl font-black text-hicado-navy">Thu học phí theo lớp</h3>
+            </div>
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[700px]">
+                <thead>
+                  <tr className="border-b border-hicado-slate bg-hicado-slate/20">
+                    {['Lớp', 'Cần thu', 'Đã thu', 'Còn thiếu', 'Tiến độ', 'Học sinh'].map(h => (
+                      <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hicado-slate/50">
+                  {financeStats.collectionByClass.map(row => (
+                    <tr key={row.classId} className="hover:bg-hicado-slate/20 transition-colors">
+                      <td className="px-6 py-4 font-black text-hicado-navy text-sm">{row.className}</td>
+                      <td className="px-6 py-4 font-mono text-hicado-navy/60 text-sm">{row.expected.toLocaleString('vi-VN')}</td>
+                      <td className="px-6 py-4 font-mono text-hicado-emerald text-sm font-black">{row.collected.toLocaleString('vi-VN')}</td>
+                      <td className="px-6 py-4 font-mono text-rose-500 text-sm">{row.gap.toLocaleString('vi-VN')}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <div className="h-1.5 w-24 bg-hicado-slate rounded-full overflow-hidden">
+                            <div className="h-full bg-hicado-emerald rounded-full" style={{ width: `${row.rate}%` }} />
+                          </div>
+                          <span className="text-[10px] font-black text-hicado-navy/50">{row.rate}%</span>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-hicado-navy/50 font-bold">{row.paidCount}/{row.studentCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {financeStats.collectionByClass.length === 0 && (
+              <p className="text-center py-8 text-sm text-hicado-navy/30 italic">Chưa có dữ liệu</p>
+            )}
+          </div>
+
+          {/* Row 3: Pending Students */}
+          {financeStats.pendingStudents.length > 0 && (
+            <div className="glass-card rounded-[2.5rem] overflow-hidden border border-rose-200">
+              <div className="p-8 border-b border-rose-100 flex items-center justify-between">
+                <div>
+                  <p className="text-[9px] font-black text-rose-400 uppercase tracking-[0.4em] mb-1">Cần theo dõi</p>
+                  <h3 className="text-xl font-black text-hicado-navy">Học sinh chưa nộp học phí</h3>
+                </div>
+                <span className="px-4 py-2 bg-rose-50 text-rose-500 font-black text-sm rounded-xl border border-rose-200">
+                  {financeStats.pendingStudents.length} học sinh
+                </span>
+              </div>
+              <div className="divide-y divide-hicado-slate/50">
+                {financeStats.pendingStudents.map(s => (
+                  <div key={s.id} className="px-8 py-4 flex items-center justify-between gap-4 hover:bg-rose-50/30 transition-colors">
+                    <div>
+                      <p className="font-black text-hicado-navy text-sm">{s.name}</p>
+                      <p className="text-[11px] text-hicado-navy/40 font-mono mt-0.5">{s.studentCode || s.id}</p>
+                      <p className="text-[10px] text-hicado-navy/30 mt-0.5">{s.classes.map(c => c.name).join(', ')}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="font-black text-rose-500 text-sm">{s.totalDebt.toLocaleString('vi-VN')}đ</p>
+                      <span className={clsx(
+                        'text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg mt-1 inline-block',
+                        s.tuitionStatus === 'DEBT' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
+                      )}>{s.tuitionStatus}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Row 4: Webhook Transaction Log */}
+          <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+            <div className="p-8 border-b border-hicado-slate">
+              <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Bank Webhook</p>
+              <h3 className="text-xl font-black text-hicado-navy">Giao dịch gần nhất</h3>
+            </div>
+            <div className="overflow-x-auto custom-scrollbar max-h-96 overflow-y-auto">
+              <table className="w-full text-left min-w-[700px]">
+                <thead className="sticky top-0 z-10">
+                  <tr className="border-b border-hicado-slate bg-white/90 backdrop-blur-sm">
+                    {['Thời gian', 'Học sinh', 'Lớp', 'Số tiền', 'Nội dung'].map(h => (
+                      <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hicado-slate/50">
+                  {financeStats.recentTransactions.map(tx => (
+                    <tr key={tx.id} className="hover:bg-hicado-slate/20 transition-colors">
+                      <td className="px-6 py-4 text-[11px] font-mono text-hicado-navy/40">
+                        {new Date(tx.date).toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="font-black text-hicado-navy text-sm">{tx.studentName}</p>
+                        <p className="text-[10px] font-mono text-hicado-navy/40">{tx.studentCode}</p>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-hicado-navy/60">{tx.classes}</td>
+                      <td className="px-6 py-4 font-black text-hicado-emerald text-sm">{tx.amount.toLocaleString('vi-VN')}đ</td>
+                      <td className="px-6 py-4 text-[11px] text-hicado-navy/40 max-w-[200px] truncate" title={tx.content}>{tx.content}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {financeStats.recentTransactions.length === 0 && (
+              <p className="text-center py-8 text-sm text-hicado-navy/30 italic">Chưa có giao dịch nào được ghi nhận qua webhook</p>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };

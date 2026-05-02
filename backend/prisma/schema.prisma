@@ -190,19 +190,39 @@ model ZaloTemplate {
   updatedAt    DateTime @updatedAt
 }
 
+model Campaign {
+  id          String   @id @default(uuid())
+  name        String
+  type        String   // "TUITION_REMINDER" | "GENERAL"
+  status      String   @default("DRAFT")
+  filtersJson String   @default("{}")
+  sentCount   Int      @default(0)
+  readCount   Int      @default(0)
+  failedCount Int      @default(0)
+  createdAt   DateTime @default(now())
+  sentAt      DateTime?
+  logs        ZaloMessageLog[]
+}
+
 model ZaloMessageLog {
-  id           String   @id @default(uuid())
+  id           String    @id @default(uuid())
   phone        String
   zaloUserId   String?
   templateId   String
-  trackingId   String   @unique
-  status       String   // "SENT", "DELIVERED", "READ", "FAILED"
+  trackingId   String    @unique
+  status       String    // "SENT" | "DELIVERED" | "READ" | "FAILED"
   errorReason  String?
-  sentAt       DateTime @default(now())
+  sentAt       DateTime  @default(now())
   readAt       DateTime?
+  deliveredAt  DateTime?
+  zaloMsgId    String?
+  classId      String?
 
   studentId    String?
-  student      Student? @relation(fields: [studentId], references: [id])
+  student      Student?  @relation(fields: [studentId], references: [id])
+
+  campaignId   String?
+  campaign     Campaign? @relation(fields: [campaignId], references: [id])
 }
 
 model SystemConfig {

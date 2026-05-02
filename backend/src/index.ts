@@ -15,6 +15,7 @@ import webhookRoutes from './routes/webhook';
 import userRoutes from './routes/users';
 import zaloRoutes from './routes/zalo';
 import configRoutes from './routes/config';
+import campaignRoutes from './routes/campaigns';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,6 +34,7 @@ app.use('/api/webhook', webhookRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/zalo', zaloRoutes);
 app.use('/api/config', configRoutes);
+app.use('/api/campaigns', campaignRoutes);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

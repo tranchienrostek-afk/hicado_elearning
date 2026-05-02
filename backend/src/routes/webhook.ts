@@ -29,6 +29,32 @@ const handleZaloOA = async (req: any, res: any) => {
         }
       }
     }
+
+    // Read receipt: update ZaloMessageLog status → READ and increment campaign readCount
+    if (event_name === 'user_seen_message') {
+      const seenMsgId: string | undefined = req.body.message?.msg_id;
+      const log = await (prisma as any).zaloMessageLog.findFirst({
+        where: {
+          zaloUserId: userId,
+          status: 'SENT',
+          ...(seenMsgId ? { zaloMsgId: seenMsgId } : {}),
+        },
+        orderBy: { sentAt: 'desc' },
+      });
+      if (log) {
+        await (prisma as any).zaloMessageLog.update({
+          where: { id: log.id },
+          data: { status: 'READ', readAt: new Date() },
+        });
+        if (log.campaignId) {
+          await (prisma as any).campaign.update({
+            where: { id: log.campaignId },
+            data: { readCount: { increment: 1 } },
+          });
+        }
+        console.log(`[Zalo Webhook] READ receipt: userId=${userId} logId=${log.id}`);
+      }
+    }
   } catch (err) {
     console.error('[Zalo Webhook] Error:', err);
   }

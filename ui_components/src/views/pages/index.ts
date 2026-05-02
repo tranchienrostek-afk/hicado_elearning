@@ -9,3 +9,4 @@ export * from './student/student';
 export * from './errors/notFound';
 export * from './zalo-campaign/zalo-campaign';
 export * from './settings/settings';
+export * from './pay/pay-page';
