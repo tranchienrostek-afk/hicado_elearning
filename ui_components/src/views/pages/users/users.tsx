@@ -13,6 +13,8 @@ const studentSchema = z.object({
   address: z.string().optional(),
   schoolName: z.string().optional(),
   schoolClass: z.string().optional(),
+  parentPhone: z.string().optional(),
+  studentPhone: z.string().optional(),
 });
 
 const teacherSchema = z.object({
@@ -121,6 +123,8 @@ export const Users = () => {
       address: item.address || '',
       schoolName: item.schoolName || '',
       schoolClass: item.schoolClass || '',
+      parentPhone: item.parentPhone || '',
+      studentPhone: item.studentPhone || '',
       phone: item.phone || '',
       specialization: item.specialization || '',
       bankAccount: item.bankAccount || '',
@@ -229,7 +233,7 @@ export const Users = () => {
     setIsEditMode(false);
     setSelectedId(null);
     setFormErrors({});
-    setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 });
+    setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 });
   };
 
   const filteredStudents = scopedStudents.filter(s => 
@@ -455,13 +459,35 @@ export const Users = () => {
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Địa chỉ</label>
-                    <input 
-                      type="text" 
+                    <input
+                      type="text"
                       value={formData.address}
                       onChange={e => setFormData({ ...formData, address: e.target.value })}
                       className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-management-blue/20 outline-none"
                       placeholder="Nhập địa chỉ..."
                     />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SĐT Phụ huynh</label>
+                      <input
+                        type="tel"
+                        value={formData.parentPhone}
+                        onChange={e => setFormData({ ...formData, parentPhone: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-management-blue/20 outline-none"
+                        placeholder="0901234567"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SĐT Học sinh</label>
+                      <input
+                        type="tel"
+                        value={formData.studentPhone}
+                        onChange={e => setFormData({ ...formData, studentPhone: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-management-blue/20 outline-none"
+                        placeholder="0901234567"
+                      />
+                    </div>
                   </div>
                 </>
               ) : (
@@ -558,7 +584,7 @@ export const Users = () => {
                   Import Sheets
                 </button>
                 <button 
-                  onClick={() => { setIsAddModalOpen(true); setIsEditMode(false); setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 }); }}
+                  onClick={() => { setIsAddModalOpen(true); setIsEditMode(false); setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 }); }}
                   className="flex-1 sm:flex-none bg-hicado-navy text-white px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-hicado-navy/20"
                 >
                   Thêm mới
