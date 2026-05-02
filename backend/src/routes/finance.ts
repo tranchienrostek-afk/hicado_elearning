@@ -67,7 +67,7 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
     const bankBin = bankCfgMap.BANK_BIN || process.env.BANK_BIN || '970436';
     const accountNo = bankCfgMap.BANK_ACC || process.env.BANK_ACC || '123456789';
     const amount = classItem.tuitionPerSession * classItem.totalSessions;
-    const memo = `${student.studentCode ?? ''} ${classItem.classCode ?? ''}`.trim().toUpperCase();
+    const memo = `${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`.trim().toUpperCase().slice(0, 50);
 
     const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
     const qrImage = await QRCode.toDataURL(qrData, {
@@ -193,7 +193,7 @@ router.get('/public/student/:studentId', async (req, res) => {
       student.classes.map(async cs => {
         const cls = cs.class;
         const amount = cls.tuitionPerSession * cls.totalSessions;
-        const memo = `${student.studentCode ?? student.id} ${cls.classCode ?? cls.id}`.trim().toUpperCase();
+        const memo = `${student.studentCode ?? student.id} ${cls.classCode ?? cls.id} ${student.name}`.trim().toUpperCase().slice(0, 50);
         const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
         const qrImage = await QRCode.toDataURL(qrData, { margin: 1, color: { dark: '#000000', light: '#ffffff' } });
         return { classId: cls.id, className: cls.name, classCode: cls.classCode, amount, memo, qrImage };
@@ -207,6 +207,26 @@ router.get('/public/student/:studentId', async (req, res) => {
   } catch (err) {
     console.error('[Public Pay]', err);
     res.status(500).json({ message: 'Lỗi' });
+  }
+});
+
+// Public QR image endpoint — returns PNG directly for use in Zalo image messages
+router.get('/qr-png/:studentId/:classId', async (req, res) => {
+  try {
+    const [student, classItem, bankCfg] = await Promise.all([
+      prisma.student.findUnique({ where: { id: req.params.studentId }, select: { id: true, studentCode: true, name: true } }),
+      prisma.class.findUnique({ where: { id: req.params.classId }, select: { id: true, classCode: true, tuitionPerSession: true, totalSessions: true } }),
+      prisma.systemConfig.findMany({ where: { key: { in: ['BANK_BIN', 'BANK_ACC'] } } }),
+    ]);
+    if (!student || !classItem) return res.status(404).end();
+    const bm = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
+    const amount = classItem.tuitionPerSession * classItem.totalSessions;
+    const memo = `${student.studentCode ?? student.id} ${classItem.classCode ?? classItem.id} ${student.name}`.trim().toUpperCase().slice(0, 50);
+    const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', amount, memo);
+    const pngBuffer = await (QRCode as any).toBuffer(qrData, { margin: 1, color: { dark: '#000000', light: '#ffffff' }, type: 'png' });
+    res.type('png').send(pngBuffer);
+  } catch (err) {
+    res.status(500).end();
   }
 });
 

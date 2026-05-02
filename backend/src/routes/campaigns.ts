@@ -94,7 +94,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     let totalDue = 0;
     for (const cs of student.classes) {
       const attended = student.attendances.filter((a: any) => a.classId === cs.class.id).length;
-      totalDue += cs.class.tuitionPerSession * (attended || cs.class.totalSessions);
+      totalDue += cs.class.tuitionPerSession * attended;
     }
 
     // ── Branch: ZNS via phone (if no UID, fallbackZNS ON, TUITION_REMINDER) ──
@@ -151,16 +151,18 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       for (const cs of student.classes) {
         const cls = cs.class;
         const attended = student.attendances.filter((a: any) => a.classId === cls.id).length;
-        const amount = cls.tuitionPerSession * (attended || cls.totalSessions);
+        const amount = cls.tuitionPerSession * attended;
         lines.push(
           `• Lớp ${cls.name}${cls.classCode ? ` (${cls.classCode})` : ''}\n` +
           `  Đã học: ${attended} buổi × ${cls.tuitionPerSession.toLocaleString('vi-VN')}đ\n` +
           `  Tạm tính: ${amount.toLocaleString('vi-VN')}đ`
         );
       }
+      const primaryClass = student.classes[0]?.class;
+      const memo = `${student.studentCode ?? ''} ${primaryClass?.classCode ?? ''} ${student.name}`.toUpperCase().trim().slice(0, 50);
       lines.push(`\n💰 Tổng: ${totalDue.toLocaleString('vi-VN')}đ`);
       lines.push(`📱 Quét QR nộp tiền: ${appBaseUrl}/pay/${student.id}`);
-      if (student.studentCode) lines.push(`📝 Nội dung CK: ${student.studentCode}`);
+      lines.push(`📝 Nội dung CK: ${memo}`);
       messageText = lines.join('\n');
     } else {
       messageText = filters.message || 'Thông báo từ Trung tâm Hicado';
@@ -175,6 +177,15 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       );
       const success = r.data?.error === 0;
       const zaloMsgId: string | null = success ? (r.data?.data?.msg_id ?? r.data?.data?.message_id ?? null) : null;
+
+      // Send QR image as a follow-up attachment
+      if (success && primaryClassId && type === 'TUITION_REMINDER') {
+        const qrUrl = `${appBaseUrl}/api/finance/qr-png/${student.id}/${primaryClassId}`;
+        zaloApiClient.post(`${ZALO_OA_API}/v3.0/oa/message/cs`, {
+          recipient: { user_id: student.zaloUserId },
+          message: { attachment: { type: 'image', payload: { url: qrUrl } } },
+        }, { headers }).catch(() => {});
+      }
 
       await (prisma as any).zaloMessageLog.create({
         data: {

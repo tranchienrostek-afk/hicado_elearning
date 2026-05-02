@@ -16,7 +16,9 @@ router.get('/', authenticateToken, async (req: any, res) => {
     if (!['ADMIN', 'MANAGER', 'TEACHER'].includes(req.user.role)) {
       return res.status(403).json({ message: 'Insufficient permissions' });
     }
-    const students = await prisma.student.findMany();
+    const students = await prisma.student.findMany({
+      include: { classes: { select: { classId: true } } },
+    });
     res.json(students);
   } catch (error) {
     res.status(500).json({ message: 'Lỗi khi lấy danh sách học sinh' });
