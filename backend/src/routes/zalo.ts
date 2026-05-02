@@ -3,6 +3,8 @@ import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 
+export const formatPhone = (p: string) => p.replace(/^0/, '84');
+
 const router = Router();
 
 // 1. Sync Zalo Templates
@@ -217,7 +219,7 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
       const phoneToUse = student.parentPhone || student.studentPhone;
       if (!phoneToUse) { failedCount++; continue; }
 
-      const formattedPhone = phoneToUse.replace(/^0/, '84');
+      const formattedPhone = formatPhone(phoneToUse);
       const trackingId = `TUITION_${student.id}_${Date.now()}`;
 
       try {

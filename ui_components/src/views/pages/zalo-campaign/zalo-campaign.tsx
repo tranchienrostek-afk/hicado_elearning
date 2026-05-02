@@ -8,7 +8,7 @@ type CampaignType = 'TUITION_REMINDER' | 'GENERAL';
 
 interface Campaign {
   id: string; name: string; type: CampaignType; status: string;
-  sentCount: number; readCount: number; failedCount: number; readRate: number;
+  sentCount: number; znsSentCount?: number; readCount: number; failedCount: number; readRate: number;
   createdAt: string; sentAt?: string;
 }
 interface CampaignLog {
@@ -46,8 +46,10 @@ export const ZaloCampaignPage = () => {
   const [wizardStatuses, setWizardStatuses] = useState<string[]>(['PENDING', 'DEBT']);
   const [wizardRequireZalo, setWizardRequireZalo] = useState(true);
   const [wizardMessage, setWizardMessage] = useState('');
+  const [wizardFallbackZNS, setWizardFallbackZNS] = useState(false);
+  const [wizardZnsTemplateId, setWizardZnsTemplateId] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [sendResult, setSendResult] = useState<{ sentCount: number; failedCount: number } | null>(null);
+  const [sendResult, setSendResult] = useState<{ sentCount: number; znsSentCount: number; failedCount: number } | null>(null);
 
   // ── Followers (existing) ───────────────────────────────────────────────────
   const [followers, setFollowers] = useState<Follower[]>([]);
@@ -109,16 +111,19 @@ export const ZaloCampaignPage = () => {
     fetchZaloTemplates(); fetchZaloConfig(); fetchCampaigns();
   }, [fetchClasses, fetchStudents, fetchTeachers, fetchZaloTemplates, fetchZaloConfig, fetchCampaigns]);
 
-  // ── Recipient preview (client-side filter) ────────────────────────────────
-  const recipientPreview = students.filter(s => {
-    if (wizardStatuses.length && !wizardStatuses.includes((s as any).tuitionStatus)) return false;
-    if (wizardRequireZalo && !(s as any).zaloUserId) return false;
+  // ── Recipient preview (3 groups) ─────────────────────────────────────────
+  const allFiltered = students.filter((s: any) => {
+    if (wizardStatuses.length && !wizardStatuses.includes(s.tuitionStatus)) return false;
     if (wizardClassIds.length) {
-      const sClassIds = ((s as any).classes || []).map((c: any) => c.classId ?? c.id);
-      if (!wizardClassIds.some(id => sClassIds.includes(id))) return false;
+      const sClassIds = (s.classes || []).map((c: any) => c.classId ?? c.id);
+      if (!wizardClassIds.some((id: string) => sClassIds.includes(id))) return false;
     }
     return true;
   });
+  const uidGroup = allFiltered.filter((s: any) => !!s.zaloUserId);
+  const phoneGroup = allFiltered.filter((s: any) => !s.zaloUserId && !!(s.parentPhone || s.studentPhone));
+  const noContactGroup = allFiltered.filter((s: any) => !s.zaloUserId && !(s.parentPhone || s.studentPhone));
+  const recipientPreview = wizardRequireZalo ? uidGroup : allFiltered;
 
   const buildSampleMessage = () => {
     const first = recipientPreview[0] as any;
@@ -149,12 +154,14 @@ export const ZaloCampaignPage = () => {
             tuitionStatuses: wizardStatuses,
             requireZalo: wizardRequireZalo,
             message: wizardType === 'GENERAL' ? wizardMessage : undefined,
+            fallbackZNS: wizardFallbackZNS,
+            znsTemplateId: wizardFallbackZNS ? wizardZnsTemplateId : undefined,
           },
         }),
       });
       const data = await r.json();
       if (r.ok) {
-        setSendResult({ sentCount: data.campaign.sentCount, failedCount: data.campaign.failedCount });
+        setSendResult({ sentCount: data.campaign.sentCount, znsSentCount: data.campaign.znsSentCount ?? 0, failedCount: data.campaign.failedCount });
         fetchCampaigns();
       } else { alert(data.message || 'Gửi thất bại'); }
     } catch { alert('Lỗi kết nối'); } finally { setIsSending(false); }
@@ -295,8 +302,11 @@ export const ZaloCampaignPage = () => {
                     {c.status}
                   </span>
                 </div>
-                <div className="flex gap-6 text-xs text-hicado-navy/40 font-bold">
+                <div className="flex flex-wrap gap-4 text-xs text-hicado-navy/40 font-bold">
                   <span>📤 Đã gửi: <strong className="text-hicado-navy">{c.sentCount}</strong></span>
+                  {(c.znsSentCount ?? 0) > 0 && (
+                    <span>📱 ZNS: <strong className="text-amber-600">{c.znsSentCount}</strong></span>
+                  )}
                   <span>👁 Đã đọc: <strong className="text-hicado-emerald">{c.readCount} ({c.readRate}%)</strong></span>
                   <span>❌ Lỗi: <strong className="text-rose-500">{c.failedCount}</strong></span>
                 </div>
@@ -386,10 +396,44 @@ export const ZaloCampaignPage = () => {
                   <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${wizardRequireZalo ? 'translate-x-6' : 'translate-x-0'}`} />
                 </div>
                 <div>
-                  <p className="font-black text-hicado-navy text-sm">Chỉ gửi học sinh có Zalo</p>
-                  <p className="text-xs text-hicado-navy/40">Bỏ tắt để thử gửi cho tất cả (có thể thất bại nếu chưa link)</p>
+                  <p className="font-black text-hicado-navy text-sm">Chỉ gửi học sinh có Zalo UID</p>
+                  <p className="text-xs text-hicado-navy/40">Tắt để mở rộng sang gửi ZNS qua SĐT bên dưới</p>
                 </div>
               </div>
+
+              {/* ZNS fallback toggle — only for TUITION_REMINDER + requireZalo OFF */}
+              {wizardType === 'TUITION_REMINDER' && (
+                <div className={`space-y-3 rounded-2xl border p-4 transition-all ${!wizardRequireZalo ? 'border-amber-300 bg-amber-50/50' : 'border-hicado-slate/30 opacity-40 pointer-events-none'}`}>
+                  <div onClick={() => !wizardRequireZalo && setWizardFallbackZNS(v => !v)} className="flex items-center gap-4 cursor-pointer">
+                    <div className={`w-12 h-6 rounded-full flex items-center px-0.5 transition-colors ${wizardFallbackZNS && !wizardRequireZalo ? 'bg-amber-500' : 'bg-gray-300'}`}>
+                      <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform ${wizardFallbackZNS && !wizardRequireZalo ? 'translate-x-6' : 'translate-x-0'}`} />
+                    </div>
+                    <div>
+                      <p className="font-black text-hicado-navy text-sm">Gửi ZNS qua SĐT cho học sinh chưa có Zalo UID</p>
+                      <p className="text-xs text-amber-600">⚠ ~220-330đ/tin thành công · OA phải xác thực · Template phải được duyệt</p>
+                    </div>
+                  </div>
+                  {wizardFallbackZNS && !wizardRequireZalo && (
+                    <div>
+                      <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest mb-1 block">Chọn ZNS Template</label>
+                      <select
+                        value={wizardZnsTemplateId}
+                        onChange={e => setWizardZnsTemplateId(e.target.value)}
+                        className="w-full bg-white border border-amber-200 rounded-xl px-4 py-2 text-sm font-bold text-hicado-navy outline-none focus:border-amber-400"
+                      >
+                        <option value="">-- Chọn template --</option>
+                        {templates.filter((t: any) => t.status === 'APPROVED').map((t: any) => (
+                          <option key={t.templateId} value={t.templateId}>{t.templateName} (ID: {t.templateId})</option>
+                        ))}
+                      </select>
+                      {templates.filter((t: any) => t.status === 'APPROVED').length === 0 && (
+                        <p className="text-xs text-rose-500 mt-1">Không có template đã duyệt. Đồng bộ template trong tab Cài đặt.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-3">
                 <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-2xl border border-hicado-slate font-black text-sm text-hicado-navy/40 hover:bg-hicado-slate transition-all">← Quay lại</button>
                 <button onClick={() => setStep(3)} className="flex-1 bg-hicado-navy text-white py-3 rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-[1.02] transition-all">Xem danh sách →</button>
@@ -401,9 +445,18 @@ export const ZaloCampaignPage = () => {
           {step === 3 && (
             <div className="space-y-4">
               <h3 className="text-xl font-serif font-black text-hicado-navy">Danh sách người nhận</h3>
-              <div className="flex gap-4 text-sm font-bold text-hicado-navy/60">
-                <span>Tổng: <strong className="text-hicado-navy">{recipientPreview.length}</strong></span>
-                <span>Có Zalo: <strong className="text-hicado-emerald">{recipientPreview.filter(s => (s as any).zaloUserId).length}</strong></span>
+              <div className="flex flex-wrap gap-3 text-xs font-black">
+                <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                  ✅ {uidGroup.length} học sinh — Zalo UID (CS)
+                </span>
+                <span className={`px-3 py-1.5 rounded-xl ${wizardFallbackZNS && !wizardRequireZalo ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
+                  📱 {phoneGroup.length} học sinh — Chỉ có SĐT {wizardFallbackZNS && !wizardRequireZalo ? '(ZNS)' : '(bỏ qua)'}
+                </span>
+                {noContactGroup.length > 0 && (
+                  <span className="px-3 py-1.5 bg-rose-100 text-rose-600 rounded-xl">
+                    ❌ {noContactGroup.length} học sinh — Không có liên hệ
+                  </span>
+                )}
               </div>
               <div className="border border-hicado-slate rounded-2xl overflow-hidden max-h-72 overflow-y-auto custom-scrollbar">
                 <table className="w-full text-sm text-left">
@@ -500,10 +553,24 @@ export const ZaloCampaignPage = () => {
                 ))}
               </div>
               {sendResult ? (
-                <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center">
-                  <p className="text-3xl mb-2">✅</p>
-                  <p className="font-black text-green-700">Gửi thành công {sendResult.sentCount} tin</p>
-                  {sendResult.failedCount > 0 && <p className="text-sm text-rose-500 font-bold mt-1">Thất bại: {sendResult.failedCount}</p>}
+                <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center space-y-2">
+                  <p className="text-3xl mb-1">✅</p>
+                  <p className="font-black text-green-700 text-lg">Chiến dịch đã gửi!</p>
+                  <div className="flex justify-center gap-3 flex-wrap text-xs font-black mt-2">
+                    <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                      Zalo UID: {sendResult.sentCount - (sendResult.znsSentCount ?? 0)}
+                    </span>
+                    {(sendResult.znsSentCount ?? 0) > 0 && (
+                      <span className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-xl">
+                        📱 ZNS Phone: {sendResult.znsSentCount}
+                      </span>
+                    )}
+                    {sendResult.failedCount > 0 && (
+                      <span className="px-3 py-1.5 bg-rose-100 text-rose-600 rounded-xl">
+                        Thất bại: {sendResult.failedCount}
+                      </span>
+                    )}
+                  </div>
                   <div className="flex gap-3 mt-4">
                     <button onClick={resetWizard} className="flex-1 py-3 rounded-2xl border border-hicado-slate font-black text-sm text-hicado-navy/60 hover:bg-hicado-slate transition-all">Tạo chiến dịch mới</button>
                     <button onClick={() => setActiveTab('campaigns')} className="flex-1 py-3 bg-hicado-navy text-white rounded-2xl font-black text-sm uppercase tracking-widest">Xem danh sách</button>
@@ -513,7 +580,7 @@ export const ZaloCampaignPage = () => {
                 <div className="space-y-3">
                   <button onClick={handleSendCampaign} disabled={isSending}
                     className="w-full bg-hicado-navy text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest disabled:bg-hicado-slate/50 hover:scale-[1.02] transition-all shadow-lg">
-                    {isSending ? '⏳ Đang gửi...' : `🚀 Gửi ${recipientPreview.filter(s => (s as any).zaloUserId).length} tin Zalo`}
+                    {isSending ? '⏳ Đang gửi...' : `🚀 Gửi cho ${uidGroup.length + (wizardFallbackZNS && !wizardRequireZalo ? phoneGroup.length : 0)} người nhận`}
                   </button>
                   <button onClick={() => setStep(4)} disabled={isSending} className="w-full py-3 rounded-2xl border border-hicado-slate font-black text-sm text-hicado-navy/40 hover:bg-hicado-slate transition-all">← Quay lại</button>
                 </div>

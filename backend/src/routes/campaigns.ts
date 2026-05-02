@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
+import { formatPhone } from './zalo';
 
 const router = Router();
 
@@ -35,7 +36,14 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   const { name, type, filters = {} } = req.body as {
     name: string;
     type: 'TUITION_REMINDER' | 'GENERAL';
-    filters: { classIds?: string[]; tuitionStatuses?: string[]; requireZalo?: boolean; message?: string };
+    filters: {
+      classIds?: string[];
+      tuitionStatuses?: string[];
+      requireZalo?: boolean;
+      message?: string;
+      fallbackZNS?: boolean;
+      znsTemplateId?: string;
+    };
   };
   if (!name || !type) return res.status(400).json({ message: 'Thiếu tên hoặc loại chiến dịch' });
 
@@ -67,27 +75,83 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   });
 
   let sentCount = 0;
+  let znsSentCount = 0;
   let failedCount = 0;
   const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
 
+  // due_date = last day of current month in DD/MM/YYYY
+  const now = new Date();
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const dueDate = `${String(lastDay.getDate()).padStart(2, '0')}/${String(lastDay.getMonth() + 1).padStart(2, '0')}/${lastDay.getFullYear()}`;
+
   for (const student of students) {
-    if (!student.zaloUserId) { failedCount++; continue; }
     if (!student.classes.length) { failedCount++; continue; }
 
-    let messageText = '';
     const primaryClassId = student.classes[0]?.class?.id ?? null;
+    const phone = student.parentPhone || student.studentPhone || '';
+
+    // ── Compute tuition amount (used by both CS message and ZNS template_data) ──
+    let totalDue = 0;
+    for (const cs of student.classes) {
+      const attended = student.attendances.filter((a: any) => a.classId === cs.class.id).length;
+      totalDue += cs.class.tuitionPerSession * (attended || cs.class.totalSessions);
+    }
+
+    // ── Branch: ZNS via phone (if no UID, fallbackZNS ON, TUITION_REMINDER) ──
+    if (!student.zaloUserId && filters.fallbackZNS && type === 'TUITION_REMINDER' && phone && filters.znsTemplateId) {
+      const trackingId = `CAMP_${campaign.id}_${student.id}_${Date.now()}`;
+      try {
+        const r = await zaloApiClient.post<any>(
+          'https://business.openapi.zalo.me/message/template',
+          {
+            phone: formatPhone(phone),
+            template_id: filters.znsTemplateId,
+            template_data: {
+              student_name: student.name,
+              amount: totalDue.toLocaleString('vi-VN') + 'đ',
+              due_date: dueDate,
+            },
+            tracking_id: trackingId,
+          },
+          { headers }
+        );
+        const success = r.data?.error === 0;
+        await (prisma as any).zaloMessageLog.create({
+          data: {
+            phone: formatPhone(phone),
+            templateId: `ZNS_${filters.znsTemplateId}`,
+            trackingId,
+            status: success ? 'SENT' : 'FAILED',
+            errorReason: success ? null : (r.data?.message ?? 'Unknown'),
+            studentId: student.id,
+            campaignId: campaign.id,
+            classId: primaryClassId,
+          },
+        });
+        if (success) { sentCount++; znsSentCount++; } else failedCount++;
+      } catch (err: any) {
+        failedCount++;
+        await (prisma as any).zaloMessageLog.create({
+          data: { phone: formatPhone(phone), templateId: `ZNS_${filters.znsTemplateId}`, trackingId, status: 'FAILED', errorReason: err.message, studentId: student.id, campaignId: campaign.id, classId: primaryClassId },
+        });
+      }
+      continue;
+    }
+
+    // ── Branch: OA CS message (requires zaloUserId) ──
+    if (!student.zaloUserId) { failedCount++; continue; }
+
+    let messageText = '';
 
     if (type === 'TUITION_REMINDER') {
       const lines: string[] = [
         `Kính gửi phụ huynh em ${student.name}!`,
         `Trung tâm Hicado xin thông báo học phí:\n`,
       ];
-      let totalDue = 0;
       for (const cs of student.classes) {
         const cls = cs.class;
         const attended = student.attendances.filter((a: any) => a.classId === cls.id).length;
         const amount = cls.tuitionPerSession * (attended || cls.totalSessions);
-        totalDue += amount;
         lines.push(
           `• Lớp ${cls.name}${cls.classCode ? ` (${cls.classCode})` : ''}\n` +
           `  Đã học: ${attended} buổi × ${cls.tuitionPerSession.toLocaleString('vi-VN')}đ\n` +
@@ -114,7 +178,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 
       await (prisma as any).zaloMessageLog.create({
         data: {
-          phone: student.parentPhone || student.studentPhone || '',
+          phone,
           zaloUserId: student.zaloUserId,
           templateId: `CAMPAIGN_${type}`,
           trackingId,
@@ -131,7 +195,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       failedCount++;
       await (prisma as any).zaloMessageLog.create({
         data: {
-          phone: student.parentPhone || student.studentPhone || '',
+          phone,
           zaloUserId: student.zaloUserId,
           templateId: `CAMPAIGN_${type}`,
           trackingId,
@@ -147,11 +211,11 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 
   const finalCampaign = await (prisma as any).campaign.update({
     where: { id: campaign.id },
-    data: { status: 'SENT', sentCount, failedCount, sentAt: new Date() },
+    data: { status: 'SENT', sentCount, znsSentCount, failedCount, sentAt: new Date() },
   });
 
   res.json({
-    message: `Chiến dịch "${name}": gửi thành công ${sentCount}, thất bại ${failedCount}`,
+    message: `Chiến dịch "${name}": gửi thành công ${sentCount} (ZNS: ${znsSentCount}), thất bại ${failedCount}`,
     campaign: { ...finalCampaign, readRate: 0 },
   });
 });

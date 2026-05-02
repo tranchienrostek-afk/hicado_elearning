@@ -196,11 +196,12 @@ model Campaign {
   type        String   // "TUITION_REMINDER" | "GENERAL"
   status      String   @default("DRAFT")
   filtersJson String   @default("{}")
-  sentCount   Int      @default(0)
-  readCount   Int      @default(0)
-  failedCount Int      @default(0)
-  createdAt   DateTime @default(now())
-  sentAt      DateTime?
+  sentCount    Int      @default(0)
+  znsSentCount Int      @default(0)
+  readCount    Int      @default(0)
+  failedCount  Int      @default(0)
+  createdAt    DateTime @default(now())
+  sentAt       DateTime?
   logs        ZaloMessageLog[]
 }
 
