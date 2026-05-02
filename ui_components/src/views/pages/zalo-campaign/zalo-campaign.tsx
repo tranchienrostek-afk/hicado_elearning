@@ -12,7 +12,7 @@ interface Campaign {
   createdAt: string; sentAt?: string;
 }
 interface CampaignLog {
-  id: string; status: string; sentAt: string; readAt?: string;
+  id: string; status: string; sentAt: string; readAt?: string; errorReason?: string | null;
   student: { name: string; studentCode?: string } | null;
 }
 interface CampaignDetail extends Campaign { logs: CampaignLog[] }
