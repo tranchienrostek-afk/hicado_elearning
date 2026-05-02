@@ -1,9 +1,18 @@
-import { useState } from 'react';
+import { ChangeEvent, useRef, useState } from 'react';
 import { useCenterStore, useAuthStore } from '@/store';
 import { z } from 'zod';
 import { toast } from 'react-hot-toast';
 import { exportToCSV } from '@/utils/export';
 import FocusLock from 'react-focus-lock';
+import {
+  exportCenterWorkbook,
+  normalizeCenterImportRows,
+  readCenterWorkbookRows,
+  type ClassImportRow,
+} from '@/utils/center-spreadsheet';
+import { downloadXlsxWorkbook } from '@/utils/excel-workbook';
+import { buildImportErrorRows, planImport, type ImportPlan } from '@/utils/import-planner';
+import { ImportPreviewModal } from '@/views/components/import-preview-modal';
 
 const classSchema = z.object({
   name: z.string().min(3, 'Tên lớp quá ngắn'),
@@ -30,6 +39,9 @@ export const Classes = () => {
   const [viewingHistoryId, setViewingHistoryId] = useState<string | null>(null);
   const [viewingClassStudentsId, setViewingClassStudentsId] = useState<string | null>(null);
   const [viewingStoryId, setViewingStoryId] = useState<string | null>(null);
+  const [importPlan, setImportPlan] = useState<ImportPlan<ClassImportRow> | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -67,7 +79,7 @@ export const Classes = () => {
     resetForm();
   };
 
-  const handleExport = () => {
+  const handleExportLegacy = () => {
     const exportData = visibleClasses.map(cls => ({
       'Tên Lớp': cls.name,
       'Giáo Viên': teachers.find(t => t.id === cls.teacherId)?.name || 'N/A',
@@ -78,6 +90,63 @@ export const Classes = () => {
     }));
     exportToCSV(exportData, 'Danh_Sach_Lop_Hoc');
     toast.success('Đã xuất file báo cáo');
+  };
+  void handleExportLegacy;
+
+  const handleExport = () => {
+    exportCenterWorkbook('CLASSES', visibleClasses, { teachers, rooms, students });
+    toast.success(visibleClasses.length === 0 ? 'Đã xuất template lớp học' : 'Đã xuất danh sách lớp học');
+  };
+
+  const handleImportExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const rows = await readCenterWorkbookRows(file);
+      const result = normalizeCenterImportRows('CLASSES', rows, { teachers, rooms, students });
+      if (result.validRows.length === 0) {
+        toast.error(result.errors[0] || 'File Excel không có dữ liệu lớp hợp lệ');
+        return;
+      }
+      setImportPlan(planImport('CLASSES', result.validRows, { teachers, rooms, students, classes }, 'ADD_ONLY'));
+    } catch (error) {
+      console.error('Class import failed:', error);
+      toast.error('Không thể đọc file Excel');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPlan) return;
+    setIsImporting(true);
+    let imported = 0;
+    try {
+      for (const row of importPlan.commitRows) {
+        const record = row.record;
+        if (row.action === 'UPDATE' && record.id) await updateClass(record.id, record);
+        else await addClass(record);
+        imported += 1;
+      }
+      toast.success(`Đã nhập ${imported} lớp học từ Excel`);
+      setImportPlan(null);
+    } catch (error) {
+      console.error('Class commit failed:', error);
+      toast.error('Có dòng lớp học bị lỗi khi ghi dữ liệu');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleExportImportErrors = () => {
+    if (!importPlan) return;
+    downloadXlsxWorkbook({
+      fileName: `Bao_Cao_Loi_CLASSES_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheetName: 'Loi import',
+      rows: buildImportErrorRows('CLASSES', importPlan),
+    });
   };
 
   const handleEdit = (cls: any) => {
@@ -154,6 +223,10 @@ export const Classes = () => {
         </div>
         {!isTeacher && (
           <div className="flex gap-3 relative z-10">
+            <input ref={fileInputRef} type="file" accept=".xlsx" onChange={handleImportExcel} className="hidden" />
+            <button onClick={() => fileInputRef.current?.click()} className="bg-hicado-emerald/10 text-hicado-emerald px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-emerald/20 transition-all border border-hicado-emerald/20">
+              Nhập Excel
+            </button>
             <button onClick={handleExport} className="bg-hicado-slate/20 text-hicado-navy px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-slate transition-all border border-hicado-slate/50">
               Xuất Báo Cáo
             </button>
@@ -427,6 +500,16 @@ export const Classes = () => {
           </div>
         </div>
       )}
+
+      <ImportPreviewModal
+        isOpen={!!importPlan}
+        title="Nhập danh sách lớp học"
+        plan={importPlan}
+        isCommitting={isImporting}
+        onConfirm={handleConfirmImport}
+        onCancel={() => setImportPlan(null)}
+        onExportErrors={handleExportImportErrors}
+      />
 
       {viewingClassStudentsId && (
         <ClassStudentsModal

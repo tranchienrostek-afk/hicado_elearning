@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { ChangeEvent, useEffect, useRef, useState } from 'react';
 import { useCenterStore } from '@/store/modules/center/hooks';
 import { useAuthStore } from '@/store';
 import { toast } from 'react-hot-toast';
@@ -6,6 +6,15 @@ import { Room } from '@/store/modules/center/types';
 import { z } from 'zod';
 import FocusLock from 'react-focus-lock';
 import clsx from 'clsx';
+import {
+  exportCenterWorkbook,
+  normalizeCenterImportRows,
+  readCenterWorkbookRows,
+  type RoomImportRow,
+} from '@/utils/center-spreadsheet';
+import { downloadXlsxWorkbook } from '@/utils/excel-workbook';
+import { buildImportErrorRows, planImport, type ImportPlan } from '@/utils/import-planner';
+import { ImportPreviewModal } from '@/views/components/import-preview-modal';
 
 const roomSchema = z.object({
   name: z.string().min(3, 'Tên phòng quá ngắn'),
@@ -23,6 +32,9 @@ export const Rooms = () => {
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [selectedClassId, setSelectedClassId] = useState<string | null>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [importPlan, setImportPlan] = useState<ImportPlan<RoomImportRow> | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [formData, setFormData] = useState<Partial<Room>>({
     name: '',
@@ -143,6 +155,62 @@ export const Rooms = () => {
     setFormData({ name: '', center: 'Hicado', capacity: 30, notes: '' });
   };
 
+  const handleExportExcel = () => {
+    exportCenterWorkbook('ROOMS', scopedRooms, { classes });
+    toast.success(scopedRooms.length === 0 ? 'Đã xuất template phòng học' : 'Đã xuất danh sách phòng học');
+  };
+
+  const handleImportExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setIsImporting(true);
+    try {
+      const rows = await readCenterWorkbookRows(file);
+      const result = normalizeCenterImportRows('ROOMS', rows, { classes });
+      if (result.validRows.length === 0) {
+        toast.error(result.errors[0] || 'File Excel không có dữ liệu phòng hợp lệ');
+        return;
+      }
+      setImportPlan(planImport('ROOMS', result.validRows, { rooms, classes }, 'ADD_ONLY'));
+    } catch (error) {
+      console.error('Room import failed:', error);
+      toast.error('Không thể đọc file Excel');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPlan) return;
+    setIsImporting(true);
+    let imported = 0;
+    try {
+      for (const row of importPlan.commitRows) {
+        const record = row.record;
+        if (row.action === 'UPDATE' && record.id) await updateRoom(record.id, record);
+        else await addRoom(record);
+        imported += 1;
+      }
+      toast.success(`Đã nhập ${imported} phòng học từ Excel`);
+      setImportPlan(null);
+    } catch (error) {
+      console.error('Room commit failed:', error);
+      toast.error('Có dòng phòng học bị lỗi khi ghi dữ liệu');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleExportImportErrors = () => {
+    if (!importPlan) return;
+    downloadXlsxWorkbook({
+      fileName: `Bao_Cao_Loi_ROOMS_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheetName: 'Loi import',
+      rows: buildImportErrorRows('ROOMS', importPlan),
+    });
+  };
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6 bg-white p-8 rounded-[2.5rem] border border-hicado-slate shadow-premium relative overflow-hidden">
@@ -167,6 +235,18 @@ export const Rooms = () => {
           </button>
         )}
       </div>
+
+      {!isTeacher && (
+        <div className="flex flex-wrap gap-3">
+          <input ref={fileInputRef} type="file" accept=".xlsx" onChange={handleImportExcel} className="hidden" />
+          <button onClick={() => fileInputRef.current?.click()} className="bg-hicado-emerald/10 text-hicado-emerald px-6 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest border border-hicado-emerald/20">
+            Nhập Excel
+          </button>
+          <button onClick={handleExportExcel} className="bg-hicado-slate/20 text-hicado-navy px-6 py-3 rounded-2xl font-black uppercase text-[10px] tracking-widest border border-hicado-slate">
+            Xuất Excel
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {scopedRooms.map(room => (
@@ -366,6 +446,16 @@ export const Rooms = () => {
           </div>
         </div>
       </div>
+
+      <ImportPreviewModal
+        isOpen={!!importPlan}
+        title="Nhập danh sách phòng học"
+        plan={importPlan}
+        isCommitting={isImporting}
+        onConfirm={handleConfirmImport}
+        onCancel={() => setImportPlan(null)}
+        onExportErrors={handleExportImportErrors}
+      />
 
       {isModalOpen && (
         <div className="fixed inset-0 bg-hicado-navy/40 backdrop-blur-sm z-[150] flex items-center justify-center p-4">

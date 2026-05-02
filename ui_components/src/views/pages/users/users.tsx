@@ -7,10 +7,15 @@ import FocusLock from 'react-focus-lock';
 import { z } from 'zod';
 import clsx from 'clsx';
 import {
-  exportProfileWorkbook,
-  normalizeProfileImportRows,
-  readSpreadsheetRows,
-} from '@/utils/user-spreadsheet';
+  exportCenterWorkbook,
+  normalizeCenterImportRows,
+  readCenterWorkbookRows,
+  type StudentImportRow,
+  type TeacherImportRow,
+} from '@/utils/center-spreadsheet';
+import { downloadXlsxWorkbook } from '@/utils/excel-workbook';
+import { buildImportErrorRows, planImport, type ImportPlan } from '@/utils/import-planner';
+import { ImportPreviewModal } from '@/views/components/import-preview-modal';
 
 const studentSchema = z.object({
   name: z.string().min(2, 'Tên quá ngắn'),
@@ -58,6 +63,8 @@ export const Users = () => {
   const [sheetUrl, setSheetUrl] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importPlan, setImportPlan] = useState<ImportPlan<StudentImportRow | TeacherImportRow> | null>(null);
+  const [importKind, setImportKind] = useState<'STUDENTS' | 'TEACHERS'>('STUDENTS');
   const [search, setSearch] = useState('');
   const [yearFilter, setYearFilter] = useState('');
   const [monthFilter, setMonthFilter] = useState(() => {
@@ -338,11 +345,11 @@ export const Users = () => {
 
   const handleExportExcel = () => {
     const rows = activeTab === 'STUDENTS' ? filteredStudents : filteredTeachers;
-    exportProfileWorkbook(activeTab, rows);
+    exportCenterWorkbook(activeTab, rows);
     toast.success(rows.length === 0 ? 'Đã xuất file template Excel' : 'Đã xuất danh sách Excel');
   };
 
-  const handleImportExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleImportExcelLegacy = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
     if (!file) return;
@@ -351,8 +358,8 @@ export const Users = () => {
     try {
       let importedCount = 0;
       if (activeTab === 'STUDENTS') {
-        const rows = await readSpreadsheetRows(file);
-        const result = normalizeProfileImportRows('STUDENTS', rows);
+        const rows = await readCenterWorkbookRows(file);
+        const result = normalizeCenterImportRows('STUDENTS', rows);
         if (result.validRows.length === 0) {
           toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
           return;
@@ -367,8 +374,8 @@ export const Users = () => {
           toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
         }
       } else if (activeTab === 'TEACHERS') {
-        const rows = await readSpreadsheetRows(file);
-        const result = normalizeProfileImportRows('TEACHERS', rows);
+        const rows = await readCenterWorkbookRows(file);
+        const result = normalizeCenterImportRows('TEACHERS', rows);
         if (result.validRows.length === 0) {
           toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
           return;
@@ -390,6 +397,77 @@ export const Users = () => {
     } finally {
       setIsSyncing(false);
     }
+  };
+  void handleImportExcelLegacy;
+
+  const handleImportExcel = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setIsSyncing(true);
+    try {
+      const rows = await readCenterWorkbookRows(file);
+      if (activeTab === 'STUDENTS') {
+        const result = normalizeCenterImportRows('STUDENTS', rows);
+        if (result.validRows.length === 0) {
+          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          return;
+        }
+        setImportKind('STUDENTS');
+        setImportPlan(planImport('STUDENTS', result.validRows, { students }, 'ADD_ONLY') as ImportPlan<StudentImportRow | TeacherImportRow>);
+      } else {
+        const result = normalizeCenterImportRows('TEACHERS', rows);
+        if (result.validRows.length === 0) {
+          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          return;
+        }
+        setImportKind('TEACHERS');
+        setImportPlan(planImport('TEACHERS', result.validRows, { teachers }, 'ADD_ONLY') as ImportPlan<StudentImportRow | TeacherImportRow>);
+      }
+    } catch (error) {
+      console.error('Excel import failed:', error);
+      toast.error('Không thể đọc file Excel');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleConfirmImport = async () => {
+    if (!importPlan) return;
+    setIsSyncing(true);
+    let importedCount = 0;
+    try {
+      for (const row of importPlan.commitRows) {
+        if (importKind === 'STUDENTS') {
+          const record = row.record as StudentImportRow;
+          if (row.action === 'UPDATE' && record.id) await updateStudent(record.id, record);
+          else await addStudent(record);
+        } else {
+          const record = row.record as TeacherImportRow;
+          if (row.action === 'UPDATE' && record.id) await updateTeacher(record.id, record);
+          else await addTeacher(record);
+        }
+        importedCount += 1;
+      }
+      toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
+      setImportPlan(null);
+      setIsImportOpen(false);
+    } catch (error) {
+      console.error('Excel commit failed:', error);
+      toast.error('Có dòng import bị lỗi khi ghi dữ liệu');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleExportImportErrors = () => {
+    if (!importPlan) return;
+    downloadXlsxWorkbook({
+      fileName: `Bao_Cao_Loi_${importKind}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+      sheetName: 'Loi import',
+      rows: buildImportErrorRows(importKind, importPlan),
+    });
   };
 
   const availableTeacherTargets = teachers.filter(t => !accounts.some(a => a.teacherId === t.id));
@@ -712,7 +790,7 @@ export const Users = () => {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".xls,.csv"
+                accept=".xlsx"
                 onChange={handleImportExcel}
                 className="hidden"
               />
@@ -1069,6 +1147,16 @@ export const Users = () => {
         message={`Bạn có chắc chắn muốn xóa vĩnh viễn hồ sơ của "${confirmDelete?.title}"? Hành động này không thể hoàn tác.`}
         onConfirm={executeDelete}
         onCancel={() => setConfirmDelete(null)}
+      />
+
+      <ImportPreviewModal
+        isOpen={!!importPlan}
+        title={importKind === 'STUDENTS' ? 'Nhập danh sách học sinh' : 'Nhập danh sách giáo viên'}
+        plan={importPlan}
+        isCommitting={isSyncing}
+        onConfirm={handleConfirmImport}
+        onCancel={() => setImportPlan(null)}
+        onExportErrors={handleExportImportErrors}
       />
 
       {viewingStoryId && (

@@ -11,6 +11,7 @@ describe('user spreadsheet helpers', () => {
 
     expect(rows).toEqual([
       {
+        id: '',
         name: 'Nguyen Van A',
         birthYear: 2012,
         address: 'Ha Noi',
@@ -38,6 +39,7 @@ describe('user spreadsheet helpers', () => {
 
     expect(result.validRows).toEqual([
       {
+        id: undefined,
         name: 'Tran Thi B',
         birthYear: 2011,
         address: 'HCM',
@@ -66,6 +68,7 @@ describe('user spreadsheet helpers', () => {
 
     expect(result.validRows).toEqual([
       {
+        id: undefined,
         name: 'Le Van C',
         phone: '0987654321',
         specialization: 'Math',
@@ -88,7 +91,9 @@ describe('user spreadsheet helpers', () => {
 
     expect(result.validRows).toHaveLength(1);
     expect(result.errors).toEqual([
-      'Dong 3: thieu phone, bankAccount, bankName',
+      'Dong 3: thieu phone',
+      'Dong 3: thieu bankAccount',
+      'Dong 3: thieu bankName',
     ]);
   });
 });
