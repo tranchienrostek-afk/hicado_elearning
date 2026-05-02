@@ -152,7 +152,8 @@ router.post('/sepay', async (req, res) => {
         transferDate: transactionDate ? new Date(transactionDate) : new Date(),
         referenceCode,
         status: 'SUCCESS',
-        studentId: student.id
+        studentId: student.id,
+        classId: targetClass?.id ?? null,
       } as any
     });
 

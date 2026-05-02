@@ -210,4 +210,108 @@ router.get('/public/student/:studentId', async (req, res) => {
   }
 });
 
+// Payment Tracking — per-student cross-reference of transactions vs expected + last Zalo notification
+router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { classId, dateFrom, dateTo, status } = req.query as Record<string, string | undefined>;
+
+    const txWhere: any = { status: 'SUCCESS' };
+    if (dateFrom || dateTo) {
+      txWhere.date = {};
+      if (dateFrom) txWhere.date.gte = new Date(dateFrom);
+      if (dateTo) { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); txWhere.date.lte = d; }
+    }
+
+    // Load students (optionally filtered by class)
+    const studentWhere: any = {};
+    if (classId) studentWhere.classes = { some: { classId } };
+
+    const [students, allTransactions] = await Promise.all([
+      prisma.student.findMany({
+        where: studentWhere,
+        include: {
+          classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.transaction.findMany({
+        where: txWhere,
+        orderBy: { date: 'desc' },
+      }),
+    ]);
+
+    // Last Zalo notification per student
+    const zaloLogs = await (prisma as any).zaloMessageLog.findMany({
+      where: {
+        studentId: { in: students.map((s: any) => s.id) },
+        status: { in: ['SENT', 'READ'] },
+      },
+      include: { campaign: { select: { name: true } } },
+      orderBy: { sentAt: 'desc' },
+    });
+    const lastZaloByStudent: Record<string, any> = {};
+    for (const log of zaloLogs) {
+      if (!lastZaloByStudent[log.studentId]) lastZaloByStudent[log.studentId] = log;
+    }
+
+    // Build per-student result
+    const result = students.map((s: any) => {
+      const txList = allTransactions.filter((t: any) => t.studentId === s.id);
+      const totalPaid = txList.reduce((sum: number, t: any) => sum + t.amount, 0);
+      const totalExpected = s.classes.reduce((sum: number, cs: any) =>
+        sum + cs.class.tuitionPerSession * cs.class.totalSessions, 0);
+      const totalBalance = Math.max(0, totalExpected - totalPaid);
+
+      let paymentStatus: string;
+      if (totalExpected === 0) paymentStatus = 'NOT_PAID';
+      else if (totalPaid >= totalExpected) paymentStatus = 'PAID_FULL';
+      else if (totalPaid > 0) paymentStatus = 'PAID_PARTIAL';
+      else paymentStatus = 'NOT_PAID';
+
+      const lastZalo = lastZaloByStudent[s.id] ?? null;
+
+      return {
+        id: s.id, name: s.name, studentCode: s.studentCode,
+        tuitionStatus: s.tuitionStatus,
+        classes: s.classes.map((cs: any) => ({
+          classId: cs.class.id, className: cs.class.name, classCode: cs.class.classCode,
+          expected: cs.class.tuitionPerSession * cs.class.totalSessions,
+        })),
+        totalExpected, totalPaid, totalBalance,
+        paymentStatus,
+        transactions: txList.map((t: any) => ({
+          id: t.id, amount: t.amount,
+          date: t.date, content: t.content,
+          classId: t.classId,
+        })),
+        lastPaymentDate: txList[0]?.date ?? null,
+        lastZaloNotification: lastZalo ? {
+          sentAt: lastZalo.sentAt,
+          status: lastZalo.status,
+          campaignName: lastZalo.campaign?.name ?? null,
+        } : null,
+      };
+    });
+
+    // Apply status filter
+    const filtered = status && status !== 'ALL'
+      ? result.filter((r: any) => r.paymentStatus === status)
+      : result;
+
+    const summary = {
+      total: filtered.length,
+      paidFull: filtered.filter((r: any) => r.paymentStatus === 'PAID_FULL').length,
+      paidPartial: filtered.filter((r: any) => r.paymentStatus === 'PAID_PARTIAL').length,
+      notPaid: filtered.filter((r: any) => r.paymentStatus === 'NOT_PAID').length,
+      totalExpected: filtered.reduce((s: number, r: any) => s + r.totalExpected, 0),
+      totalCollected: filtered.reduce((s: number, r: any) => s + r.totalPaid, 0),
+    };
+
+    res.json({ students: filtered, summary });
+  } catch (err) {
+    console.error('[Payment Tracking]', err);
+    res.status(500).json({ message: 'Lỗi khi lấy dữ liệu theo dõi thu tiền' });
+  }
+});
+
 export default router;

@@ -175,6 +175,8 @@ model Transaction {
   transferDate   DateTime?
   referenceCode  String?
 
+  classId   String?
+
   studentId String
   student   Student @relation(fields: [studentId], references: [id])
 }

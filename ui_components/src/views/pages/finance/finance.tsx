@@ -24,6 +24,20 @@ interface FinanceStats {
   }[];
 }
 
+interface TrackingStudent {
+  id: string; name: string; studentCode: string | null; tuitionStatus: string;
+  classes: { classId: string; className: string; classCode: string | null; expected: number }[];
+  totalExpected: number; totalPaid: number; totalBalance: number;
+  paymentStatus: 'PAID_FULL' | 'PAID_PARTIAL' | 'NOT_PAID';
+  transactions: { id: string; amount: number; date: string; content: string | null; classId: string | null }[];
+  lastPaymentDate: string | null;
+  lastZaloNotification: { sentAt: string; status: string; campaignName: string | null } | null;
+}
+interface TrackingSummary {
+  total: number; paidFull: number; paidPartial: number; notPaid: number;
+  totalExpected: number; totalCollected: number;
+}
+
 interface FinanceRow {
   classId: string;
   className: string;
@@ -67,6 +81,32 @@ export const FinancialPage = () => {
   const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
 
+  // ── Payment Tracking state ────────────────────────────────────────────────
+  const [trackingData, setTrackingData] = useState<{ students: TrackingStudent[]; summary: TrackingSummary } | null>(null);
+  const [trackingLoading, setTrackingLoading] = useState(false);
+  const [trackClassId, setTrackClassId] = useState('');
+  const [trackDateFrom, setTrackDateFrom] = useState('');
+  const [trackDateTo, setTrackDateTo] = useState('');
+  const [trackStatus, setTrackStatus] = useState('ALL');
+  const [trackSearch, setTrackSearch] = useState('');
+  const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
+
+  const fetchTracking = () => {
+    const token = auth?.token;
+    if (!token) return;
+    setTrackingLoading(true);
+    const params = new URLSearchParams();
+    if (trackClassId) params.set('classId', trackClassId);
+    if (trackDateFrom) params.set('dateFrom', trackDateFrom);
+    if (trackDateTo) params.set('dateTo', trackDateTo);
+    if (trackStatus !== 'ALL') params.set('status', trackStatus);
+    fetch(`/api/finance/payment-tracking?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setTrackingData(data); })
+      .catch(() => toast.error('Lỗi tải dữ liệu theo dõi'))
+      .finally(() => setTrackingLoading(false));
+  };
+
   useEffect(() => {
     if (isTeacher) return;
     const token = auth?.token;
@@ -76,6 +116,8 @@ export const FinancialPage = () => {
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setFinanceStats(data); })
       .finally(() => setStatsLoading(false));
+    fetchTracking();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.token, isTeacher]);
 
   const scopedClasses = useMemo(
@@ -649,6 +691,223 @@ export const FinancialPage = () => {
             )}
           </div>
         </>
+      )}
+
+      {/* ══ PAYMENT TRACKING ══════════════════════════════════════════════ */}
+      {!isTeacher && (
+        <div className="space-y-5">
+
+          {/* Header + filters */}
+          <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate space-y-5">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Payment Tracking</p>
+                <h3 className="text-xl font-black text-hicado-navy">Theo dõi thu học phí</h3>
+              </div>
+              <button
+                onClick={fetchTracking}
+                disabled={trackingLoading}
+                className="px-5 py-2.5 bg-hicado-navy text-hicado-emerald rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-emerald hover:text-hicado-navy transition-all disabled:opacity-40"
+              >
+                {trackingLoading ? 'Đang tải...' : '↻ Làm mới'}
+              </button>
+            </div>
+
+            {/* Filter row */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="space-y-1 col-span-2 md:col-span-1">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Tìm học sinh</label>
+                <input
+                  type="text" value={trackSearch} onChange={e => setTrackSearch(e.target.value)}
+                  placeholder="Tên hoặc mã HS..."
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none focus:border-hicado-emerald/50"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Lớp học</label>
+                <select value={trackClassId} onChange={e => setTrackClassId(e.target.value)}
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none focus:border-hicado-emerald/50">
+                  <option value="">Tất cả lớp</option>
+                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Trạng thái</label>
+                <select value={trackStatus} onChange={e => setTrackStatus(e.target.value)}
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none focus:border-hicado-emerald/50">
+                  <option value="ALL">Tất cả</option>
+                  <option value="PAID_FULL">✅ Đã chuyển đủ</option>
+                  <option value="PAID_PARTIAL">⚠️ Chuyển thiếu</option>
+                  <option value="NOT_PAID">❌ Chưa chuyển</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Từ ngày</label>
+                <input type="date" value={trackDateFrom} onChange={e => setTrackDateFrom(e.target.value)}
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none focus:border-hicado-emerald/50" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="space-y-1 md:col-start-4">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Đến ngày</label>
+                <input type="date" value={trackDateTo} onChange={e => setTrackDateTo(e.target.value)}
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none focus:border-hicado-emerald/50" />
+              </div>
+            </div>
+            <button onClick={fetchTracking} disabled={trackingLoading}
+              className="w-full py-3 bg-hicado-navy/5 border border-hicado-navy/10 rounded-2xl text-sm font-black text-hicado-navy/50 hover:bg-hicado-navy hover:text-white transition-all">
+              Áp dụng bộ lọc
+            </button>
+          </div>
+
+          {/* Summary cards */}
+          {trackingData && (() => {
+            const { summary } = trackingData;
+            const displayStudents = trackingData.students.filter(s =>
+              !trackSearch || s.name.toLowerCase().includes(trackSearch.toLowerCase()) ||
+              (s.studentCode || '').toLowerCase().includes(trackSearch.toLowerCase())
+            );
+            return (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  {[
+                    { label: 'Tổng học sinh', value: summary.total, color: 'text-hicado-navy', bg: '' },
+                    { label: 'Đã chuyển đủ', value: summary.paidFull, color: 'text-hicado-emerald', bg: 'bg-emerald-50 border-emerald-200' },
+                    { label: 'Chuyển thiếu', value: summary.paidPartial, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200' },
+                    { label: 'Chưa chuyển', value: summary.notPaid, color: 'text-rose-500', bg: 'bg-rose-50 border-rose-200' },
+                  ].map(card => (
+                    <div key={card.label} className={clsx('glass-card rounded-[2rem] p-5 border', card.bg || 'border-hicado-slate')}>
+                      <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-2">{card.label}</p>
+                      <p className={`text-3xl font-black ${card.color}`}>{card.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Progress bar summary */}
+                <div className="glass-card rounded-[2rem] p-5 border border-hicado-slate flex items-center gap-4 flex-wrap">
+                  <div className="flex-1 min-w-[200px]">
+                    <div className="flex justify-between text-[10px] font-black text-hicado-navy/40 mb-1.5">
+                      <span>Đã thu: {(summary.totalCollected / 1_000_000).toFixed(1)}M đ</span>
+                      <span>Cần thu: {(summary.totalExpected / 1_000_000).toFixed(1)}M đ</span>
+                    </div>
+                    <div className="h-2 bg-hicado-slate rounded-full overflow-hidden">
+                      <div className="h-full bg-hicado-emerald rounded-full transition-all"
+                        style={{ width: `${summary.totalExpected > 0 ? Math.round((summary.totalCollected / summary.totalExpected) * 100) : 0}%` }} />
+                    </div>
+                  </div>
+                  <span className="text-2xl font-black text-hicado-emerald text-glow">
+                    {summary.totalExpected > 0 ? Math.round((summary.totalCollected / summary.totalExpected) * 100) : 0}%
+                  </span>
+                </div>
+
+                {/* Table */}
+                <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+                  <div className="overflow-x-auto custom-scrollbar">
+                    <table className="w-full text-left min-w-[900px]">
+                      <thead className="sticky top-0 z-10">
+                        <tr className="border-b border-hicado-slate bg-white/90 backdrop-blur-sm">
+                          {['Học sinh', 'Lớp', 'Cần nộp', 'Đã nộp', 'Còn thiếu', 'Nộp lần cuối', 'Zalo', 'Trạng thái'].map(h => (
+                            <th key={h} className="px-5 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-hicado-slate/50">
+                        {displayStudents.map(s => {
+                          const isExpanded = expandedStudentId === s.id;
+                          const statusCfg = {
+                            PAID_FULL: { label: '✅ Đủ', cls: 'bg-emerald-100 text-emerald-700' },
+                            PAID_PARTIAL: { label: '⚠️ Thiếu', cls: 'bg-amber-100 text-amber-700' },
+                            NOT_PAID: { label: '❌ Chưa nộp', cls: 'bg-rose-100 text-rose-600' },
+                          }[s.paymentStatus];
+
+                          return (
+                            <>
+                              <tr key={s.id}
+                                className="hover:bg-hicado-slate/20 transition-colors cursor-pointer"
+                                onClick={() => setExpandedStudentId(isExpanded ? null : s.id)}>
+                                <td className="px-5 py-4">
+                                  <p className="font-black text-hicado-navy text-sm">{s.name}</p>
+                                  <p className="text-[10px] font-mono text-hicado-navy/40">{s.studentCode || '—'}</p>
+                                </td>
+                                <td className="px-5 py-4 text-sm text-hicado-navy/60 max-w-[140px]">
+                                  {s.classes.map(c => c.className).join(', ') || '—'}
+                                </td>
+                                <td className="px-5 py-4 font-mono text-sm text-hicado-navy/70">{formatMoney(s.totalExpected)}đ</td>
+                                <td className="px-5 py-4 font-black text-sm text-hicado-emerald">{formatMoney(s.totalPaid)}đ</td>
+                                <td className="px-5 py-4 font-mono text-sm text-rose-500">{s.totalBalance > 0 ? formatMoney(s.totalBalance) + 'đ' : '—'}</td>
+                                <td className="px-5 py-4 text-[11px] text-hicado-navy/40">
+                                  {s.lastPaymentDate
+                                    ? new Date(s.lastPaymentDate).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                                    : '—'}
+                                </td>
+                                <td className="px-5 py-4 text-[11px]">
+                                  {s.lastZaloNotification ? (
+                                    <div>
+                                      <span className={clsx('px-2 py-0.5 rounded-lg font-black text-[9px] uppercase',
+                                        s.lastZaloNotification.status === 'READ' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-600'
+                                      )}>
+                                        {s.lastZaloNotification.status === 'READ' ? '✓ Đã đọc' : '✓ Đã gửi'}
+                                      </span>
+                                      <p className="text-hicado-navy/30 mt-0.5 font-mono">
+                                        {new Date(s.lastZaloNotification.sentAt).toLocaleDateString('vi-VN')}
+                                      </p>
+                                    </div>
+                                  ) : <span className="text-hicado-navy/20">—</span>}
+                                </td>
+                                <td className="px-5 py-4">
+                                  <span className={clsx('px-3 py-1.5 rounded-xl text-[10px] font-black', statusCfg.cls)}>
+                                    {statusCfg.label}
+                                  </span>
+                                </td>
+                              </tr>
+                              {/* Expanded: transaction history */}
+                              {isExpanded && (
+                                <tr key={`${s.id}-expand`} className="bg-hicado-slate/10">
+                                  <td colSpan={8} className="px-8 py-4">
+                                    {s.transactions.length === 0 ? (
+                                      <p className="text-sm text-hicado-navy/30 italic">Chưa có giao dịch nào</p>
+                                    ) : (
+                                      <div className="space-y-2">
+                                        <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-2">Lịch sử giao dịch</p>
+                                        {s.transactions.map(tx => (
+                                          <div key={tx.id} className="flex items-center gap-6 text-sm bg-white rounded-xl px-4 py-2.5 border border-hicado-slate/50">
+                                            <span className="font-black text-hicado-emerald">{formatMoney(tx.amount)}đ</span>
+                                            <span className="text-hicado-navy/40 font-mono text-[11px]">
+                                              {new Date(tx.date).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                            </span>
+                                            {tx.content && <span className="text-hicado-navy/40 text-[11px] italic">{tx.content}</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              )}
+                            </>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {trackingData.students.length === 0 && !trackingLoading && (
+                    <div className="py-16 text-center space-y-3">
+                      <div className="text-4xl opacity-20">🔍</div>
+                      <p className="text-sm font-black text-hicado-navy/30 uppercase tracking-widest italic">
+                        Không có dữ liệu theo điều kiện lọc
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </>
+            );
+          })()}
+
+          {trackingLoading && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[...Array(4)].map((_, i) => <SkeletonCard key={i} />)}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );
