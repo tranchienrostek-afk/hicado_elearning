@@ -2,74 +2,8 @@ import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import QRCode from 'qrcode';
-import Jimp from 'jimp';
 import { generateVietQRString } from '../lib/vietqr';
-
-// Strip Vietnamese diacritics so jimp's ASCII bitmap fonts can render the text
-const deaccent = (s: string) =>
-  s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, (c) => c === 'đ' ? 'd' : 'D');
-
-async function buildPaymentSlipPNG(opts: {
-  studentName: string; studentCode: string;
-  className: string; classCode: string;
-  attended: number; tuitionPerSession: number;
-  amount: number; memo: string;
-  qrData: string;
-}): Promise<Buffer> {
-  const W = 600, H = 680;
-  const canvas = new Jimp(W, H, 0xFFFFFFFF);
-
-  // ── Header bar (Hicado Navy) ────────────────────────────────────────────
-  const header = new Jimp(W, 84, 0x0F172AFF);
-  canvas.composite(header, 0, 0);
-
-  // ── Emerald accent line ─────────────────────────────────────────────────
-  const accent = new Jimp(W, 4, 0x10B981FF);
-  canvas.composite(accent, 0, 84);
-
-  // ── QR code ─────────────────────────────────────────────────────────────
-  const qrSize = 260;
-  const qrBuf = await (QRCode as any).toBuffer(opts.qrData, { width: qrSize, margin: 1, color: { dark: '#000000', light: '#ffffff' } });
-  const qrImg = await Jimp.read(qrBuf);
-  // Light gray QR background box
-  const qrBox = new Jimp(qrSize + 16, qrSize + 16, 0xF8FAFCff);
-  canvas.composite(qrBox, (W - qrSize - 16) / 2, 253);
-  canvas.composite(qrImg, (W - qrSize) / 2, 261);
-
-  // ── Separator lines ─────────────────────────────────────────────────────
-  const sep = new Jimp(540, 1, 0xE2E8F0FF);
-  canvas.composite(sep, 30, 168);
-  canvas.composite(sep, 30, 540);
-
-  // ── Fonts ────────────────────────────────────────────────────────────────
-  const f32w = await Jimp.loadFont(Jimp.FONT_SANS_32_WHITE);
-  const f16w = await Jimp.loadFont(Jimp.FONT_SANS_16_WHITE);
-  const f32b = await Jimp.loadFont(Jimp.FONT_SANS_32_BLACK);
-  const f16b = await Jimp.loadFont(Jimp.FONT_SANS_16_BLACK);
-  const f14b = await Jimp.loadFont(Jimp.FONT_SANS_14_BLACK);
-
-  // Header text
-  canvas.print(f32w, 24, 14, 'HICADO');
-  canvas.print(f16w, 24, 54, 'THONG BAO HOC PHI');
-
-  // Info rows
-  const px = 30;
-  canvas.print(f16b, px, 100, `HOC SINH : ${deaccent(opts.studentName).toUpperCase()} (${opts.studentCode})`);
-  canvas.print(f16b, px, 128, `LOP      : ${deaccent(opts.className).toUpperCase()}${opts.classCode ? ` (${opts.classCode})` : ''}`);
-  canvas.print(f16b, px, 153, `DA HOC   : ${opts.attended} BUOI x ${opts.tuitionPerSession.toLocaleString('vi-VN')}d`);
-
-  // Amount
-  canvas.print(f14b, px, 180, 'HOAN PHI :');
-  canvas.print(f32b, px, 200, `${opts.amount.toLocaleString('vi-VN')}d`);
-
-  // Below QR
-  canvas.print(f14b, px, 548, 'NOI DUNG CHUYEN KHOAN:');
-  canvas.print(f16b, px, 570, opts.memo);
-  canvas.print(f14b, px, 610, 'Quet ma QR tren de thanh toan nhanh');
-  canvas.print(f14b, px, 650, 'Trung tam Hicado | hicado-elearning.onrender.com');
-
-  return canvas.getBufferAsync(Jimp.MIME_PNG) as Promise<Buffer>;
-}
+import { buildPaymentSlipPNG } from '../lib/paymentSlip';
 
 const router = Router();
 

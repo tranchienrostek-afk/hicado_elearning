@@ -3,6 +3,21 @@ import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 import { formatPhone } from './zalo';
+import FormData from 'form-data';
+import axios from 'axios';
+import { buildPaymentSlipPNG } from '../lib/paymentSlip';
+import { generateVietQRString } from '../lib/vietqr';
+
+// Upload PNG buffer to Zalo and return attachment_id
+async function uploadZaloImage(buffer: Buffer, accessToken: string): Promise<string> {
+  const form = new FormData();
+  form.append('file', buffer, { filename: 'payment.png', contentType: 'image/png' });
+  const res = await axios.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
+    headers: { ...form.getHeaders(), access_token: accessToken },
+  });
+  if (res.data?.error !== 0) throw new Error(res.data?.message ?? 'Upload failed');
+  return res.data.data.attachment_id as string;
+}
 
 const router = Router();
 
@@ -141,12 +156,30 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     // ── Branch: OA CS message (requires zaloUserId) ──
     if (!student.zaloUserId) { failedCount++; continue; }
 
-    // TUITION_REMINDER → single image message (payment slip PNG with QR embedded)
-    // GENERAL → text message
+    // TUITION_REMINDER → generate payment slip PNG, upload to Zalo, send as image
+    // GENERAL → plain text message
     const primaryAttended = student.attendances.filter((a: any) => a.classId === primaryClassId).length;
-    const message = type === 'TUITION_REMINDER' && primaryClassId
-      ? { attachment: { type: 'image', payload: { url: `${appBaseUrl}/api/finance/qr-png/${student.id}/${primaryClassId}?attended=${primaryAttended}` } } }
-      : { text: filters.message || 'Thông báo từ Trung tâm Hicado' };
+    let message: any;
+    if (type === 'TUITION_REMINDER' && primaryClassId) {
+      const primaryClass = student.classes.find((cs: any) => cs.class.id === primaryClassId)?.class;
+      const memo = `${student.studentCode ?? student.id} ${primaryClass?.classCode ?? ''} ${student.name}`.toUpperCase().trim().slice(0, 50);
+      const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo);
+      try {
+        const pngBuffer = await buildPaymentSlipPNG({
+          studentName: student.name, studentCode: student.studentCode ?? student.id,
+          className: primaryClass?.name ?? '', classCode: primaryClass?.classCode ?? '',
+          attended: primaryAttended, tuitionPerSession: primaryClass?.tuitionPerSession ?? 0,
+          amount: primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo, qrData,
+        });
+        const attachmentId = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
+        message = { attachment: { type: 'image', payload: { attachment_id: attachmentId } } };
+      } catch (imgErr: any) {
+        console.error('[Campaign] Image build/upload failed, falling back to text:', imgErr.message);
+        message = { text: `Hicado: Hoc phi ${student.name} — ${(primaryAttended * (primaryClass?.tuitionPerSession ?? 0)).toLocaleString('vi-VN')}d. QR: ${appBaseUrl}/pay/${student.id}` };
+      }
+    } else {
+      message = { text: filters.message || 'Thông báo từ Trung tâm Hicado' };
+    }
 
     const trackingId = `CAMP_${campaign.id}_${student.id}_${Date.now()}`;
     try {
