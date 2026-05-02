@@ -165,17 +165,20 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       const memo = `${student.studentCode ?? student.id} ${primaryClass?.classCode ?? ''} ${student.name}`.toUpperCase().trim().slice(0, 50);
       const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo);
       try {
+        console.log(`[Campaign] Building PNG for ${student.name}...`);
         const pngBuffer = await buildPaymentSlipPNG({
           studentName: student.name, studentCode: student.studentCode ?? student.id,
           className: primaryClass?.name ?? '', classCode: primaryClass?.classCode ?? '',
           attended: primaryAttended, tuitionPerSession: primaryClass?.tuitionPerSession ?? 0,
           amount: primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo, qrData,
         });
-        const attachmentId = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
-        message = { attachment: { type: 'image', payload: { attachment_id: attachmentId } } };
+        console.log(`[Campaign] PNG built (${pngBuffer.length} bytes), uploading to Zalo...`);
+        const token = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
+        console.log(`[Campaign] Upload OK, token=${token}`);
+        message = { attachment: { type: 'image', payload: { token } } };
       } catch (imgErr: any) {
-        console.error('[Campaign] Image build/upload failed, falling back to text:', imgErr.message);
-        message = { text: `Hicado: Hoc phi ${student.name} — ${(primaryAttended * (primaryClass?.tuitionPerSession ?? 0)).toLocaleString('vi-VN')}d. QR: ${appBaseUrl}/pay/${student.id}` };
+        console.error(`[Campaign] Image pipeline failed for ${student.name}:`, imgErr.message);
+        message = { text: `Hicado thong bao hoc phi ${student.name}: ${(primaryAttended * (primaryClass?.tuitionPerSession ?? 0)).toLocaleString('vi-VN')}d. Chi tiet: ${appBaseUrl}/pay/${student.id}` };
       }
     } else {
       message = { text: filters.message || 'Thông báo từ Trung tâm Hicado' };
@@ -190,6 +193,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       );
       const success = r.data?.error === 0;
       const zaloMsgId: string | null = success ? (r.data?.data?.msg_id ?? r.data?.data?.message_id ?? null) : null;
+      if (!success) console.error(`[Campaign] CS send FAILED for ${student.name}: error=${r.data?.error} msg=${r.data?.message} body=${JSON.stringify(r.data)}`);
 
       await (prisma as any).zaloMessageLog.create({
         data: {
@@ -198,7 +202,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           templateId: `CAMPAIGN_${type}`,
           trackingId,
           status: success ? 'SENT' : 'FAILED',
-          errorReason: success ? null : (r.data?.message ?? 'Unknown'),
+          errorReason: success ? null : `[${r.data?.error}] ${r.data?.message ?? 'Unknown'}`,
           studentId: student.id,
           campaignId: campaign.id,
           zaloMsgId,
