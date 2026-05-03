@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { initialLoginData, LoginPayload } from '@/api';
-import { useAuthStore } from '@/store';
+import { jwtExpired, useAuthStore } from '@/store';
 import { toast } from '@/toast';
 
 const loginSchema = z.object({
@@ -13,7 +14,16 @@ const loginSchema = z.object({
 
 export const Login = () => {
   const navigate = useNavigate();
-  const { login } = useAuthStore();
+  const { auth, login } = useAuthStore();
+
+  const routeForRole = (role?: string | null) =>
+    role === 'STUDENT' ? '/student' : role === 'TEACHER' ? '/classes' : '/home';
+
+  useEffect(() => {
+    if (auth?.token && !jwtExpired(auth.token)) {
+      navigate(routeForRole(auth.role), { replace: true });
+    }
+  }, [auth, navigate]);
   
   const {
     register,
@@ -29,7 +39,8 @@ export const Login = () => {
     try {
       await login(data.username, data.password);
       toast.success('Đăng nhập thành công');
-      navigate('/home');
+      const nextAuth = useAuthStore.getState().auth;
+      navigate(routeForRole(nextAuth?.role), { replace: true });
     } catch (error: any) {
       toast.error(error.message || 'Sai tài khoản hoặc mật khẩu');
     }
@@ -173,5 +184,4 @@ export const Login = () => {
     </div>
   );
 };
-
 

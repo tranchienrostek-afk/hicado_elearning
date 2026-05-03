@@ -11,10 +11,11 @@ if (!JWT_SECRET) {
 
 router.post('/login', async (req, res) => {
   const { username, password } = req.body;
+  const normalizedUsername = typeof username === 'string' ? username.trim() : username;
 
   try {
     const user = await prisma.user.findUnique({
-      where: { username },
+      where: { username: normalizedUsername },
     });
 
     if (!user) {
