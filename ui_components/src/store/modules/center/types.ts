@@ -91,7 +91,7 @@ export interface CenterStore {
   fetchStudents: () => Promise<void>;
   fetchClasses: () => Promise<void>;
   fetchRooms: () => Promise<void>;
-  fetchAttendance: (classId: string) => Promise<void>;
+  fetchAttendance: (classId: string, date?: string) => Promise<void>;
   
   addAttendance: (record: Partial<Attendance>) => Promise<void>;
   updateTuitionStatus: (studentId: string, status: Student['tuitionStatus']) => void;

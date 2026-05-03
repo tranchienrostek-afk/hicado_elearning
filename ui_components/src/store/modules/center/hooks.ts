@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { CenterStore } from './types';
 import { useAuthStore } from '../auth';
+import { attendanceDateKey } from '@/utils/attendance-date';
 
 const fetchWithAuth = (url: string, options: RequestInit = {}): Promise<Response> => {
   const token = useAuthStore.getState().auth?.token;
@@ -72,13 +73,16 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
     }
   },
 
-  fetchAttendance: async (classId) => {
-    const res = await fetchWithAuth(`/api/attendance/${classId}`);
+  fetchAttendance: async (classId, date) => {
+    const res = await fetchWithAuth(`/api/attendance/${classId}${date ? `?date=${date}` : ''}`);
     if (res.ok) {
       const records = await res.json();
       set((state) => ({
         attendance: [
-          ...state.attendance.filter(a => a.classId !== classId),
+          ...state.attendance.filter(a =>
+            a.classId !== classId ||
+            (date && attendanceDateKey(a.date) !== attendanceDateKey(date))
+          ),
           ...records
         ]
       }));
@@ -95,7 +99,10 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
       const newRecord = await response.json();
       set((state) => {
         const existingIndex = state.attendance.findIndex(
-          (item) => item.classId === record.classId && item.studentId === record.studentId && item.date === record.date
+          (item) =>
+            item.classId === record.classId &&
+            item.studentId === record.studentId &&
+            attendanceDateKey(item.date) === attendanceDateKey(record.date)
         );
         if (existingIndex === -1) return { attendance: [...state.attendance, newRecord] };
         const next = [...state.attendance];

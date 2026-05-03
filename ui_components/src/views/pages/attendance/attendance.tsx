@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useAuthStore, useCenterStore } from '@/store';
 import { SkeletonTable } from '@/views/components/skeleton';
+import { attendanceSameDay } from '@/utils/attendance-date';
 
 type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LEAVE_REQUEST';
 
@@ -17,7 +18,7 @@ const formatDateTime = (value?: string) => {
 };
 
 export const AttendancePage = () => {
-  const { classes, students, teachers, addAttendance, attendance, isLoading } = useCenterStore();
+  const { classes, students, teachers, addAttendance, fetchAttendance, attendance, isLoading } = useCenterStore();
   const { auth } = useAuthStore();
 
   const isTeacher = auth?.role === 'TEACHER';
@@ -46,6 +47,11 @@ export const AttendancePage = () => {
   }, [accessibleClasses, selectedClassId]);
 
   const selectedClass = accessibleClasses.find((item) => item.id === selectedClassId);
+
+  useEffect(() => {
+    if (selectedClassId) fetchAttendance(selectedClassId, date);
+  }, [date, fetchAttendance, selectedClassId]);
+
   const classStudentIds = useMemo(
     () => Array.from(new Set(selectedClass?.studentIds || [])),
     [selectedClass?.studentIds]
@@ -54,7 +60,7 @@ export const AttendancePage = () => {
   const selectedTeacherName = teachers.find((item) => item.id === selectedClass?.teacherId)?.name || 'N/A';
 
   const classRecords = useMemo(
-    () => attendance.filter((item) => item.classId === selectedClassId && item.date === date),
+    () => attendance.filter((item) => item.classId === selectedClassId && attendanceSameDay(item.date, date)),
     [attendance, date, selectedClassId]
   );
 

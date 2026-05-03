@@ -28,6 +28,10 @@ router.post('/mark', authenticateToken, async (req, res) => {
   const user = (req as any).user;
 
   try {
+    const markerName = user.name ?? (
+      await prisma.user.findUnique({ where: { id: user.id }, select: { name: true } })
+    )?.name;
+
     const record = await prisma.attendance.upsert({
       where: {
         classId_studentId_date: {
@@ -40,7 +44,7 @@ router.post('/mark', authenticateToken, async (req, res) => {
         status,
         note,
         markedByUserId: user.id,
-        markedByName: user.name,
+        markedByName: markerName,
         markedByRole: user.role,
         markedAt: new Date()
       },
@@ -51,7 +55,7 @@ router.post('/mark', authenticateToken, async (req, res) => {
         status,
         note,
         markedByUserId: user.id,
-        markedByName: user.name,
+        markedByName: markerName,
         markedByRole: user.role,
         markedAt: new Date()
       }
