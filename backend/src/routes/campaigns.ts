@@ -7,6 +7,7 @@ import FormData from 'form-data';
 import axios from 'axios';
 import { buildPaymentSlipPNG } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
+import { buildZaloImageMessage } from '../lib/zaloMessage';
 
 // Upload PNG buffer to Zalo and return attachment_id
 async function uploadZaloImage(buffer: Buffer, accessToken: string): Promise<string> {
@@ -179,10 +180,10 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 
         // Step 2: Upload to Zalo
         trace.push('②UPLOAD...');
-        const token = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
+        const attachmentId = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
         trace[trace.length - 1] = `②UPLOAD_OK`;
-        message = { attachment: { type: 'image', payload: { token } } };
-        trace.push('③MSG=IMAGE');
+        message = buildZaloImageMessage(attachmentId, `Phieu hoc phi ${student.name}`);
+        trace.push('③MSG=MEDIA_IMAGE');
       } catch (imgErr: any) {
         trace[trace.length - 1] += `_FAIL:${imgErr.message}`;
         trace.push('③FALLBACK=TEXT');
