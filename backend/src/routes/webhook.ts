@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
+import { findStudentByPaymentContent, normalizeSepayWebhookPayload } from '../lib/sepayMatch';
 
 // Zalo OA Webhook — captures follower user_ids when they message the OA
 // Configure URL in oa.zalo.me → Cài đặt → Webhook
@@ -77,16 +78,15 @@ async function processSepayTransaction(payload: {
   const combinedContent = `${sepayCode || ''} ${content || ''}`.toUpperCase().trim();
   console.log(`[SePay] Processing: amount=${transferAmount} content="${combinedContent}"`);
 
-  // Load all students with codes, and all classCodes — single queries
+  // Load all students/classes once. QR memos use studentCode when present, otherwise student id.
   const [allStudents, allClasses] = await Promise.all([
-    prisma.student.findMany({ where: { studentCode: { not: null } }, select: { id: true, name: true, studentCode: true } }),
+    prisma.student.findMany({ select: { id: true, name: true, studentCode: true } }),
     prisma.class.findMany({ where: { classCode: { not: null } }, select: { id: true, name: true, classCode: true } }),
   ]);
 
-  // Match student: find any studentCode that appears in the transfer content
-  const matchedStudent = allStudents.find(s => s.studentCode && combinedContent.includes(s.studentCode.toUpperCase()));
+  const matchedStudent = findStudentByPaymentContent(allStudents, combinedContent);
   if (!matchedStudent) {
-    console.warn(`[SePay] No student code found in: "${combinedContent}"`);
+    console.warn(`[SePay] No student identifier found in: "${combinedContent}"`);
     return { success: false, message: `Không tìm thấy mã học sinh trong nội dung: "${combinedContent}"` };
   }
 
@@ -144,7 +144,7 @@ router.post('/sepay', async (req, res) => {
     return res.status(401).json({ message: 'Unauthorized' });
   }
 
-  const { id, gateway, transactionDate, content, transferType, transferAmount, referenceCode, code: sepayCode } = req.body;
+  const { id, gateway, transactionDate, content, transferType, transferAmount, referenceCode, sepayCode } = normalizeSepayWebhookPayload(req.body);
 
   if (transferType !== 'in') {
     return res.json({ success: true, message: 'Not an incoming transfer' });
