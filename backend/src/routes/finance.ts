@@ -3,7 +3,7 @@ import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import QRCode from 'qrcode';
 import { generateVietQRString } from '../lib/vietqr';
-import { buildPaymentSlipPNG } from '../lib/paymentSlip';
+import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 
 const router = Router();
 
@@ -68,7 +68,7 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
     const bankBin = bankCfgMap.BANK_BIN || process.env.BANK_BIN || '970436';
     const accountNo = bankCfgMap.BANK_ACC || process.env.BANK_ACC || '123456789';
     const amount = classItem.tuitionPerSession * classItem.totalSessions;
-    const memo = `${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`.trim().toUpperCase().slice(0, 50);
+    const memo = deaccent(`${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`).trim().toUpperCase().slice(0, 50);
 
     const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
     const qrImage = await QRCode.toDataURL(qrData, {
@@ -194,7 +194,7 @@ router.get('/public/student/:studentId', async (req, res) => {
       student.classes.map(async cs => {
         const cls = cs.class;
         const amount = cls.tuitionPerSession * cls.totalSessions;
-        const memo = `${student.studentCode ?? student.id} ${cls.classCode ?? cls.id} ${student.name}`.trim().toUpperCase().slice(0, 50);
+        const memo = deaccent(`${student.studentCode ?? student.id} ${cls.classCode ?? cls.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
         const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
         const qrImage = await QRCode.toDataURL(qrData, { margin: 1, color: { dark: '#000000', light: '#ffffff' } });
         return { classId: cls.id, className: cls.name, classCode: cls.classCode, amount, memo, qrImage };
@@ -223,7 +223,7 @@ router.get('/qr-png/:studentId/:classId', async (req, res) => {
     const bm = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
     const attended = Number(req.query.attended ?? classItem.totalSessions);
     const amount = classItem.tuitionPerSession * attended;
-    const memo = `${student.studentCode ?? student.id} ${classItem.classCode ?? classItem.id} ${student.name}`.trim().toUpperCase().slice(0, 50);
+    const memo = deaccent(`${student.studentCode ?? student.id} ${classItem.classCode ?? classItem.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
     const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', amount, memo);
     const pngBuffer = await buildPaymentSlipPNG({
       studentName: student.name, studentCode: student.studentCode ?? student.id,

@@ -2,7 +2,7 @@ import QRCode from 'qrcode';
 import Jimp from 'jimp';
 
 // Strip Vietnamese diacritics — jimp's bitmap fonts are ASCII-only
-const deaccent = (s: string) =>
+export const deaccent = (s: string) =>
   s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, (c) => c === 'đ' ? 'd' : 'D');
 
 export interface PaymentSlipOpts {
@@ -55,7 +55,7 @@ export async function buildPaymentSlipPNG(opts: PaymentSlipOpts): Promise<Buffer
   canvas.print(f14b, px, 180, 'HOAN PHI :');
   canvas.print(f32b, px, 200, `${opts.amount.toLocaleString('vi-VN')}d`);
   canvas.print(f14b, px, 548, 'NOI DUNG CHUYEN KHOAN:');
-  canvas.print(f16b, px, 570, opts.memo);
+  canvas.print(f16b, px, 570, deaccent(opts.memo).toUpperCase());
   canvas.print(f14b, px, 610, 'Quet ma QR tren de thanh toan nhanh');
   canvas.print(f14b, px, 650, 'Trung tam Hicado | hicado-elearning.onrender.com');
 

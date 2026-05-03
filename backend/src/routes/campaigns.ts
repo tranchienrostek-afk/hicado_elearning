@@ -5,7 +5,7 @@ import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 import { formatPhone } from './zalo';
 import FormData from 'form-data';
 import axios from 'axios';
-import { buildPaymentSlipPNG } from '../lib/paymentSlip';
+import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildZaloImageMessage } from '../lib/zaloMessage';
 
@@ -164,7 +164,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 
     if (type === 'TUITION_REMINDER' && primaryClassId) {
       const primaryClass = student.classes.find((cs: any) => cs.class.id === primaryClassId)?.class;
-      const memo = `${student.studentCode ?? student.id} ${primaryClass?.classCode ?? ''} ${student.name}`.toUpperCase().trim().slice(0, 50);
+      const memo = deaccent(`${student.studentCode ?? student.id} ${primaryClass?.classCode ?? ''} ${student.name}`).toUpperCase().trim().slice(0, 50);
       const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo);
 
       // Step 1: Build PNG
