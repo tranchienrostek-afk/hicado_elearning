@@ -4,6 +4,7 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import QRCode from 'qrcode';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
+import { buildClassCollectionStats, buildStudentPaymentRows } from '../lib/financeMath';
 
 const router = Router();
 
@@ -67,7 +68,10 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
     const bankCfgMap = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
     const bankBin = bankCfgMap.BANK_BIN || process.env.BANK_BIN || '970436';
     const accountNo = bankCfgMap.BANK_ACC || process.env.BANK_ACC || '123456789';
-    const amount = classItem.tuitionPerSession * classItem.totalSessions;
+    const attended = await prisma.attendance.count({
+      where: { studentId, classId, status: 'PRESENT' },
+    });
+    const amount = classItem.tuitionPerSession * attended;
     const memo = deaccent(`${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`).trim().toUpperCase().slice(0, 50);
 
     const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
@@ -76,7 +80,7 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
       color: { dark: '#000000', light: '#ffffff' }
     });
 
-    res.json({ qrImage, student: student.name, className: classItem.name, amount, memo });
+    res.json({ qrImage, student: student.name, className: classItem.name, attended, amount, memo });
   } catch (error) {
     console.error('[QR] Error generating QR:', error);
     res.status(500).json({ message: 'Lỗi khi tạo mã QR' });
@@ -91,7 +95,7 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
     twelveMonthsAgo.setDate(1);
     twelveMonthsAgo.setHours(0, 0, 0, 0);
 
-    const [recentTxs, allClasses, pendingStudents, totalAgg] = await Promise.all([
+    const [recentTxs, allClasses, allSuccessTxs, presentAttendances, totalAgg] = await Promise.all([
       prisma.transaction.findMany({
         where: { status: 'SUCCESS', date: { gte: twelveMonthsAgo } },
         include: {
@@ -106,11 +110,21 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
         take: 50,
       }),
       prisma.class.findMany({
-        include: { students: { include: { student: { select: { id: true, tuitionStatus: true } } } } },
+        include: {
+          students: {
+            include: {
+              student: { select: { id: true, name: true, studentCode: true, tuitionStatus: true } },
+            },
+          },
+        },
       }),
-      prisma.student.findMany({
-        where: { tuitionStatus: { in: ['PENDING', 'DEBT'] } },
-        include: { classes: { include: { class: { select: { id: true, name: true, tuitionPerSession: true, totalSessions: true } } } } },
+      prisma.transaction.findMany({
+        where: { status: 'SUCCESS' },
+        select: { id: true, studentId: true, classId: true, amount: true },
+      }),
+      prisma.attendance.findMany({
+        where: { status: 'PRESENT' },
+        select: { classId: true, studentId: true, status: true },
       }),
       prisma.transaction.aggregate({ _sum: { amount: true }, where: { status: 'SUCCESS' } }),
     ]);
@@ -125,35 +139,26 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, amount]) => ({ month, amount }));
 
-    // Per-class collection
-    const collectionByClass = allClasses.map(cls => {
-      const studentCount = cls.students.length;
-      const expected = cls.tuitionPerSession * cls.totalSessions * studentCount;
-      const paidCount = cls.students.filter(cs => cs.student.tuitionStatus === 'PAID').length;
-      const collected = cls.tuitionPerSession * cls.totalSessions * paidCount;
-      return {
-        classId: cls.id, className: cls.name,
-        expected, collected, gap: expected - collected,
-        rate: expected > 0 ? Math.round((collected / expected) * 100) : 0,
-        studentCount, paidCount,
-      };
-    });
-
-    // Pending students
-    const pendingList = pendingStudents.map(s => ({
-      id: s.id, name: s.name, studentCode: s.studentCode, tuitionStatus: s.tuitionStatus,
-      totalDebt: s.classes.reduce((sum, cs) => sum + cs.class.tuitionPerSession * cs.class.totalSessions, 0),
-      classes: s.classes.map(cs => ({ id: cs.class.id, name: cs.class.name })),
-    }));
+    const collectionByClass = buildClassCollectionStats(allClasses, allSuccessTxs, presentAttendances);
+    const pendingList = buildStudentPaymentRows(allClasses, allSuccessTxs, presentAttendances)
+      .filter(s => s.paymentStatus !== 'PAID_FULL')
+      .map(s => ({
+        id: s.id,
+        name: s.name,
+        studentCode: s.studentCode,
+        tuitionStatus: s.tuitionStatus,
+        paymentStatus: s.paymentStatus,
+        totalDebt: s.totalDebt,
+        totalPaid: s.totalPaid,
+        classes: s.classes,
+      }));
 
     const totalCollected = totalAgg._sum.amount || 0;
-    const totalExpected = allClasses.reduce(
-      (sum, cls) => sum + cls.tuitionPerSession * cls.totalSessions * cls.students.length, 0
-    );
+    const totalExpected = collectionByClass.reduce((sum, cls) => sum + cls.expected, 0);
 
     res.json({
       totalCollected, totalExpected,
-      collectionRate: totalExpected > 0 ? Math.round((totalCollected / totalExpected) * 100) : 0,
+      collectionRate: totalExpected > 0 ? Number(((totalCollected / totalExpected) * 100).toFixed(1)) : 0,
       monthlyRevenue,
       collectionByClass,
       pendingStudents: pendingList,
@@ -193,11 +198,14 @@ router.get('/public/student/:studentId', async (req, res) => {
     const classQRs = await Promise.all(
       student.classes.map(async cs => {
         const cls = cs.class;
-        const amount = cls.tuitionPerSession * cls.totalSessions;
+        const attended = await prisma.attendance.count({
+          where: { studentId: student.id, classId: cls.id, status: 'PRESENT' },
+        });
+        const amount = cls.tuitionPerSession * attended;
         const memo = deaccent(`${student.studentCode ?? student.id} ${cls.classCode ?? cls.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
         const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
         const qrImage = await QRCode.toDataURL(qrData, { margin: 1, color: { dark: '#000000', light: '#ffffff' } });
-        return { classId: cls.id, className: cls.name, classCode: cls.classCode, amount, memo, qrImage };
+        return { classId: cls.id, className: cls.name, classCode: cls.classCode, attended, amount, memo, qrImage };
       })
     );
 
@@ -221,7 +229,9 @@ router.get('/qr-png/:studentId/:classId', async (req, res) => {
     ]);
     if (!student || !classItem) return res.status(404).end();
     const bm = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
-    const attended = Number(req.query.attended ?? classItem.totalSessions);
+    const attended = Number(req.query.attended ?? await prisma.attendance.count({
+      where: { studentId: student.id, classId: classItem.id, status: 'PRESENT' },
+    }));
     const amount = classItem.tuitionPerSession * attended;
     const memo = deaccent(`${student.studentCode ?? student.id} ${classItem.classCode ?? classItem.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
     const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', amount, memo);
@@ -258,6 +268,7 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
         where: studentWhere,
         include: {
           classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } } },
+          attendances: { where: { status: 'PRESENT' }, select: { classId: true } },
         },
         orderBy: { name: 'asc' },
       }),
@@ -285,8 +296,10 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
     const result = students.map((s: any) => {
       const txList = allTransactions.filter((t: any) => t.studentId === s.id);
       const totalPaid = txList.reduce((sum: number, t: any) => sum + t.amount, 0);
-      const totalExpected = s.classes.reduce((sum: number, cs: any) =>
-        sum + cs.class.tuitionPerSession * cs.class.totalSessions, 0);
+      const totalExpected = s.classes.reduce((sum: number, cs: any) => {
+        const attended = s.attendances.filter((a: any) => a.classId === cs.class.id).length;
+        return sum + cs.class.tuitionPerSession * attended;
+      }, 0);
       const totalBalance = Math.max(0, totalExpected - totalPaid);
 
       let paymentStatus: string;
@@ -302,7 +315,8 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
         tuitionStatus: s.tuitionStatus,
         classes: s.classes.map((cs: any) => ({
           classId: cs.class.id, className: cs.class.name, classCode: cs.class.classCode,
-          expected: cs.class.tuitionPerSession * cs.class.totalSessions,
+          attended: s.attendances.filter((a: any) => a.classId === cs.class.id).length,
+          expected: cs.class.tuitionPerSession * s.attendances.filter((a: any) => a.classId === cs.class.id).length,
         })),
         totalExpected, totalPaid, totalBalance,
         paymentStatus,

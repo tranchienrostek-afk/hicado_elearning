@@ -12,11 +12,12 @@ interface FinanceStats {
   collectionByClass: {
     classId: string; className: string;
     expected: number; collected: number; gap: number; rate: number;
-    studentCount: number; paidCount: number;
+    studentCount: number; paidCount: number; partialCount?: number;
   }[];
   pendingStudents: {
     id: string; name: string; studentCode: string | null; tuitionStatus: string;
-    totalDebt: number; classes: { id: string; name: string }[];
+    paymentStatus?: 'PAID_FULL' | 'PAID_PARTIAL' | 'NOT_PAID';
+    totalDebt: number; totalPaid?: number; classes: { id: string; name: string }[];
   }[];
   recentTransactions: {
     id: string; amount: number; date: string; status: string; content: string;
@@ -46,6 +47,7 @@ interface FinanceRow {
   scheduleLabel: string;
   studentCount: number;
   salaryRate: number;
+  tuitionPerSession: number;
   totalSessions: number;
   expectedRevenue: number;
   paidRevenue: number;
@@ -67,6 +69,14 @@ const getCurrentMonth = () => {
 const countUniqueDates = (dates: string[]) => new Set(dates).size;
 
 const formatMoney = (value: number) => value.toLocaleString('vi-VN');
+const formatPercent = (value: number) => {
+  if (value > 0 && value < 1) return `${value.toFixed(1)}%`;
+  return `${Math.round(value)}%`;
+};
+const formatDashboardMoney = (value: number) => {
+  if (Math.abs(value) < 100_000) return { value: formatMoney(value), unit: 'đ' };
+  return { value: (value / 1_000_000).toFixed(1), unit: 'Triệu đ' };
+};
 
 export const FinancialPage = () => {
   const { teachers, students, classes, rooms, attendance, updateTuitionStatus, isLoading } = useCenterStore();
@@ -147,14 +157,11 @@ export const FinancialPage = () => {
         const allSessionCount = countUniqueDates(presentRecords.map((item) => item.date));
         const monthSessionCount = countUniqueDates(monthPresentRecords.map((item) => item.date));
 
-        const expectedRevenue = cls.tuitionPerSession * cls.totalSessions * classStudents.length;
-        const paidRevenue =
-          classStudents.filter((item) => item.tuitionStatus === 'PAID').length *
-          cls.tuitionPerSession *
-          cls.totalSessions;
+        const statsRow = financeStats?.collectionByClass.find((item) => item.classId === cls.id);
+        const expectedRevenue = statsRow?.expected ?? cls.tuitionPerSession * cls.totalSessions * classStudents.length;
+        const paidRevenue = statsRow?.collected ?? 0;
 
-        const salaryAllTime =
-          cls.tuitionPerSession * classStudents.length * allSessionCount * salaryRate;
+        const salaryAllTime = paidRevenue * salaryRate;
         const centerProfit = paidRevenue - salaryAllTime;
 
         const monthBaseSalary =
@@ -178,6 +185,7 @@ export const FinancialPage = () => {
           }`,
           studentCount: classStudents.length,
           salaryRate,
+          tuitionPerSession: cls.tuitionPerSession,
           totalSessions: cls.totalSessions,
           expectedRevenue,
           paidRevenue,
@@ -191,13 +199,16 @@ export const FinancialPage = () => {
           monthPayout,
         };
       }),
-    [attendance, rooms, scopedClasses, selectedMonth, students, teachers]
+    [attendance, financeStats?.collectionByClass, rooms, scopedClasses, selectedMonth, students, teachers]
   );
 
-  const totalExpectedAll = financeData.reduce((acc, row) => acc + row.expectedRevenue, 0);
-  const totalPaidAll = financeData.reduce((acc, row) => acc + row.paidRevenue, 0);
+  const totalExpectedAll = financeStats?.totalExpected ?? financeData.reduce((acc, row) => acc + row.expectedRevenue, 0);
+  const totalPaidAll = financeStats?.totalCollected ?? financeData.reduce((acc, row) => acc + row.paidRevenue, 0);
   const totalSalaryAll = financeData.reduce((acc, row) => acc + row.salaryAllTime, 0);
   const totalProfitAll = totalPaidAll - totalSalaryAll;
+  const paidCard = formatDashboardMoney(totalPaidAll);
+  const salaryCard = formatDashboardMoney(totalSalaryAll);
+  const profitCard = formatDashboardMoney(totalProfitAll);
 
   const teacherBaseTotal = financeData.reduce((acc, row) => acc + row.monthBaseSalary, 0);
   const teacherBonusTotal = financeData.reduce((acc, row) => acc + row.monthBonus, 0);
@@ -351,8 +362,8 @@ export const FinancialPage = () => {
             <div className="absolute top-0 right-0 w-32 h-32 bg-hicado-emerald/15 rounded-full -mr-16 -mt-16 blur-2xl" />
             <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-3 relative z-10">Đã thu</p>
             <div className="flex items-baseline gap-2 relative z-10">
-              <span className="text-4xl md:text-5xl font-black text-white">{(totalPaidAll / 1_000_000).toFixed(1)}</span>
-              <span className="text-lg font-bold text-white/40 font-mono">Triệu đ</span>
+              <span className="text-4xl md:text-5xl font-black text-white">{paidCard.value}</span>
+              <span className="text-lg font-bold text-white/40 font-mono">{paidCard.unit}</span>
             </div>
           </div>
         </div>
@@ -360,8 +371,8 @@ export const FinancialPage = () => {
         <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate">
           <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-[0.4em] mb-3">Chi lương GV</p>
           <div className="flex items-baseline gap-2">
-            <span className="text-4xl md:text-5xl font-black text-hicado-navy">{(totalSalaryAll / 1_000_000).toFixed(1)}</span>
-            <span className="text-lg font-bold text-hicado-navy/30 font-mono">Triệu đ</span>
+            <span className="text-4xl md:text-5xl font-black text-hicado-navy">{salaryCard.value}</span>
+            <span className="text-lg font-bold text-hicado-navy/30 font-mono">{salaryCard.unit}</span>
           </div>
         </div>
 
@@ -369,9 +380,9 @@ export const FinancialPage = () => {
           <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-[0.4em] mb-3">Lợi nhuận gộp</p>
           <div className="flex items-baseline gap-2">
             <span className={`text-4xl md:text-5xl font-black ${totalProfitAll >= 0 ? 'text-hicado-emerald text-glow' : 'text-rose-500'}`}>
-              {(totalProfitAll / 1_000_000).toFixed(1)}
+              {profitCard.value}
             </span>
-            <span className="text-lg font-bold text-hicado-navy/30 font-mono">Triệu đ</span>
+            <span className="text-lg font-bold text-hicado-navy/30 font-mono">{profitCard.unit}</span>
           </div>
           <p className="text-[10px] text-hicado-navy/30 font-bold mt-3">
             Tổng cần thu: {(totalExpectedAll / 1_000_000).toFixed(1)}M đ
@@ -442,7 +453,7 @@ export const FinancialPage = () => {
           <table className="w-full text-left min-w-[1000px]">
             <thead>
               <tr className="border-b border-hicado-slate bg-hicado-slate/20">
-                {['Lớp / Giáo viên', 'Cần thu / Đã nộp', 'Tỷ lệ %', 'Lương GV', 'Lợi nhuận TT', 'HP TB/Buổi'].map((h) => (
+                {['Lớp / Giáo viên', 'Cần thu / Đã nộp', 'Tỷ lệ GV', 'Lương GV', 'Lợi nhuận TT', 'HP/Buổi'].map((h) => (
                   <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
                 ))}
               </tr>
@@ -451,8 +462,6 @@ export const FinancialPage = () => {
               {financeData.map((row) => {
                 const paidPercent = row.expectedRevenue > 0 ? (row.paidRevenue / row.expectedRevenue) * 100 : 0;
                 const safePaidPercent = Math.max(0, Math.min(100, paidPercent));
-                const avgPerSession = row.totalSessions > 0 ? row.paidRevenue / row.totalSessions : 0;
-
                 return (
                   <tr key={row.classId} className="hover:bg-hicado-slate/20 transition-colors">
                     <td className="px-6 py-5">
@@ -463,7 +472,7 @@ export const FinancialPage = () => {
                       <div className="space-y-1.5">
                         <div className="flex justify-between text-[10px] font-black uppercase">
                           <span className="text-hicado-navy/30">Đã nộp</span>
-                          <span className="text-hicado-emerald">{safePaidPercent.toFixed(0)}%</span>
+                          <span className="text-hicado-emerald">{formatPercent(safePaidPercent)}</span>
                         </div>
                         <div className="h-1.5 w-32 bg-hicado-slate rounded-full overflow-hidden">
                           <div
@@ -477,7 +486,7 @@ export const FinancialPage = () => {
                       </div>
                     </td>
                     <td className="px-6 py-5 font-black text-hicado-navy/70 text-sm">
-                      {Math.round(row.salaryRate * 100)}%
+                      {formatPercent(row.salaryRate * 100)}
                     </td>
                     <td className="px-6 py-5 font-black text-hicado-navy text-sm">
                       {row.salaryAllTime.toLocaleString()}
@@ -488,7 +497,7 @@ export const FinancialPage = () => {
                       </span>
                     </td>
                     <td className="px-6 py-5 text-hicado-navy/40 font-mono text-sm">
-                      {avgPerSession.toLocaleString()}
+                      {row.tuitionPerSession.toLocaleString('vi-VN')}
                     </td>
                   </tr>
                 );
@@ -534,18 +543,18 @@ export const FinancialPage = () => {
                   }}
                 />
                 <div className="absolute inset-[16px] rounded-full bg-white flex flex-col items-center justify-center">
-                  <span className="text-3xl font-black text-hicado-emerald text-glow">{financeStats.collectionRate}%</span>
+                  <span className="text-3xl font-black text-hicado-emerald text-glow">{formatPercent(financeStats.collectionRate)}</span>
                   <span className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mt-0.5">đã thu</span>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-4 w-full">
                 <div className="text-center">
                   <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Đã thu</p>
-                  <p className="font-black text-hicado-navy">{(financeStats.totalCollected / 1_000_000).toFixed(1)}M đ</p>
+                  <p className="font-black text-hicado-navy">{formatMoney(financeStats.totalCollected)}đ</p>
                 </div>
                 <div className="text-center">
                   <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Cần thu</p>
-                  <p className="font-black text-hicado-navy">{(financeStats.totalExpected / 1_000_000).toFixed(1)}M đ</p>
+                  <p className="font-black text-hicado-navy">{formatMoney(financeStats.totalExpected)}đ</p>
                 </div>
               </div>
             </div>
@@ -606,10 +615,12 @@ export const FinancialPage = () => {
                           <div className="h-1.5 w-24 bg-hicado-slate rounded-full overflow-hidden">
                             <div className="h-full bg-hicado-emerald rounded-full" style={{ width: `${row.rate}%` }} />
                           </div>
-                          <span className="text-[10px] font-black text-hicado-navy/50">{row.rate}%</span>
+                          <span className="text-[10px] font-black text-hicado-navy/50">{formatPercent(row.rate)}</span>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-hicado-navy/50 font-bold">{row.paidCount}/{row.studentCount}</td>
+                      <td className="px-6 py-4 text-sm text-hicado-navy/50 font-bold">
+                        {row.paidCount} đủ / {row.partialCount ?? 0} thiếu / {row.studentCount}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -626,7 +637,7 @@ export const FinancialPage = () => {
               <div className="p-8 border-b border-rose-100 flex items-center justify-between">
                 <div>
                   <p className="text-[9px] font-black text-rose-400 uppercase tracking-[0.4em] mb-1">Cần theo dõi</p>
-                  <h3 className="text-xl font-black text-hicado-navy">Học sinh chưa nộp học phí</h3>
+                  <h3 className="text-xl font-black text-hicado-navy">Học sinh còn thiếu học phí</h3>
                 </div>
                 <span className="px-4 py-2 bg-rose-50 text-rose-500 font-black text-sm rounded-xl border border-rose-200">
                   {financeStats.pendingStudents.length} học sinh
@@ -644,8 +655,12 @@ export const FinancialPage = () => {
                       <p className="font-black text-rose-500 text-sm">{s.totalDebt.toLocaleString('vi-VN')}đ</p>
                       <span className={clsx(
                         'text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg mt-1 inline-block',
-                        s.tuitionStatus === 'DEBT' ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'
-                      )}>{s.tuitionStatus}</span>
+                        s.paymentStatus === 'PAID_PARTIAL'
+                          ? 'bg-amber-100 text-amber-600'
+                          : s.tuitionStatus === 'DEBT'
+                            ? 'bg-rose-100 text-rose-600'
+                            : 'bg-slate-100 text-slate-600'
+                      )}>{s.paymentStatus === 'PAID_PARTIAL' ? 'THIẾU' : s.tuitionStatus}</span>
                     </div>
                   </div>
                 ))}
@@ -767,6 +782,7 @@ export const FinancialPage = () => {
               !trackSearch || s.name.toLowerCase().includes(trackSearch.toLowerCase()) ||
               (s.studentCode || '').toLowerCase().includes(trackSearch.toLowerCase())
             );
+            const trackingRate = summary.totalExpected > 0 ? (summary.totalCollected / summary.totalExpected) * 100 : 0;
             return (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -787,16 +803,16 @@ export const FinancialPage = () => {
                 <div className="glass-card rounded-[2rem] p-5 border border-hicado-slate flex items-center gap-4 flex-wrap">
                   <div className="flex-1 min-w-[200px]">
                     <div className="flex justify-between text-[10px] font-black text-hicado-navy/40 mb-1.5">
-                      <span>Đã thu: {(summary.totalCollected / 1_000_000).toFixed(1)}M đ</span>
-                      <span>Cần thu: {(summary.totalExpected / 1_000_000).toFixed(1)}M đ</span>
+                      <span>Đã thu: {formatMoney(summary.totalCollected)}đ</span>
+                      <span>Cần thu: {formatMoney(summary.totalExpected)}đ</span>
                     </div>
                     <div className="h-2 bg-hicado-slate rounded-full overflow-hidden">
                       <div className="h-full bg-hicado-emerald rounded-full transition-all"
-                        style={{ width: `${summary.totalExpected > 0 ? Math.round((summary.totalCollected / summary.totalExpected) * 100) : 0}%` }} />
+                        style={{ width: `${trackingRate}%` }} />
                     </div>
                   </div>
                   <span className="text-2xl font-black text-hicado-emerald text-glow">
-                    {summary.totalExpected > 0 ? Math.round((summary.totalCollected / summary.totalExpected) * 100) : 0}%
+                    {formatPercent(trackingRate)}
                   </span>
                 </div>
 
