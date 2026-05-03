@@ -4,7 +4,9 @@ import { AuthStore, Auth } from './types';
 
 export const jwtExpired = (token: string): boolean => {
   try {
-    const { exp } = JSON.parse(atob(token.split('.')[1]));
+    // JWT uses base64url (RFC 4648 §5); atob needs standard base64 (§4)
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const { exp } = JSON.parse(atob(b64));
     return exp * 1000 < Date.now();
   } catch { return true; }
 };

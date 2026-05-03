@@ -39,8 +39,7 @@ export const Login = () => {
     try {
       await login(data.username, data.password);
       toast.success('Đăng nhập thành công');
-      const nextAuth = useAuthStore.getState().auth;
-      navigate(routeForRole(nextAuth?.role), { replace: true });
+      // navigation handled by useEffect after React commits auth state
     } catch (error: any) {
       toast.error(error.message || 'Sai tài khoản hoặc mật khẩu');
     }
