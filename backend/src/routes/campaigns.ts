@@ -253,39 +253,56 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   });
 });
 
-// Debug endpoint — tests each step of the image-send pipeline
+// Debug endpoint — uploads test PNG then tries every known CS image format + text fallback
+// GET /api/campaigns/debug/image-send?zaloUserId=XXXX  (zaloUserId optional — skips send test if omitted)
 router.get('/debug/image-send', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
-  const steps: Record<string, any> = {};
+  const testUserId = req.query.zaloUserId as string | undefined;
+  const result: Record<string, any> = {};
   try {
-    // Step 1: Zalo config
     const cfg = await getZaloConfig();
-    steps.step1_config = { hasToken: !!cfg.ZALO_ACCESS_TOKEN, tokenPreview: cfg.ZALO_ACCESS_TOKEN?.slice(0, 10) + '...' };
+    result.token_preview = cfg.ZALO_ACCESS_TOKEN?.slice(0, 12) + '...' + cfg.ZALO_ACCESS_TOKEN?.slice(-4);
+    result.has_token = !!cfg.ZALO_ACCESS_TOKEN;
 
-    // Step 2: Build PNG
-    const { buildPaymentSlipPNG: bsp } = await import('../lib/paymentSlip');
-    const { generateVietQRString: gvqs } = await import('../lib/vietqr');
-    const qrData = gvqs('970436', '123456789', 100000, 'HS001 TOAN TEST');
-    const pngBuffer = await bsp({ studentName: 'Test Student', studentCode: 'HS001', className: 'Toan Hoc', classCode: 'TOAN', attended: 5, tuitionPerSession: 200000, amount: 1000000, memo: 'HS001 TOAN TEST', qrData });
-    steps.step2_png = { ok: true, bytes: pngBuffer.length };
+    // PNG build
+    const qrData = generateVietQRString('970436', '123456789', 100000, 'HS001 TOAN TEST');
+    const pngBuffer = await buildPaymentSlipPNG({ studentName: 'Test Student', studentCode: 'HS001', className: 'Toan Hoc', classCode: 'TOAN', attended: 5, tuitionPerSession: 200000, amount: 1000000, memo: 'HS001 TOAN TEST', qrData });
+    result.png_bytes = pngBuffer.length;
 
-    // Step 3: Upload to Zalo
-    const FormDataLib = require('form-data');
-    const axiosLib = require('axios');
-    const form = new FormDataLib();
+    // Upload
+    const form = new FormData();
     form.append('file', pngBuffer, { filename: 'payment.png', contentType: 'image/png' });
-    const uploadRes = await axiosLib.post(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
+    const uploadRes = await axios.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
       headers: { ...form.getHeaders(), access_token: cfg.ZALO_ACCESS_TOKEN },
     });
-    steps.step3_upload = { error: uploadRes.data?.error, message: uploadRes.data?.message, data: uploadRes.data?.data };
+    result.upload = uploadRes.data;
+    const uploadedToken = uploadRes.data?.data?.attachment_id;
+    if (!uploadedToken) return res.json({ ok: false, result, verdict: 'Upload failed or no attachment_id in response' });
 
-    if (uploadRes.data?.error !== 0) {
-      return res.json({ ok: false, steps, verdict: 'Upload to Zalo failed — check Zalo token or OA permissions' });
-    }
+    if (!testUserId) return res.json({ ok: true, result, verdict: 'Upload OK. Re-call with ?zaloUserId=XXX to test CS send formats.' });
 
-    steps.verdict = 'All steps OK — image pipeline works';
-    res.json({ ok: true, steps });
+    const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
+
+    // Try 4 CS message formats in parallel
+    const tryFormat = async (label: string, message: any) => {
+      try {
+        const r = await axios.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`,
+          { recipient: { user_id: testUserId }, message }, { headers });
+        return { label, error: r.data?.error, message: r.data?.message, data: r.data?.data };
+      } catch (e: any) { return { label, exception: e.message }; }
+    };
+
+    result.cs_format_tests = await Promise.all([
+      tryFormat('A: {token}',         { attachment: { type: 'image', payload: { token: uploadedToken } } }),
+      tryFormat('B: {attachment_id}', { attachment: { type: 'image', payload: { attachment_id: uploadedToken } } }),
+      tryFormat('C: text fallback',   { text: 'Hicado debug test - plain text' }),
+      tryFormat('D: template/media',  { attachment: { type: 'template', payload: { template_type: 'media', elements: [{ media_type: 'image', attachment_id: uploadedToken }] } } }),
+    ]);
+
+    const winner = result.cs_format_tests.find((t: any) => t.error === 0);
+    result.verdict = winner ? `✅ Working format: ${winner.label}` : `❌ All formats failed — check OA type/permissions`;
+    res.json({ ok: !!winner, result });
   } catch (err: any) {
-    res.json({ ok: false, steps, error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
+    res.json({ ok: false, result, error: err.message });
   }
 });
 
