@@ -32,9 +32,27 @@ enum AttendanceStatus {
   LEAVE_REQUEST
 }
 
+enum AttendanceSlot {
+  MORNING
+  AFTERNOON
+  EVENING
+  CUSTOM
+}
+
+enum AttendanceAuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
 enum TransactionStatus {
   SUCCESS
   FAILED
+}
+
+enum PaymentAdjustmentSource {
+  CASH
+  ADJUSTMENT
 }
 
 model User {
@@ -95,6 +113,7 @@ model Student {
   classes        ClassStudent[]
   attendances    Attendance[]
   transactions   Transaction[]
+  paymentAdjustments PaymentAdjustment[]
   zaloMessageLogs ZaloMessageLog[]
 
   createdAt      DateTime @default(now())
@@ -147,6 +166,8 @@ model ClassStudent {
 model Attendance {
   id             String           @id @default(uuid())
   date           DateTime
+  slot           AttendanceSlot   @default(MORNING)
+  sessionUnits   Float            @default(1)
   status         AttendanceStatus
   note           String?          @db.Text
   markedByUserId String?          // Reference to User ID who marked this
@@ -158,8 +179,36 @@ model Attendance {
   class          Class    @relation(fields: [classId], references: [id])
   studentId      String
   student        Student  @relation(fields: [studentId], references: [id])
+  audits         AttendanceAudit[]
 
-  @@unique([classId, studentId, date])
+  @@unique([classId, studentId, date, slot])
+}
+
+model AttendanceAudit {
+  id               String               @id @default(uuid())
+  attendanceId     String?
+  attendance       Attendance?          @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
+  action           AttendanceAuditAction
+  reason           String?
+
+  classId          String
+  studentId        String
+  oldStudentId     String?
+  date             DateTime
+  oldDate          DateTime?
+  slot             AttendanceSlot
+  oldSlot          AttendanceSlot?
+  status           AttendanceStatus
+  oldStatus        AttendanceStatus?
+  sessionUnits     Float
+  oldSessionUnits  Float?
+  note             String?
+  oldNote          String?
+
+  changedByUserId  String?
+  changedByName    String?
+  changedByRole    String?
+  changedAt        DateTime             @default(now())
 }
 
 model Transaction {
@@ -179,6 +228,21 @@ model Transaction {
 
   studentId String
   student   Student @relation(fields: [studentId], references: [id])
+}
+
+model PaymentAdjustment {
+  id              String                  @id @default(uuid())
+  studentId       String
+  student         Student                 @relation(fields: [studentId], references: [id])
+  classId         String?
+  source          PaymentAdjustmentSource @default(CASH)
+  amount          Int
+  note            String?
+  effectiveDate   DateTime                @default(now())
+  createdByUserId String?
+  createdByName   String?
+  createdByRole   String?
+  createdAt       DateTime                @default(now())
 }
 
 model ZaloTemplate {

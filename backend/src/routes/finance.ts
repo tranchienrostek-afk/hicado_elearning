@@ -25,10 +25,15 @@ router.get('/transactions', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'
 // Financial summary
 router.get('/summary', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const totalRevenue = await prisma.transaction.aggregate({
-      _sum: { amount: true },
-      where: { status: 'SUCCESS' }
-    });
+    const [totalRevenue, totalAdjustments] = await Promise.all([
+      prisma.transaction.aggregate({
+        _sum: { amount: true },
+        where: { status: 'SUCCESS' }
+      }),
+      prisma.paymentAdjustment.aggregate({
+        _sum: { amount: true },
+      }),
+    ]);
 
     const studentStats = await prisma.student.groupBy({
       by: ['tuitionStatus'],
@@ -36,7 +41,7 @@ router.get('/summary', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), as
     });
 
     res.json({
-      totalRevenue: totalRevenue._sum.amount || 0,
+      totalRevenue: (totalRevenue._sum.amount || 0) + (totalAdjustments._sum.amount || 0),
       studentStats
     });
   } catch (error) {
@@ -68,9 +73,11 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
     const bankCfgMap = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
     const bankBin = bankCfgMap.BANK_BIN || process.env.BANK_BIN || '970436';
     const accountNo = bankCfgMap.BANK_ACC || process.env.BANK_ACC || '123456789';
-    const attended = await prisma.attendance.count({
+    const attendedAgg = await prisma.attendance.aggregate({
+      _sum: { sessionUnits: true },
       where: { studentId, classId, status: 'PRESENT' },
     });
+    const attended = attendedAgg._sum.sessionUnits || 0;
     const amount = classItem.tuitionPerSession * attended;
     const memo = deaccent(`${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`).trim().toUpperCase().slice(0, 50);
 
@@ -95,7 +102,7 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
     twelveMonthsAgo.setDate(1);
     twelveMonthsAgo.setHours(0, 0, 0, 0);
 
-    const [recentTxs, allClasses, allSuccessTxs, presentAttendances, totalAgg] = await Promise.all([
+    const [recentTxs, allClasses, allSuccessTxs, presentAttendances, totalAgg, allAdjustments] = await Promise.all([
       prisma.transaction.findMany({
         where: { status: 'SUCCESS', date: { gte: twelveMonthsAgo } },
         include: {
@@ -124,9 +131,12 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       }),
       prisma.attendance.findMany({
         where: { status: 'PRESENT' },
-        select: { classId: true, studentId: true, status: true },
+        select: { classId: true, studentId: true, status: true, sessionUnits: true },
       }),
       prisma.transaction.aggregate({ _sum: { amount: true }, where: { status: 'SUCCESS' } }),
+      prisma.paymentAdjustment.findMany({
+        select: { id: true, studentId: true, classId: true, amount: true, effectiveDate: true, note: true, source: true },
+      }),
     ]);
 
     // Monthly revenue
@@ -139,8 +149,16 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([month, amount]) => ({ month, amount }));
 
-    const collectionByClass = buildClassCollectionStats(allClasses, allSuccessTxs, presentAttendances);
-    const pendingList = buildStudentPaymentRows(allClasses, allSuccessTxs, presentAttendances)
+    const virtualAdjustmentsAsTx = allAdjustments.map((a) => ({
+      id: `adj-${a.id}`,
+      studentId: a.studentId,
+      classId: a.classId,
+      amount: a.amount,
+    }));
+    const allPaidLike = [...allSuccessTxs, ...virtualAdjustmentsAsTx];
+
+    const collectionByClass = buildClassCollectionStats(allClasses, allPaidLike as any, presentAttendances);
+    const pendingList = buildStudentPaymentRows(allClasses, allPaidLike as any, presentAttendances)
       .filter(s => s.paymentStatus !== 'PAID_FULL')
       .map(s => ({
         id: s.id,
@@ -153,7 +171,7 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
         classes: s.classes,
       }));
 
-    const totalCollected = totalAgg._sum.amount || 0;
+    const totalCollected = (totalAgg._sum.amount || 0) + allAdjustments.reduce((sum, adj) => sum + adj.amount, 0);
     const totalExpected = collectionByClass.reduce((sum, cls) => sum + cls.expected, 0);
 
     res.json({
@@ -168,6 +186,7 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
         studentCode: tx.student?.studentCode ?? '—',
         classes: tx.student?.classes?.map(cs => cs.class.name).join(', ') ?? '—',
       })),
+      manualAdjustments: allAdjustments,
     });
   } catch (err) {
     console.error('[Finance Stats]', err);
@@ -198,9 +217,11 @@ router.get('/public/student/:studentId', async (req, res) => {
     const classQRs = await Promise.all(
       student.classes.map(async cs => {
         const cls = cs.class;
-        const attended = await prisma.attendance.count({
+        const attendedAgg = await prisma.attendance.aggregate({
+          _sum: { sessionUnits: true },
           where: { studentId: student.id, classId: cls.id, status: 'PRESENT' },
         });
+        const attended = attendedAgg._sum.sessionUnits || 0;
         const amount = cls.tuitionPerSession * attended;
         const memo = deaccent(`${student.studentCode ?? student.id} ${cls.classCode ?? cls.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
         const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
@@ -229,9 +250,12 @@ router.get('/qr-png/:studentId/:classId', async (req, res) => {
     ]);
     if (!student || !classItem) return res.status(404).end();
     const bm = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
-    const attended = Number(req.query.attended ?? await prisma.attendance.count({
+    const attendedFromQuery = req.query.attended != null ? Number(req.query.attended) : null;
+    const attendedAgg = attendedFromQuery == null ? await prisma.attendance.aggregate({
+      _sum: { sessionUnits: true },
       where: { studentId: student.id, classId: classItem.id, status: 'PRESENT' },
-    }));
+    }) : null;
+    const attended = attendedFromQuery ?? attendedAgg?._sum.sessionUnits ?? 0;
     const amount = classItem.tuitionPerSession * attended;
     const memo = deaccent(`${student.studentCode ?? student.id} ${classItem.classCode ?? classItem.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
     const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', amount, memo);
@@ -263,18 +287,21 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
     const studentWhere: any = {};
     if (classId) studentWhere.classes = { some: { classId } };
 
-    const [students, allTransactions] = await Promise.all([
+    const [students, allTransactions, allAdjustments] = await Promise.all([
       prisma.student.findMany({
         where: studentWhere,
         include: {
           classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } } },
-          attendances: { where: { status: 'PRESENT' }, select: { classId: true } },
+          attendances: { where: { status: 'PRESENT' }, select: { classId: true, sessionUnits: true } },
         },
         orderBy: { name: 'asc' },
       }),
       prisma.transaction.findMany({
         where: txWhere,
         orderBy: { date: 'desc' },
+      }),
+      prisma.paymentAdjustment.findMany({
+        orderBy: { effectiveDate: 'desc' },
       }),
     ]);
 
@@ -295,9 +322,12 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
     // Build per-student result
     const result = students.map((s: any) => {
       const txList = allTransactions.filter((t: any) => t.studentId === s.id);
-      const totalPaid = txList.reduce((sum: number, t: any) => sum + t.amount, 0);
+      const adjustmentList = allAdjustments.filter((a: any) => a.studentId === s.id);
+      const totalPaid = txList.reduce((sum: number, t: any) => sum + t.amount, 0) + adjustmentList.reduce((sum: number, a: any) => sum + a.amount, 0);
       const totalExpected = s.classes.reduce((sum: number, cs: any) => {
-        const attended = s.attendances.filter((a: any) => a.classId === cs.class.id).length;
+        const attended = s.attendances
+          .filter((a: any) => a.classId === cs.class.id)
+          .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
         return sum + cs.class.tuitionPerSession * attended;
       }, 0);
       const totalBalance = Math.max(0, totalExpected - totalPaid);
@@ -315,8 +345,12 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
         tuitionStatus: s.tuitionStatus,
         classes: s.classes.map((cs: any) => ({
           classId: cs.class.id, className: cs.class.name, classCode: cs.class.classCode,
-          attended: s.attendances.filter((a: any) => a.classId === cs.class.id).length,
-          expected: cs.class.tuitionPerSession * s.attendances.filter((a: any) => a.classId === cs.class.id).length,
+          attended: s.attendances
+            .filter((a: any) => a.classId === cs.class.id)
+            .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0),
+          expected: cs.class.tuitionPerSession * s.attendances
+            .filter((a: any) => a.classId === cs.class.id)
+            .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0),
         })),
         totalExpected, totalPaid, totalBalance,
         paymentStatus,
@@ -324,6 +358,14 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
           id: t.id, amount: t.amount,
           date: t.date, content: t.content,
           classId: t.classId,
+        })),
+        adjustments: adjustmentList.map((a: any) => ({
+          id: a.id,
+          amount: a.amount,
+          source: a.source,
+          note: a.note,
+          date: a.effectiveDate,
+          classId: a.classId,
         })),
         lastPaymentDate: txList[0]?.date ?? null,
         lastZaloNotification: lastZalo ? {
@@ -352,6 +394,54 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
   } catch (err) {
     console.error('[Payment Tracking]', err);
     res.status(500).json({ message: 'Lỗi khi lấy dữ liệu theo dõi thu tiền' });
+  }
+});
+
+// Manual adjustments (cash/other), with actor + note for audit trail
+router.post('/payment-adjustments', authenticateToken, authorizeRoles('ADMIN', 'MANAGER', 'TEACHER'), async (req, res) => {
+  const user = (req as any).user;
+  const { studentId, classId, amount, source = 'CASH', note, effectiveDate } = req.body || {};
+  const value = Number(amount);
+  if (!studentId || !Number.isFinite(value) || value === 0) {
+    return res.status(400).json({ message: 'studentId va amount hop le la bat buoc' });
+  }
+  try {
+    const actorName = user.name ?? (
+      await prisma.user.findUnique({ where: { id: user.id }, select: { name: true } })
+    )?.name;
+    const created = await prisma.paymentAdjustment.create({
+      data: {
+        studentId,
+        classId: classId || null,
+        amount: Math.round(value),
+        source: source === 'ADJUSTMENT' ? 'ADJUSTMENT' : 'CASH',
+        note: note || null,
+        effectiveDate: effectiveDate ? new Date(effectiveDate) : new Date(),
+        createdByUserId: user.id,
+        createdByName: actorName || null,
+        createdByRole: user.role,
+      }
+    });
+    res.status(201).json(created);
+  } catch (error) {
+    console.error('[Payment Adjustment Create]', error);
+    res.status(500).json({ message: 'Khong the tao dieu chinh thanh toan' });
+  }
+});
+
+router.get('/payment-adjustments', authenticateToken, authorizeRoles('ADMIN', 'MANAGER', 'TEACHER'), async (req, res) => {
+  const studentId = req.query.studentId as string | undefined;
+  try {
+    const rows = await prisma.paymentAdjustment.findMany({
+      where: studentId ? { studentId } : undefined,
+      orderBy: { createdAt: 'desc' },
+      include: { student: { select: { id: true, name: true, studentCode: true } } },
+      take: 500,
+    });
+    res.json(rows);
+  } catch (error) {
+    console.error('[Payment Adjustment List]', error);
+    res.status(500).json({ message: 'Khong the lay lich su dieu chinh thanh toan' });
   }
 });
 

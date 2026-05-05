@@ -5,11 +5,19 @@ import { SkeletonTable } from '@/views/components/skeleton';
 import { attendanceSameDay } from '@/utils/attendance-date';
 
 type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LEAVE_REQUEST';
+type AttendanceSlot = 'MORNING' | 'AFTERNOON' | 'EVENING' | 'CUSTOM';
 
 const STATUS_LABEL: Record<AttendanceStatus, string> = {
-  PRESENT: 'Đi học',
-  ABSENT: 'Vắng mặt',
-  LEAVE_REQUEST: 'Xin nghỉ',
+  PRESENT: 'Di hoc',
+  ABSENT: 'Vang mat',
+  LEAVE_REQUEST: 'Xin nghi',
+};
+
+const SLOT_LABEL: Record<AttendanceSlot, string> = {
+  MORNING: 'Sang',
+  AFTERNOON: 'Chieu',
+  EVENING: 'Toi',
+  CUSTOM: 'Ca khac',
 };
 
 const formatDateTime = (value?: string) => {
@@ -18,7 +26,7 @@ const formatDateTime = (value?: string) => {
 };
 
 export const AttendancePage = () => {
-  const { classes, students, teachers, addAttendance, fetchAttendance, attendance, isLoading } = useCenterStore();
+  const { classes, students, teachers, addAttendance, updateAttendance, deleteAttendance, fetchAttendance, attendance, isLoading } = useCenterStore();
   const { auth } = useAuthStore();
 
   const isTeacher = auth?.role === 'TEACHER';
@@ -35,6 +43,8 @@ export const AttendancePage = () => {
 
   const [selectedClassId, setSelectedClassId] = useState(accessibleClasses[0]?.id || '');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [slot, setSlot] = useState<AttendanceSlot>('MORNING');
+  const [sessionUnits, setSessionUnits] = useState<number>(1);
 
   useEffect(() => {
     if (!selectedClassId && accessibleClasses.length > 0) {
@@ -49,7 +59,7 @@ export const AttendancePage = () => {
   const selectedClass = accessibleClasses.find((item) => item.id === selectedClassId);
 
   useEffect(() => {
-    if (selectedClassId) fetchAttendance(selectedClassId, date);
+    if (selectedClassId) void fetchAttendance(selectedClassId, date);
   }, [date, fetchAttendance, selectedClassId]);
 
   const classStudentIds = useMemo(
@@ -60,9 +70,21 @@ export const AttendancePage = () => {
   const selectedTeacherName = teachers.find((item) => item.id === selectedClass?.teacherId)?.name || 'N/A';
 
   const classRecords = useMemo(
-    () => attendance.filter((item) => item.classId === selectedClassId && attendanceSameDay(item.date, date)),
-    [attendance, date, selectedClassId]
+    () => attendance.filter((item) => item.classId === selectedClassId && attendanceSameDay(item.date, date) && (item.slot || 'MORNING') === slot),
+    [attendance, date, selectedClassId, slot]
   );
+
+  const slotCards = useMemo(() => {
+    const slots: AttendanceSlot[] = ['MORNING', 'AFTERNOON', 'EVENING', 'CUSTOM'];
+    return slots.map((slotKey) => {
+      const records = attendance.filter(
+        (item) => item.classId === selectedClassId && attendanceSameDay(item.date, date) && (item.slot || 'MORNING') === slotKey
+      );
+      const presentCount = records.filter((item) => item.status === 'PRESENT').length;
+      const units = Number(records.filter((item) => item.status === 'PRESENT').reduce((sum, item) => sum + (item.sessionUnits || 1), 0).toFixed(2));
+      return { slot: slotKey, count: records.length, presentCount, units };
+    });
+  }, [attendance, date, selectedClassId]);
 
   const recordMap = useMemo(() => {
     const map = new Map<string, (typeof classRecords)[number]>();
@@ -85,11 +107,23 @@ export const AttendancePage = () => {
 
   const handleToggle = (studentId: string, status: AttendanceStatus) => {
     if (!isTeacher || !selectedClassId) return;
-    addAttendance({
-      id: `ATT-${selectedClassId}-${studentId}-${date}`,
+    const existed = recordMap.get(studentId);
+    if (existed) {
+      void updateAttendance(existed.id, {
+        status,
+        sessionUnits,
+        slot,
+        reason: 'teacher-update',
+      });
+      return;
+    }
+    void addAttendance({
+      id: `ATT-${selectedClassId}-${studentId}-${date}-${slot}`,
       classId: selectedClassId,
       studentId,
       date,
+      slot,
+      sessionUnits,
       status,
       markedByUserId: auth?.id,
       markedByName: auth?.name,
@@ -104,19 +138,15 @@ export const AttendancePage = () => {
 
   return (
     <div className="space-y-8 pb-24 md:pb-8 animate-in fade-in duration-700">
-
-      {/* Header Controls */}
       <div className="relative rounded-[2.5rem] overflow-hidden border border-hicado-slate shadow-premium">
         <div className="premium-gradient p-8 md:p-10">
           <div className="absolute top-0 right-0 w-48 h-48 bg-hicado-emerald/10 rounded-full -mr-24 -mt-24 blur-3xl pointer-events-none" />
           <div className="relative z-10 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
             <div>
               <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-2">Attendance</p>
-              <h2 className="text-2xl font-serif font-black text-white tracking-tight">Điểm danh lớp học</h2>
+              <h2 className="text-2xl font-serif font-black text-white tracking-tight">Diem danh lop hoc</h2>
               <p className="text-sm text-white/40 font-bold mt-1">
-                {isTeacher
-                  ? 'Cập nhật điểm danh cho lớp bạn phụ trách.'
-                  : 'Giám sát hành động điểm danh của giáo viên theo từng lớp.'}
+                {isTeacher ? 'Cap nhat diem danh theo tung ca va he so ca.' : 'Giam sat lich su diem danh va chinh sua.'}
               </p>
             </div>
 
@@ -139,30 +169,49 @@ export const AttendancePage = () => {
                 onChange={(e) => setDate(e.target.value)}
                 className="bg-white/10 border border-white/20 text-white rounded-2xl px-5 py-3 outline-none focus:border-hicado-emerald/50 transition-all font-bold text-sm"
               />
-              <span className={clsx(
-                'px-4 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest border self-center',
-                isTeacher
-                  ? 'bg-hicado-emerald/20 border-hicado-emerald/30 text-hicado-emerald'
-                  : 'bg-white/10 border-white/20 text-white/60'
-              )}>
-                {isTeacher ? 'Giáo viên' : 'Giám sát'}
-              </span>
+              <input
+                type="number"
+                step="0.1"
+                min="0.1"
+                value={sessionUnits}
+                onChange={(e) => setSessionUnits(Math.max(0.1, Number(e.target.value || 1)))}
+                className="w-28 bg-white/10 border border-white/20 text-white rounded-2xl px-4 py-3 outline-none focus:border-hicado-emerald/50 transition-all font-bold text-sm"
+                title="So ca co the la so le (vi du 1.5)"
+              />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Stats Strip */}
+      {selectedClass && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          {slotCards.map((card) => (
+            <button
+              key={card.slot}
+              onClick={() => setSlot(card.slot)}
+              className={clsx(
+                'glass-card rounded-2xl p-4 border text-left transition-all',
+                slot === card.slot ? 'border-hicado-emerald bg-hicado-emerald/10' : 'border-hicado-slate'
+              )}
+            >
+              <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{SLOT_LABEL[card.slot]}</p>
+              <p className="text-sm font-black text-hicado-navy mt-1">{card.count} hoc sinh</p>
+              <p className="text-[10px] text-hicado-emerald font-black mt-1">{card.presentCount} co mat · {card.units} ca</p>
+            </button>
+          ))}
+        </div>
+      )}
+
       {selectedClass && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 md:gap-4">
           {[
-            { label: 'Giáo viên', value: selectedTeacherName, color: 'text-hicado-navy' },
-            { label: 'Tiến độ', value: `${completionCount}/${classStudents.length}`, color: 'text-hicado-navy' },
-            { label: 'Có mặt', value: presentCount, color: 'text-hicado-emerald' },
-            { label: 'Vắng / Xin nghỉ', value: `${absentCount} / ${leaveCount}`, color: 'text-rose-500' },
+            { label: 'Giao vien', value: selectedTeacherName, color: 'text-hicado-navy' },
+            { label: 'Tien do', value: `${completionCount}/${classStudents.length}`, color: 'text-hicado-navy' },
+            { label: 'Co mat', value: presentCount, color: 'text-hicado-emerald' },
+            { label: 'Vang / Xin nghi', value: `${absentCount} / ${leaveCount}`, color: 'text-rose-500' },
             {
-              label: 'Cập nhật cuối',
-              value: lastRecord?.markedByName || 'Chưa có',
+              label: 'Cap nhat cuoi',
+              value: lastRecord?.markedByName || 'Chua co',
               sub: formatDateTime(lastRecord?.markedAt),
               color: 'text-hicado-navy',
             },
@@ -176,27 +225,25 @@ export const AttendancePage = () => {
         </div>
       )}
 
-      {/* Observer notice */}
       {isObserver && classRecords.length > 0 && (
         <div className="glass-card rounded-2xl px-6 py-4 border border-hicado-emerald/20 bg-hicado-emerald/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <p className="text-xs font-bold text-hicado-navy">
-            Trạng thái giám sát:{' '}
-            <span className="text-hicado-emerald">{isTeacherMarked ? 'Điểm danh do giáo viên cập nhật' : 'Cần kiểm tra người cập nhật'}</span>
+            Trang thai giam sat:{' '}
+            <span className="text-hicado-emerald">{isTeacherMarked ? 'Diem danh do giao vien cap nhat' : 'Can kiem tra nguoi cap nhat'}</span>
           </p>
           <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">
-            Lớp {selectedClass?.name} • {date}
+            Lop {selectedClass?.name} · {date} · {SLOT_LABEL[slot]}
           </p>
         </div>
       )}
 
-      {/* Student List */}
       <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
         <div className="px-8 py-6 border-b border-hicado-slate flex justify-between items-center">
           <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">
-            Học viên ({classStudents.length})
+            Hoc vien ({classStudents.length})
           </p>
           <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">
-            {isTeacher ? 'Thao tác điểm danh' : 'Trạng thái & nhật ký'}
+            {isTeacher ? 'Diem danh theo ca' : 'Trang thai & nhat ky'}
           </p>
         </div>
 
@@ -223,15 +270,18 @@ export const AttendancePage = () => {
                   <div>
                     <h3 className="text-sm font-black text-hicado-navy">{student.name}</h3>
                     <p className="text-[10px] text-hicado-navy/30 font-bold uppercase tracking-widest">ID: {student.id}</p>
+                    {record?.sessionUnits ? (
+                      <p className="text-[10px] text-hicado-emerald font-black uppercase tracking-widest">{record.sessionUnits} ca</p>
+                    ) : null}
                   </div>
                 </div>
 
                 {isTeacher ? (
-                  <div className="grid grid-cols-3 gap-2 w-full md:w-auto">
+                  <div className="grid grid-cols-4 gap-2 w-full md:w-auto">
                     {([
-                      { status: 'PRESENT' as AttendanceStatus, label: 'Đi học', active: 'bg-hicado-emerald border-hicado-emerald text-hicado-navy shadow-lg shadow-hicado-emerald/20' },
-                      { status: 'ABSENT' as AttendanceStatus, label: 'Vắng', active: 'bg-rose-500 border-rose-500 text-white shadow-lg shadow-rose-500/20' },
-                      { status: 'LEAVE_REQUEST' as AttendanceStatus, label: 'Xin nghỉ', active: 'bg-amber-400 border-amber-400 text-white shadow-lg shadow-amber-400/20' },
+                      { status: 'PRESENT' as AttendanceStatus, label: 'Di hoc', active: 'bg-hicado-emerald border-hicado-emerald text-hicado-navy shadow-lg shadow-hicado-emerald/20' },
+                      { status: 'ABSENT' as AttendanceStatus, label: 'Vang', active: 'bg-rose-500 border-rose-500 text-white shadow-lg shadow-rose-500/20' },
+                      { status: 'LEAVE_REQUEST' as AttendanceStatus, label: 'Xin nghi', active: 'bg-amber-400 border-amber-400 text-white shadow-lg shadow-amber-400/20' },
                     ]).map(({ status, label, active }) => (
                       <button
                         key={status}
@@ -246,6 +296,12 @@ export const AttendancePage = () => {
                         {label}
                       </button>
                     ))}
+                    <button
+                      onClick={() => { if (record) void deleteAttendance(record.id, 'teacher-delete-wrong'); }}
+                      className="px-3 py-2.5 rounded-xl text-[10px] font-black transition-all border outline-none whitespace-nowrap bg-white border-rose-200 text-rose-500 hover:bg-rose-50"
+                    >
+                      Xoa
+                    </button>
                   </div>
                 ) : (
                   <div className="text-right">
@@ -256,10 +312,10 @@ export const AttendancePage = () => {
                       currentStatus === 'LEAVE_REQUEST' && 'bg-amber-50 text-amber-600 border-amber-100',
                       !currentStatus && 'bg-hicado-slate text-hicado-navy/30 border-hicado-slate',
                     )}>
-                      {currentStatus ? STATUS_LABEL[currentStatus] : 'Chưa điểm danh'}
+                      {currentStatus ? STATUS_LABEL[currentStatus] : 'Chua diem danh'}
                     </span>
                     <p className="mt-1.5 text-[10px] text-hicado-navy/40 font-black uppercase tracking-widest">
-                      {record?.markedByName || 'Chưa cập nhật'}
+                      {record?.markedByName || 'Chua cap nhat'}
                     </p>
                     <p className="text-[10px] text-hicado-navy/30 font-bold">{formatDateTime(record?.markedAt)}</p>
                   </div>
@@ -271,26 +327,13 @@ export const AttendancePage = () => {
 
         {classStudents.length === 0 && (
           <div className="py-16 text-center space-y-3">
-            <div className="text-4xl opacity-20">📋</div>
             <p className="text-sm font-black text-hicado-navy/30 uppercase tracking-widest italic">
-              Không có dữ liệu học viên cho lớp này.
+              Khong co du lieu hoc vien cho lop nay.
             </p>
           </div>
-        )}
-      </div>
-
-      {/* Footer Action */}
-      <div className="flex justify-end">
-        {isTeacher ? (
-          <button className="bg-hicado-navy text-white px-10 py-4 rounded-2xl font-black shadow-2xl shadow-hicado-navy/20 hover:bg-hicado-emerald hover:text-hicado-navy hover:scale-[1.02] active:scale-[0.98] transition-all uppercase tracking-[0.2em] text-xs">
-            Hoàn thành ca dạy
-          </button>
-        ) : (
-          <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">
-            Quản lý / Kế toán chỉ giám sát, không thao tác điểm danh.
-          </p>
         )}
       </div>
     </div>
   );
 };
+

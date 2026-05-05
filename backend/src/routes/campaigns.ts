@@ -78,7 +78,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
         ...(filters.classIds?.length ? { where: { classId: { in: filters.classIds } } } : {}),
         include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } },
       },
-      attendances: { where: { status: 'PRESENT' }, select: { classId: true } },
+      attendances: { where: { status: 'PRESENT' }, select: { classId: true, sessionUnits: true } },
     },
   });
 
@@ -109,7 +109,9 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     // ── Compute tuition amount (used by both CS message and ZNS template_data) ──
     let totalDue = 0;
     for (const cs of student.classes) {
-      const attended = student.attendances.filter((a: any) => a.classId === cs.class.id).length;
+      const attended = student.attendances
+        .filter((a: any) => a.classId === cs.class.id)
+        .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
       totalDue += cs.class.tuitionPerSession * attended;
     }
 
@@ -158,7 +160,9 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     if (!student.zaloUserId) { failedCount++; continue; }
 
     // Build message + capture step-by-step trace (stored in errorReason for full UI visibility)
-    const primaryAttended = student.attendances.filter((a: any) => a.classId === primaryClassId).length;
+    const primaryAttended = student.attendances
+      .filter((a: any) => a.classId === primaryClassId)
+      .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
     const trace: string[] = [];
     let message: any;
 

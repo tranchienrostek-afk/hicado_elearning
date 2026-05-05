@@ -102,13 +102,41 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
           (item) =>
             item.classId === record.classId &&
             item.studentId === record.studentId &&
-            attendanceDateKey(item.date) === attendanceDateKey(record.date)
+            attendanceDateKey(item.date) === attendanceDateKey(record.date) &&
+            (item.slot || 'MORNING') === (record.slot || 'MORNING')
         );
         if (existingIndex === -1) return { attendance: [...state.attendance, newRecord] };
         const next = [...state.attendance];
         next[existingIndex] = newRecord;
         return { attendance: next };
       });
+    }
+  },
+
+  updateAttendance: async (id, updates) => {
+    const response = await fetchWithAuth(`/api/attendance/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (response.ok) {
+      const updated = await response.json();
+      set((state) => ({
+        attendance: state.attendance.map((item) => (item.id === id ? updated : item)),
+      }));
+    }
+  },
+
+  deleteAttendance: async (id, reason) => {
+    const response = await fetchWithAuth(`/api/attendance/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason }),
+    });
+    if (response.ok) {
+      set((state) => ({
+        attendance: state.attendance.filter((item) => item.id !== id),
+      }));
     }
   },
 

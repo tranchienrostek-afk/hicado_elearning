@@ -60,6 +60,8 @@ export interface Attendance {
   classId: string;
   studentId: string;
   date: string;
+  slot: 'MORNING' | 'AFTERNOON' | 'EVENING' | 'CUSTOM';
+  sessionUnits: number;
   status: 'PRESENT' | 'ABSENT' | 'LEAVE_REQUEST';
   note?: string;
   markedByUserId?: string;
@@ -94,6 +96,8 @@ export interface CenterStore {
   fetchAttendance: (classId: string, date?: string) => Promise<void>;
   
   addAttendance: (record: Partial<Attendance>) => Promise<void>;
+  updateAttendance: (id: string, updates: Partial<Attendance> & { reason?: string }) => Promise<void>;
+  deleteAttendance: (id: string, reason?: string) => Promise<void>;
   updateTuitionStatus: (studentId: string, status: Student['tuitionStatus']) => void;
   calculateTeacherSalary: (teacherId: string, month: number) => number;
   importStudents: (newStudents: Student[]) => void;

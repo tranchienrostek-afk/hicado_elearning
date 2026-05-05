@@ -28,16 +28,19 @@ type AttendanceLike = {
   classId: string;
   studentId: string;
   status: string;
+  sessionUnits?: number;
 };
 
 function attendedSessions(classItem: ClassLike, studentId: string, attendances?: AttendanceLike[]): number {
   if (!attendances) return classItem.totalSessions;
-  return attendances.filter(
-    attendance =>
-      attendance.classId === classItem.id &&
-      attendance.studentId === studentId &&
-      attendance.status === 'PRESENT'
-  ).length;
+  return attendances
+    .filter(
+      attendance =>
+        attendance.classId === classItem.id &&
+        attendance.studentId === studentId &&
+        attendance.status === 'PRESENT'
+    )
+    .reduce((sum, item) => sum + (item.sessionUnits ?? 1), 0);
 }
 
 function expectedForStudentClass(classItem: ClassLike, studentId: string, attendances?: AttendanceLike[]): number {
