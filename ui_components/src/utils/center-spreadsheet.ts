@@ -229,7 +229,7 @@ const normalizeStudentRows = (rows: WorkbookRow[]): ImportResult<StudentImportRo
     validRows.push({
       id: text(row.id) || undefined,
       name: text(row.name),
-      birthYear: text(row.birthYear) ? numberValue(row.birthYear) : undefined,
+      birthYear: text(row.birthYear) ? numberValue(row.birthYear) : new Date().getFullYear() - 10,
       address: text(row.address),
       schoolName: text(row.schoolName),
       schoolClass: text(row.schoolClass),
