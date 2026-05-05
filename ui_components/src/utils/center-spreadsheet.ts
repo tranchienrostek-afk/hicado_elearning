@@ -225,12 +225,11 @@ const normalizeStudentRows = (rows: WorkbookRow[]): ImportResult<StudentImportRo
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
     if (!text(row.name)) errors.push(`Dong ${rowNumber}: thieu name`);
-    if (!text(row.birthYear)) errors.push(`Dong ${rowNumber}: thieu birthYear`);
-    if (!text(row.name) || !text(row.birthYear)) return;
+    if (!text(row.name)) return;
     validRows.push({
       id: text(row.id) || undefined,
       name: text(row.name),
-      birthYear: numberValue(row.birthYear),
+      birthYear: text(row.birthYear) ? numberValue(row.birthYear) : undefined,
       address: text(row.address),
       schoolName: text(row.schoolName),
       schoolClass: text(row.schoolClass),
@@ -248,7 +247,7 @@ const normalizeTeacherRows = (rows: WorkbookRow[]): ImportResult<TeacherImportRo
   const errors: string[] = [];
   rows.forEach((row, index) => {
     const rowNumber = index + 2;
-    const missing = ['name', 'phone', 'bankAccount', 'bankName'].filter((field) => !text(row[field]));
+    const missing = ['name', 'phone'].filter((field) => !text(row[field]));
     missing.forEach((field) => errors.push(`Dong ${rowNumber}: thieu ${field}`));
     if (missing.length > 0) return;
     validRows.push({

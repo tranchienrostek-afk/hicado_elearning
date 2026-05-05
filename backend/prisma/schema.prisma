@@ -80,8 +80,8 @@ model Teacher {
 model Student {
   id             String   @id @default(uuid())
   name           String
-  birthYear      Int
-  address        String
+  birthYear      Int?
+  address        String?
   schoolName     String?
   schoolClass    String?
   cccd           String?

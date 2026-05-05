@@ -19,7 +19,7 @@ import { ImportPreviewModal } from '@/views/components/import-preview-modal';
 
 const studentSchema = z.object({
   name: z.string().min(2, 'Tên quá ngắn'),
-  birthYear: z.coerce.number().min(1900).max(new Date().getFullYear()),
+  birthYear: z.coerce.number().min(1900).max(new Date().getFullYear()).optional(),
   address: z.string().optional(),
   schoolName: z.string().optional(),
   schoolClass: z.string().optional(),
