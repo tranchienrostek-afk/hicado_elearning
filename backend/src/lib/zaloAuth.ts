@@ -2,11 +2,18 @@ import axios from 'axios';
 import prisma from './prisma';
 
 export const ZALO_OA_API = 'https://openapi.zalo.me';
+const ZALO_CONFIG_KEYS = [
+  'ZALO_APP_ID',
+  'ZALO_SECRET_KEY',
+  'ZALO_REFRESH_TOKEN',
+  'ZALO_ACCESS_TOKEN',
+  'ZALO_ACCESS_TOKEN_ISSUED_AT',
+] as const;
 
 // Function to get the latest credentials
 export const getZaloConfig = async () => {
   const configs = await prisma.systemConfig.findMany({
-    where: { key: { in: ['ZALO_APP_ID', 'ZALO_SECRET_KEY', 'ZALO_REFRESH_TOKEN', 'ZALO_ACCESS_TOKEN'] } }
+    where: { key: { in: [...ZALO_CONFIG_KEYS] } }
   });
   return configs.reduce((acc, curr) => {
     acc[curr.key] = curr.value;
@@ -34,25 +41,43 @@ export const refreshZaloToken = async () => {
   );
 
   const { access_token, refresh_token } = response.data as any;
+  const issuedAt = new Date().toISOString();
   
   if (!access_token || !refresh_token) {
     throw new Error(`Refresh token thất bại: ${JSON.stringify(response.data)}`);
   }
 
-  // Update tokens in DB
-  await prisma.systemConfig.upsert({
-    where: { key: 'ZALO_ACCESS_TOKEN' },
-    update: { value: access_token },
-    create: { key: 'ZALO_ACCESS_TOKEN', value: access_token }
-  });
-  
-  await prisma.systemConfig.upsert({
-    where: { key: 'ZALO_REFRESH_TOKEN' },
-    update: { value: refresh_token },
-    create: { key: 'ZALO_REFRESH_TOKEN', value: refresh_token }
-  });
+  await prisma.$transaction([
+    prisma.systemConfig.upsert({
+      where: { key: 'ZALO_ACCESS_TOKEN' },
+      update: { value: access_token },
+      create: { key: 'ZALO_ACCESS_TOKEN', value: access_token }
+    }),
+    prisma.systemConfig.upsert({
+      where: { key: 'ZALO_REFRESH_TOKEN' },
+      update: { value: refresh_token },
+      create: { key: 'ZALO_REFRESH_TOKEN', value: refresh_token }
+    }),
+    prisma.systemConfig.upsert({
+      where: { key: 'ZALO_ACCESS_TOKEN_ISSUED_AT' },
+      update: { value: issuedAt },
+      create: { key: 'ZALO_ACCESS_TOKEN_ISSUED_AT', value: issuedAt }
+    }),
+  ]);
 
   return access_token;
+};
+
+export const shouldProactiveRefresh = async (): Promise<boolean> => {
+  const cfg = await getZaloConfig();
+  if (!cfg.ZALO_REFRESH_TOKEN) return false;
+
+  const issuedAt = cfg.ZALO_ACCESS_TOKEN_ISSUED_AT;
+  if (!issuedAt) return true;
+
+  const ageMs = Date.now() - new Date(issuedAt).getTime();
+  const ageDays = ageMs / (1000 * 60 * 60 * 24);
+  return ageDays > 60;
 };
 
 // Create a custom Axios instance
@@ -61,9 +86,9 @@ export const zaloApiClient = axios.create({});
 // Intercept responses
 zaloApiClient.interceptors.response.use(
   async (response: any) => {
-    // Zalo API returns HTTP 200 but error code -216 inside the body when token is invalid/expired
-    if (response.data && response.data.error === -216) {
-      console.log('🔄 Zalo Token expired (-216). Auto-refreshing...');
+    // Zalo API returns HTTP 200 but error codes inside the body when token is invalid/expired
+    if (response.data && (response.data.error === -216 || response.data.error === -124)) {
+      console.log(`🔄 Zalo Token invalid (${response.data.error}). Auto-refreshing...`);
       
       const config = response.config;
       
@@ -83,7 +108,7 @@ zaloApiClient.interceptors.response.use(
         }
 
         // Retry the original request with the new token
-        return axios.request(config);
+        return zaloApiClient.request(config);
       } catch (err: any) {
         console.error('❌ Lỗi Refresh Token ngầm:', err.response?.data || err.message);
         // Return original error response if refresh fails

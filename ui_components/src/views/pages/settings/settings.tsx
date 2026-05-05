@@ -2,6 +2,13 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuthStore } from '@/store';
 
 type ZaloStatus = { success: boolean; message: string } | null;
+type TokenStatus = {
+  issuedAt: string | null;
+  ageDays: number | null;
+  estimatedExpiresIn: number | null;
+  healthStatus: 'ok' | 'warning' | 'critical' | 'unknown';
+  hasRefreshToken: boolean;
+};
 
 const BANKS = [
   { bin: '970436', name: 'Vietcombank (VCB)' },
@@ -65,7 +72,10 @@ export const SettingsPage = () => {
   const [isTestingZalo, setIsTestingZalo] = useState(false);
   const [zaloAuthMsg, setZaloAuthMsg] = useState('');
   const [callbackUrl, setCallbackUrl] = useState('');
+  const [tokenStatus, setTokenStatus] = useState<TokenStatus | null>(null);
+  const [isRefreshingToken, setIsRefreshingToken] = useState(false);
   const oauthHandlerRef = useRef<((e: MessageEvent) => void) | null>(null);
+  const zaloAuthButtonRef = useRef<HTMLButtonElement>(null);
 
   const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -97,6 +107,14 @@ export const SettingsPage = () => {
     finally { setIsTestingZalo(false); }
   }, [token]);
 
+  const fetchZaloTokenStatus = useCallback(async () => {
+    if (!token) return;
+    try {
+      const r = await fetch('/api/config/zalo/token-status', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (r.ok) setTokenStatus(await r.json());
+    } catch {}
+  }, [token]);
+
   const startZaloAuth = async () => {
     setZaloAuthMsg('');
     try {
@@ -111,6 +129,7 @@ export const SettingsPage = () => {
         if (e.data === 'zalo_auth_success') {
           setZaloAuthMsg('Kết nối thành công! Đang kiểm tra...');
           testZaloConnection();
+          fetchZaloTokenStatus();
           window.removeEventListener('message', oauthHandlerRef.current!);
           oauthHandlerRef.current = null;
         } else if (typeof e.data === 'string' && e.data.startsWith('zalo_auth_error:')) {
@@ -137,9 +156,31 @@ export const SettingsPage = () => {
   useEffect(() => {
     if (activeTab === 'zalo') {
       testZaloConnection();
+      fetchZaloTokenStatus();
       setCallbackUrl(`${window.location.origin.replace('5173', '5000')}/api/config/zalo/oauth-callback`);
     }
-  }, [activeTab, testZaloConnection]);
+  }, [activeTab, testZaloConnection, fetchZaloTokenStatus]);
+
+  const manualRefreshToken = async () => {
+    setIsRefreshingToken(true);
+    setZaloAuthMsg('');
+    try {
+      const r = await fetch('/api/config/zalo/refresh-token', { method: 'POST', headers: authHeaders });
+      const d = await r.json();
+      if (r.ok && d.success) {
+        setZaloAuthMsg('Token đã được gia hạn thành công.');
+        setTokenStatus(d);
+        testZaloConnection();
+      } else {
+        setZaloAuthMsg(d.message || 'Gia hạn thất bại — cần kết nối lại OAuth.');
+        if (d.requiresReconnect) zaloAuthButtonRef.current?.focus();
+      }
+    } catch {
+      setZaloAuthMsg('Không thể gia hạn token lúc này.');
+    } finally {
+      setIsRefreshingToken(false);
+    }
+  };
 
   const save = async () => {
     setIsSaving(true); setSaveMsg('');
@@ -179,6 +220,20 @@ export const SettingsPage = () => {
   );
 
   const zaloConnected = zaloStatus?.success === true;
+  const tokenTone = tokenStatus?.healthStatus === 'ok'
+    ? 'bg-emerald-50 border-emerald-100 text-emerald-700'
+    : tokenStatus?.healthStatus === 'warning'
+      ? 'bg-amber-50 border-amber-100 text-amber-700'
+      : tokenStatus?.healthStatus === 'critical'
+        ? 'bg-rose-50 border-rose-100 text-rose-700'
+        : 'bg-slate-50 border-slate-100 text-slate-600';
+  const tokenHeadline = tokenStatus?.healthStatus === 'ok'
+    ? `Tốt — còn ${tokenStatus?.estimatedExpiresIn ?? '?'} ngày`
+    : tokenStatus?.healthStatus === 'warning'
+      ? `Cảnh báo — còn ${tokenStatus?.estimatedExpiresIn ?? '?'} ngày`
+      : tokenStatus?.healthStatus === 'critical'
+        ? `Nguy hiểm — còn ${tokenStatus?.estimatedExpiresIn ?? '?'} ngày`
+        : 'Chưa có dữ liệu token';
 
   return (
     <div className="p-6 min-h-screen bg-hicado-slate/30">
@@ -401,6 +456,7 @@ export const SettingsPage = () => {
               {/* Auth button */}
               <button
                 onClick={startZaloAuth}
+                ref={zaloAuthButtonRef}
                 className={`w-full py-3.5 font-black rounded-2xl transition text-sm tracking-wider uppercase ${zaloConnected ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-blue-600 text-white hover:bg-blue-700'} shadow-sm`}
               >
                 {zaloConnected ? '🔄 Ủy quyền lại' : '🔗 Kết nối Zalo OA'}
@@ -421,6 +477,39 @@ export const SettingsPage = () => {
 
           {/* Setup guide + callback URL */}
           <div className="space-y-5">
+            <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
+              <div className="bg-hicado-emerald px-6 py-4">
+                <h2 className="text-white font-bold text-sm">Trạng thái Token Zalo</h2>
+                <p className="text-white/70 text-xs mt-0.5">Theo dõi tuổi token và gia hạn trước khi hết hạn</p>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className={`rounded-2xl border px-4 py-4 ${tokenTone}`}>
+                  <p className="text-sm font-black">{tokenHeadline}</p>
+                  <p className="text-xs mt-1">
+                    {tokenStatus?.issuedAt
+                      ? `Cấp lúc: ${new Date(tokenStatus.issuedAt).toLocaleDateString('vi-VN')} | Tuổi token: ${tokenStatus.ageDays} ngày`
+                      : 'Chưa ghi nhận thời điểm cấp token.'}
+                  </p>
+                  <p className="text-xs mt-1">
+                    {tokenStatus?.hasRefreshToken ? 'Có refresh token để gia hạn tự động.' : 'Không có refresh token hợp lệ.'}
+                  </p>
+                </div>
+                {(tokenStatus?.healthStatus === 'warning' || tokenStatus?.healthStatus === 'critical') && (
+                  <button
+                    onClick={manualRefreshToken}
+                    disabled={isRefreshingToken}
+                    className="w-full py-3 rounded-2xl bg-hicado-navy text-white text-sm font-black uppercase tracking-widest disabled:opacity-50"
+                  >
+                    {isRefreshingToken ? 'Đang gia hạn...' : 'Gia hạn ngay'}
+                  </button>
+                )}
+                {tokenStatus?.healthStatus === 'unknown' && (
+                  <p className="text-xs text-hicado-navy/50">
+                    Chưa có dữ liệu thời điểm cấp token. Sau lần OAuth hoặc refresh thành công tiếp theo, hệ thống sẽ tự động theo dõi tuổi token.
+                  </p>
+                )}
+              </div>
+            </div>
             <div className="bg-white rounded-3xl border border-gray-100 shadow-sm overflow-hidden">
               <div className="bg-hicado-navy px-6 py-4">
                 <h2 className="text-white font-bold text-sm">Cấu hình tại Zalo Developer</h2>
