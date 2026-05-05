@@ -5,6 +5,93 @@ import { authenticateToken } from '../middleware/auth';
 const router = Router();
 const allowedSlots = ['MORNING', 'AFTERNOON', 'EVENING', 'CUSTOM'] as const;
 
+// GET /api/attendance/monthly-report?classId=xxx&month=2026-05
+router.get('/monthly-report', authenticateToken, async (req, res) => {
+  const { classId, month } = req.query as { classId: string; month: string };
+  if (!classId || !month) return res.status(400).json({ message: 'Thiếu classId hoặc month' });
+
+  // month = "2026-05" → dateFrom = 2026-05-01, dateTo = 2026-05-31
+  const [year, mon] = month.split('-').map(Number);
+  const dateFrom = new Date(year, mon - 1, 1);
+  const dateTo = new Date(year, mon, 0, 23, 59, 59); // last day of month
+
+  try {
+    const [cls, records] = await Promise.all([
+      prisma.class.findUnique({
+        where: { id: classId },
+        include: {
+          teacher: { select: { name: true } },
+          students: { include: { student: { select: { id: true, name: true, studentCode: true } } } },
+        },
+      }),
+      prisma.attendance.findMany({
+        where: { classId, date: { gte: dateFrom, lte: dateTo } },
+        orderBy: [{ date: 'asc' }, { slot: 'asc' }],
+      }),
+    ]);
+
+    if (!cls) return res.status(404).json({ message: 'Không tìm thấy lớp học' });
+
+    // Build unique session columns: [{ date: "2026-05-03", slot: "EVENING" }, ...]
+    const sessionSet = new Map<string, string>();
+    for (const r of records) {
+      const key = `${r.date.toISOString().slice(0, 10)}__${r.slot}`;
+      sessionSet.set(key, r.date.toISOString().slice(0, 10));
+    }
+    const sessions = [...sessionSet.keys()].map(k => {
+      const [date, slot] = k.split('__');
+      return { date, slot };
+    });
+
+    // Per-student summary
+    const students = cls.students.map(({ student: s }) => {
+      const studentRecords = records.filter(r => r.studentId === s.id);
+      const presentRecords = studentRecords.filter(r => r.status === 'PRESENT');
+      const totalSessionUnits = presentRecords.reduce((sum, r) => sum + r.sessionUnits, 0);
+      return {
+        id: s.id,
+        name: s.name,
+        studentCode: s.studentCode,
+        records: studentRecords.map(r => ({
+          date: r.date.toISOString().slice(0, 10),
+          slot: r.slot,
+          status: r.status,
+          sessionUnits: r.sessionUnits,
+        })),
+        totalPresent: presentRecords.length,
+        totalSessionUnits,
+        tuitionDue: Math.round(totalSessionUnits * cls.tuitionPerSession),
+      };
+    });
+
+    // Class-level summary
+    const totalUniqueDates = new Set(records.map(r => r.date.toISOString().slice(0, 10))).size;
+    const avgAttendanceRate = students.length > 0 && sessions.length > 0
+      ? Math.round(students.reduce((sum, s) => sum + s.totalPresent, 0) / (students.length * sessions.length) * 100)
+      : 0;
+
+    res.json({
+      classId: cls.id,
+      className: cls.name,
+      classCode: cls.classCode,
+      tuitionPerSession: cls.tuitionPerSession,
+      teacher: { name: cls.teacher.name },
+      month,
+      sessions, // column definitions for the matrix
+      students,
+      summary: {
+        totalStudents: students.length,
+        totalUniqueDates,
+        totalSessions: sessions.length,
+        avgAttendanceRate,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Lỗi khi tạo báo cáo điểm danh tháng' });
+  }
+});
+
 // Get attendance for a class on a specific date
 router.get('/:classId', authenticateToken, async (req, res) => {
   const { date, slot } = req.query;

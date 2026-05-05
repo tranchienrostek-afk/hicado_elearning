@@ -39,6 +39,20 @@ interface TrackingSummary {
   totalExpected: number; totalCollected: number;
 }
 
+interface MonthlyReportSession { date: string; slot: string; }
+interface MonthlyReportStudent {
+  id: string; name: string; studentCode: string | null;
+  records: { date: string; slot: string; status: string; sessionUnits: number }[];
+  totalPresent: number; totalSessionUnits: number; tuitionDue: number;
+}
+interface MonthlyReport {
+  classId: string; className: string; classCode: string | null;
+  tuitionPerSession: number; teacher: { name: string }; month: string;
+  sessions: MonthlyReportSession[];
+  students: MonthlyReportStudent[];
+  summary: { totalStudents: number; totalUniqueDates: number; totalSessions: number; avgAttendanceRate: number };
+}
+
 interface FinanceRow {
   classId: string;
   className: string;
@@ -101,6 +115,11 @@ export const FinancialPage = () => {
   const [trackSearch, setTrackSearch] = useState('');
   const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
 
+  // ── Monthly Attendance Report state ───────────────────────────────────────
+  const [reportClassId, setReportClassId] = useState('');
+  const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
   const fetchTracking = () => {
     const token = auth?.token;
     if (!token) return;
@@ -129,6 +148,25 @@ export const FinancialPage = () => {
     fetchTracking();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.token, isTeacher]);
+
+  const fetchMonthlyReport = (classId: string, month: string) => {
+    const token = auth?.token;
+    if (!token || !classId) return;
+    setReportLoading(true);
+    setMonthlyReport(null);
+    fetch(`/api/attendance/monthly-report?classId=${classId}&month=${month}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => setMonthlyReport(data))
+      .catch(() => toast.error('Lỗi tải báo cáo điểm danh'))
+      .finally(() => setReportLoading(false));
+  };
+
+  useEffect(() => {
+    if (reportClassId) fetchMonthlyReport(reportClassId, selectedMonth);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedMonth, reportClassId]);
 
   const scopedClasses = useMemo(
     () =>
@@ -925,6 +963,171 @@ export const FinancialPage = () => {
           )}
         </div>
       )}
+
+      {/* ── MONTHLY ATTENDANCE MATRIX ───────────────────────────────────────── */}
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Attendance Report</p>
+            <h3 className="text-xl font-black text-hicado-navy tracking-tight">Báo Cáo Điểm Danh Tháng</h3>
+          </div>
+          <div className="flex items-center gap-3 glass-card rounded-2xl px-5 py-3 border border-hicado-slate">
+            <span className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Tháng báo cáo</span>
+            <input
+              type="month"
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="bg-transparent text-sm font-black text-hicado-navy outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Class Selection Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+          {scopedClasses.map(cls => (
+            <button
+              key={cls.id}
+              onClick={() => setReportClassId(cls.id)}
+              className={clsx(
+                "p-4 rounded-2xl border transition-all text-left group",
+                reportClassId === cls.id
+                  ? "bg-hicado-navy border-hicado-navy shadow-xl scale-[1.02]"
+                  : "bg-white border-hicado-slate hover:border-hicado-navy/30"
+              )}
+            >
+              <p className={clsx(
+                "text-[10px] font-black uppercase tracking-widest mb-1",
+                reportClassId === cls.id ? "text-hicado-emerald" : "text-hicado-navy/40"
+              )}>
+                {cls.classCode || 'Lớp học'}
+              </p>
+              <p className={clsx(
+                "text-xs font-bold truncate",
+                reportClassId === cls.id ? "text-white" : "text-hicado-navy"
+              )}>
+                {cls.name}
+              </p>
+            </button>
+          ))}
+        </div>
+
+        {reportLoading && <SkeletonTable rows={8} />}
+
+        {!reportLoading && monthlyReport && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
+            {/* Summary Bar */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[
+                { label: 'Học sinh', value: monthlyReport.summary.totalStudents, unit: 'hs' },
+                { label: 'Số ca dạy', value: monthlyReport.summary.totalSessions, unit: 'buổi' },
+                { label: 'Số ngày dạy', value: monthlyReport.summary.totalUniqueDates, unit: 'ngày' },
+                { label: 'Tỷ lệ đi học', value: monthlyReport.summary.avgAttendanceRate, unit: '%', color: 'text-hicado-emerald' },
+              ].map(s => (
+                <div key={s.label} className="glass-card rounded-2xl p-4 border border-hicado-slate">
+                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">{s.label}</p>
+                  <p className={clsx("text-xl font-black", s.color || "text-hicado-navy")}>
+                    {s.value}<span className="text-[10px] ml-1 opacity-40">{s.unit}</span>
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            {/* The Matrix */}
+            <div className="glass-card rounded-[2.5rem] border border-hicado-slate overflow-hidden bg-white shadow-premium">
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-left border-collapse min-w-max">
+                  <thead>
+                    <tr className="bg-hicado-slate/20 border-b border-hicado-slate">
+                      <th className="sticky left-0 z-20 bg-hicado-slate/10 backdrop-blur-md px-6 py-5 min-w-[200px] border-r border-hicado-slate/50">
+                        <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học sinh</span>
+                      </th>
+                      {monthlyReport.sessions.map((s, idx) => (
+                        <th key={idx} className="px-3 py-4 text-center border-r border-hicado-slate/30 min-w-[70px]">
+                          <p className="text-[11px] font-black text-hicado-navy">
+                            {new Date(s.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
+                          </p>
+                          <p className="text-[9px] font-black text-hicado-navy/30 uppercase">
+                            {s.slot === 'MORNING' ? 'S' : s.slot === 'AFTERNOON' ? 'C' : s.slot === 'EVENING' ? 'T' : 'K'}
+                          </p>
+                        </th>
+                      ))}
+                      <th className="sticky right-[120px] z-20 bg-hicado-slate/10 backdrop-blur-md px-4 py-5 text-center border-l border-hicado-slate/50 min-w-[80px]">
+                        <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Buổi</span>
+                      </th>
+                      <th className="sticky right-0 z-20 bg-hicado-slate/10 backdrop-blur-md px-6 py-5 text-right min-w-[120px]">
+                        <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học phí (đ)</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-hicado-slate/30">
+                    {monthlyReport.students.map((st) => (
+                      <tr key={st.id} className="hover:bg-hicado-slate/10 transition-colors group">
+                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-6 py-4 border-r border-hicado-slate/50">
+                          <p className="text-sm font-black text-hicado-navy">{st.name}</p>
+                          <p className="text-[10px] font-mono text-hicado-navy/30">{st.studentCode || '—'}</p>
+                        </td>
+                        {monthlyReport.sessions.map((sess, idx) => {
+                          const rec = st.records.find(r => r.date === sess.date && r.slot === sess.slot);
+                          const statusCfg = {
+                            PRESENT: { icon: '✓', cls: 'bg-emerald-100 text-emerald-700' },
+                            ABSENT: { icon: '✗', cls: 'bg-rose-50 text-rose-500' },
+                            LEAVE_REQUEST: { icon: '~', cls: 'bg-amber-50 text-amber-500' },
+                          }[rec?.status as any] || { icon: '—', cls: 'bg-slate-50 text-slate-300' };
+
+                          return (
+                            <td key={idx} className="px-2 py-3 text-center border-r border-hicado-slate/20">
+                              <div className={clsx(
+                                "w-8 h-8 rounded-lg mx-auto flex items-center justify-center font-black text-xs transition-transform group-hover:scale-110",
+                                statusCfg.cls
+                              )}>
+                                {statusCfg.icon}
+                              </div>
+                            </td>
+                          );
+                        })}
+                        <td className="sticky right-[120px] z-10 bg-white group-hover:bg-slate-50 px-4 py-4 text-center font-black text-hicado-navy border-l border-hicado-slate/50">
+                          {st.totalPresent}
+                        </td>
+                        <td className="sticky right-0 z-10 bg-white group-hover:bg-slate-50 px-6 py-4 text-right font-black text-hicado-emerald">
+                          {st.tuitionDue.toLocaleString()}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="bg-hicado-slate/20 font-black text-hicado-navy/50">
+                      <td className="sticky left-0 z-10 bg-hicado-slate/10 px-6 py-4 border-r border-hicado-slate/50 text-[10px] uppercase tracking-widest">
+                        Tổng cộng/ngày
+                      </td>
+                      {monthlyReport.sessions.map((sess, idx) => {
+                        const count = monthlyReport.students.filter(st => 
+                          st.records.some(r => r.date === sess.date && r.slot === sess.slot && r.status === 'PRESENT')
+                        ).length;
+                        return (
+                          <td key={idx} className="px-2 py-4 text-center border-r border-hicado-slate/20 text-xs">
+                            {count}
+                          </td>
+                        );
+                      })}
+                      <td className="sticky right-[120px] z-10 bg-hicado-slate/10 border-l border-hicado-slate/50"></td>
+                      <td className="sticky right-0 z-10 bg-hicado-slate/10"></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!monthlyReport && !reportLoading && (
+          <div className="glass-card rounded-[2.5rem] border border-dashed border-hicado-slate p-16 text-center">
+            <div className="text-5xl mb-4 opacity-20">📅</div>
+            <p className="text-sm font-black text-hicado-navy/30 uppercase tracking-widest italic">
+              Chọn một lớp học để xem báo cáo điểm danh tháng
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 };
