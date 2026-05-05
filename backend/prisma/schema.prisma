@@ -69,6 +69,8 @@ model User {
   studentId String?  @unique
   student   Student? @relation(fields: [studentId], references: [id])
 
+  isActive  Boolean  @default(true)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

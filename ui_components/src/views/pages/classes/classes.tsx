@@ -42,7 +42,6 @@ export const Classes = () => {
   const [importPlan, setImportPlan] = useState<ImportPlan<ClassImportRow> | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
-  const [studentScrollIndex, setStudentScrollIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [formData, setFormData] = useState({
@@ -60,8 +59,6 @@ export const Classes = () => {
   const visibleTeachers = isTeacher ? teachers.filter(t => t.id === auth.teacherId) : teachers;
   const visibleClasses = isTeacher ? classes.filter(c => c.teacherId === auth.teacherId) : classes;
   const visibleStudents = students;
-  const studentWindowSize = 8;
-
   const filteredStudents = useMemo(() => {
     const keyword = studentSearch.trim().toLowerCase();
     if (!keyword) return visibleStudents;
@@ -71,10 +68,6 @@ export const Classes = () => {
       return name.includes(keyword) || id.includes(keyword);
     });
   }, [studentSearch, visibleStudents]);
-
-  const sliderMax = Math.max(0, filteredStudents.length - studentWindowSize);
-  const safeStartIndex = Math.min(studentScrollIndex, sliderMax);
-  const sliderStudents = filteredStudents.slice(safeStartIndex, safeStartIndex + studentWindowSize);
 
   const resetForm = () => setFormData({ name: '', teacherId: '', roomId: '', tuitionPerSession: 0, totalSessions: 12, studentIds: [], teacherShare: 80, schedule: { days: [], time: '18:00 - 20:00' } });
 
@@ -248,7 +241,7 @@ export const Classes = () => {
               Xuất Báo Cáo
             </button>
             <button
-              onClick={() => { setIsModalOpen(true); setIsEditMode(false); resetForm(); setStudentSearch(''); setStudentScrollIndex(0); }}
+              onClick={() => { setIsModalOpen(true); setIsEditMode(false); resetForm(); setStudentSearch(''); }}
               className="bg-hicado-navy text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-2xl shadow-hicado-navy/20 hover:scale-105 transition-all flex items-center gap-3"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M12 4v16m8-8H4" /></svg>
@@ -482,28 +475,13 @@ export const Classes = () => {
                       <input
                         type="text"
                         value={studentSearch}
-                        onChange={(e) => { setStudentSearch(e.target.value); setStudentScrollIndex(0); }}
+                        onChange={(e) => setStudentSearch(e.target.value)}
                         className={inputCls}
                         placeholder="Tìm theo tên hoặc mã học sinh..."
                       />
-                      <div className="rounded-2xl border border-hicado-slate bg-white px-4 py-3 space-y-2">
-                        <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest text-hicado-navy/40">
-                          <span>Thanh trượt học sinh</span>
-                          <span>{filteredStudents.length === 0 ? '0-0' : `${safeStartIndex + 1}-${Math.min(safeStartIndex + studentWindowSize, filteredStudents.length)}`} / {filteredStudents.length}</span>
-                        </div>
-                        <input
-                          type="range"
-                          min={0}
-                          max={sliderMax}
-                          value={safeStartIndex}
-                          onChange={(e) => setStudentScrollIndex(Number(e.target.value))}
-                          className="w-full accent-[#0f172a]"
-                          disabled={filteredStudents.length <= 1}
-                        />
-                      </div>
                     </div>
                     <div className="flex-1 bg-hicado-slate/10 rounded-[1.5rem] border border-hicado-slate overflow-y-auto custom-scrollbar p-3 space-y-2 min-h-[250px] md:min-h-[350px]">
-                      {sliderStudents.map(s => (
+                      {filteredStudents.map(s => (
                         <div
                           key={s.id}
                           onClick={() => toggleStudent(s.id)}
@@ -524,7 +502,7 @@ export const Classes = () => {
                           )}
                         </div>
                       ))}
-                      {sliderStudents.length === 0 && (
+                      {filteredStudents.length === 0 && (
                         <div className="h-full min-h-[120px] flex items-center justify-center text-center">
                           <p className="text-[10px] font-black uppercase tracking-widest text-hicado-navy/30">Không tìm thấy học sinh phù hợp</p>
                         </div>

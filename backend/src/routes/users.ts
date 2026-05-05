@@ -9,6 +9,7 @@ const router = Router();
 router.get('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req: AuthRequest, res: Response) => {
   try {
     const users = await prisma.user.findMany({
+      where: { isActive: true },
       select: {
         id: true,
         username: true,
@@ -93,12 +94,12 @@ router.patch('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
   }
 });
 
-// Delete a user account
+// Delete a user account (soft delete)
 router.delete('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req: AuthRequest, res: Response) => {
   const { id } = req.params;
 
   try {
-    await prisma.user.delete({ where: { id: id as string } });
+    await prisma.user.update({ where: { id: id as string }, data: { isActive: false } });
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ message: 'Error deleting user' });

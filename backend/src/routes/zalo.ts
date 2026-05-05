@@ -3,7 +3,12 @@ import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 
-export const formatPhone = (p: string) => p.replace(/^0/, '84');
+export const formatPhone = (p: string) => {
+  const digits = p.replace(/\D/g, '');
+  if (digits.startsWith('84')) return digits;
+  if (digits.startsWith('0')) return '84' + digits.slice(1);
+  return '84' + digits;
+};
 
 const router = Router();
 

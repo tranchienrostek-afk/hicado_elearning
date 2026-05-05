@@ -18,7 +18,7 @@ router.post('/login', async (req, res) => {
       where: { username: normalizedUsername },
     });
 
-    if (!user) {
+    if (!user || !user.isActive) {
       return res.status(401).json({ message: 'Tên đăng nhập hoặc mật khẩu không đúng' });
     }
 
