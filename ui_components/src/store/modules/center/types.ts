@@ -99,19 +99,19 @@ export interface CenterStore {
   importStudents: (newStudents: Student[]) => void;
   importTeachers: (newTeachers: Teacher[]) => void;
   
-  addStudent: (student: Partial<Student>) => Promise<void>;
-  updateStudent: (id: string, updates: Partial<Student>) => Promise<void>;
-  deleteStudent: (id: string) => Promise<void>;
+  addStudent: (student: Partial<Student>) => Promise<Response>;
+  updateStudent: (id: string, updates: Partial<Student>) => Promise<Response>;
+  deleteStudent: (id: string) => Promise<Response>;
   
-  addTeacher: (teacher: Partial<Teacher>) => Promise<void>;
-  updateTeacher: (id: string, updates: Partial<Teacher>) => Promise<void>;
-  deleteTeacher: (id: string) => Promise<void>;
+  addTeacher: (teacher: Partial<Teacher>) => Promise<Response>;
+  updateTeacher: (id: string, updates: Partial<Teacher>) => Promise<Response>;
+  deleteTeacher: (id: string) => Promise<Response>;
   
-  addClass: (cls: Partial<Class>) => Promise<void>;
-  updateClass: (id: string, updates: Partial<Class>) => Promise<void>;
-  deleteClass: (id: string) => Promise<void>;
+  addClass: (cls: Partial<Class>) => Promise<Response>;
+  updateClass: (id: string, updates: Partial<Class>) => Promise<Response>;
+  deleteClass: (id: string) => Promise<Response>;
 
-  addRoom: (room: Partial<Room>) => Promise<void>;
-  updateRoom: (id: string, updates: Partial<Room>) => Promise<void>;
-  deleteRoom: (id: string) => Promise<void>;
+  addRoom: (room: Partial<Room>) => Promise<Response>;
+  updateRoom: (id: string, updates: Partial<Room>) => Promise<Response>;
+  deleteRoom: (id: string) => Promise<Response>;
 }

@@ -31,7 +31,7 @@ router.get('/:id', authenticateToken, async (req, res) => {
 });
 
 // Create teacher (Admin only)
-router.post('/', authenticateToken, authorizeRoles('ADMIN'), async (req, res) => {
+router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const teacher = await prisma.teacher.create({
       data: req.body

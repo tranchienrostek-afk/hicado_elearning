@@ -140,60 +140,72 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
   addStudent: async (student) => {
     const res = await fetchWithAuth('/api/students', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(student) });
     if (res.ok) await get().fetchStudents();
+    return res;
   },
 
   updateStudent: async (id, updates) => {
     const res = await fetchWithAuth(`/api/students/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
     if (res.ok) await get().fetchStudents();
+    return res;
   },
 
   deleteStudent: async (id) => {
     const res = await fetchWithAuth(`/api/students/${id}`, { method: 'DELETE' });
     if (res.ok) await get().fetchStudents();
+    return res;
   },
 
   addTeacher: async (teacher) => {
     const res = await fetchWithAuth('/api/teachers', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(teacher) });
     if (res.ok) await get().fetchTeachers();
+    return res;
   },
 
   updateTeacher: async (id, updates) => {
     const res = await fetchWithAuth(`/api/teachers/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
     if (res.ok) await get().fetchTeachers();
+    return res;
   },
 
   deleteTeacher: async (id) => {
     const res = await fetchWithAuth(`/api/teachers/${id}`, { method: 'DELETE' });
     if (res.ok) await get().fetchTeachers();
+    return res;
   },
 
   addClass: async (cls) => {
     const res = await fetchWithAuth('/api/classes', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cls) });
     if (res.ok) await get().fetchClasses();
+    return res;
   },
 
   updateClass: async (id, updates) => {
     const res = await fetchWithAuth(`/api/classes/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
     if (res.ok) await get().fetchClasses();
+    return res;
   },
 
   deleteClass: async (id) => {
     const res = await fetchWithAuth(`/api/classes/${id}`, { method: 'DELETE' });
     if (res.ok) await get().fetchClasses();
+    return res;
   },
 
   addRoom: async (room) => {
     const res = await fetchWithAuth('/api/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(room) });
     if (res.ok) await get().fetchRooms();
+    return res;
   },
 
   updateRoom: async (id, updates) => {
     const res = await fetchWithAuth(`/api/rooms/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
     if (res.ok) await get().fetchRooms();
+    return res;
   },
 
   deleteRoom: async (id) => {
     const res = await fetchWithAuth(`/api/rooms/${id}`, { method: 'DELETE' });
     if (res.ok) await get().fetchRooms();
+    return res;
   },
 }));

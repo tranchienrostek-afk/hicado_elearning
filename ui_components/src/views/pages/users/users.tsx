@@ -200,7 +200,7 @@ export const Users = () => {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setFormErrors({});
     const schema = activeTab === 'STUDENTS' ? studentSchema : teacherSchema;
     const result = schema.safeParse(formData);
@@ -216,37 +216,47 @@ export const Users = () => {
     }
 
     const data = result.data;
+    let res: Response;
 
-    if (activeTab === 'STUDENTS') {
-      if (isEditMode && selectedId) {
-        updateStudent(selectedId, data as any);
-        toast.success('Đã cập nhật học sinh');
+    try {
+      if (activeTab === 'STUDENTS') {
+        if (isEditMode && selectedId) {
+          res = await updateStudent(selectedId, data as any);
+          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi cập nhật học sinh');
+          toast.success('Đã cập nhật học sinh');
+        } else {
+          res = await addStudent({
+            id: 'S' + Date.now(),
+            ...(data as any),
+            tuitionStatus: 'DEBT'
+          });
+          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi thêm học sinh');
+          toast.success('Đã thêm học sinh mới');
+        }
       } else {
-        addStudent({
-          id: 'S' + Date.now(),
-          ...(data as any),
-          tuitionStatus: 'DEBT'
-        });
-        toast.success('Đã thêm học sinh mới');
+        if (isEditMode && selectedId) {
+          res = await updateTeacher(selectedId, data as any);
+          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi cập nhật giáo viên');
+          toast.success('Đã cập nhật giáo viên');
+        } else {
+          res = await addTeacher({
+            id: 'T' + Date.now(),
+            ...(data as any)
+          });
+          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi thêm giáo viên');
+          toast.success('Đã thêm giáo viên mới');
+        }
       }
-    } else {
-      if (isEditMode && selectedId) {
-        updateTeacher(selectedId, data as any);
-        toast.success('Đã cập nhật giáo viên');
-      } else {
-        addTeacher({
-          id: 'T' + Date.now(),
-          ...(data as any)
-        });
-        toast.success('Đã thêm giáo viên mới');
-      }
+
+      setIsAddModalOpen(false);
+      setIsEditMode(false);
+      setSelectedId(null);
+      setFormErrors({});
+      setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 });
+    } catch (error: any) {
+      console.error('Save failed:', error);
+      toast.error(error.message || 'Không thể lưu thông tin. Vui lòng thử lại.');
     }
-
-    setIsAddModalOpen(false);
-    setIsEditMode(false);
-    setSelectedId(null);
-    setFormErrors({});
-    setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 });
   };
 
   const filteredStudents = scopedStudents.filter(s => 
@@ -365,8 +375,8 @@ export const Users = () => {
           return;
         }
         for (const row of result.validRows) {
-          await addStudent(row);
-          importedCount += 1;
+          const res = await addStudent(row);
+          if (res.ok) importedCount += 1;
         }
         if (result.errors.length > 0) {
           toast.success(`Đã nhập ${importedCount} dòng. Bỏ qua ${result.errors.length} dòng lỗi.`);
@@ -381,8 +391,8 @@ export const Users = () => {
           return;
         }
         for (const row of result.validRows) {
-          await addTeacher(row);
-          importedCount += 1;
+          const res = await addTeacher(row);
+          if (res.ok) importedCount += 1;
         }
         if (result.errors.length > 0) {
           toast.success(`Đã nhập ${importedCount} dòng. Bỏ qua ${result.errors.length} dòng lỗi.`);
@@ -439,23 +449,30 @@ export const Users = () => {
     let importedCount = 0;
     try {
       for (const row of importPlan.commitRows) {
+        let res: Response;
         if (importKind === 'STUDENTS') {
           const record = row.record as StudentImportRow;
-          if (row.action === 'UPDATE' && record.id) await updateStudent(record.id, record);
-          else await addStudent(record);
+          if (row.action === 'UPDATE' && record.id) res = await updateStudent(record.id, record);
+          else res = await addStudent(record);
         } else {
           const record = row.record as TeacherImportRow;
-          if (row.action === 'UPDATE' && record.id) await updateTeacher(record.id, record);
-          else await addTeacher(record);
+          if (row.action === 'UPDATE' && record.id) res = await updateTeacher(record.id, record);
+          else res = await addTeacher(record);
         }
+
+        if (!res.ok) {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(errorData.message || `Lỗi khi xử lý dòng ${importedCount + 1}`);
+        }
+
         importedCount += 1;
       }
       toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
       setImportPlan(null);
       setIsImportOpen(false);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Excel commit failed:', error);
-      toast.error('Có dòng import bị lỗi khi ghi dữ liệu');
+      toast.error(error.message || 'Có dòng import bị lỗi khi ghi dữ liệu');
     } finally {
       setIsSyncing(false);
     }
