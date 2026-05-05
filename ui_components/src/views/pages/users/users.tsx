@@ -30,9 +30,9 @@ const studentSchema = z.object({
 const teacherSchema = z.object({
   name: z.string().min(2, 'Tên quá ngắn'),
   phone: z.string().min(10, 'Số điện thoại không hợp lệ'),
-  specialization: z.string().min(2, 'Chuyên môn không được trống'),
-  bankAccount: z.string().min(5, 'Số tài khoản không hợp lệ'),
-  bankName: z.string().min(2, 'Tên ngân hàng không được trống'),
+  specialization: z.string().optional(),
+  bankAccount: z.string().optional(),
+  bankName: z.string().optional(),
   salaryRate: z.coerce.number().min(0).max(1),
 });
 

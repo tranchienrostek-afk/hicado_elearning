@@ -65,8 +65,8 @@ model Teacher {
   cccd             String?
   phone            String
   zaloUserId       String?
-  bankAccount      String
-  bankName         String
+  bankAccount      String?
+  bankName         String?
   salaryRate       Float    // Percentage (e.g., 0.8)
   notes            String?  @db.Text
 
