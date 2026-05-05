@@ -105,15 +105,46 @@ const getWorkbookBytes = async (input: Uint8Array | ArrayBuffer | File): Promise
   return new Uint8Array(await input.arrayBuffer());
 };
 
-const parseCellValues = (sheetXml: string) => {
-  const cellPattern = /<c\b[^>]*?r="([A-Z]+)(\d+)"[^>]*?>([\s\S]*?)<\/c>/g;
+const parseSharedStrings = (sharedStringsXml: string): string[] => {
+  const strings: string[] = [];
+  const siPattern = /<si>([\s\S]*?)<\/si>/g;
+  let siMatch: RegExpExecArray | null;
+  while ((siMatch = siPattern.exec(sharedStringsXml))) {
+    const body = siMatch[1];
+    const tPattern = /<t[^>]*>([\s\S]*?)<\/t>/g;
+    let tMatch: RegExpExecArray | null;
+    let text = '';
+    while ((tMatch = tPattern.exec(body))) {
+      text += tMatch[1];
+    }
+    strings.push(xmlUnescape(text));
+  }
+  return strings;
+};
+
+const parseCellValues = (sheetXml: string, sharedStrings: string[]) => {
+  const cellPattern = /<c\b([^>]*?)r="([A-Z]+)(\d+)"([^>]*?)(?:>([\s\S]*?)<\/c>|\/>)/g;
   const values = new Map<number, Map<string, string>>();
   let match: RegExpExecArray | null;
   while ((match = cellPattern.exec(sheetXml))) {
-    const [, col, rowString, body] = match;
+    const [fullMatch, beforeR, col, rowString, afterR, body = ''] = match;
+    const attrs = beforeR + afterR;
+    const isShared = /t="s"/.test(attrs);
+
     const textMatch = body.match(/<t[^>]*>([\s\S]*?)<\/t>/);
     const valueMatch = body.match(/<v[^>]*>([\s\S]*?)<\/v>/);
-    const raw = textMatch?.[1] ?? valueMatch?.[1] ?? '';
+    let raw = textMatch?.[1] ?? valueMatch?.[1] ?? '';
+
+    if (raw === '' && fullMatch.includes('/>')) {
+      const vAttrMatch = attrs.match(/v="([^"]*)"/);
+      raw = vAttrMatch?.[1] ?? '';
+    }
+
+    if (isShared && raw !== '') {
+      const index = parseInt(raw, 10);
+      raw = sharedStrings[index] ?? raw;
+    }
+
     const rowIndex = Number(rowString);
     if (!values.has(rowIndex)) values.set(rowIndex, new Map());
     values.get(rowIndex)!.set(col, xmlUnescape(raw));
@@ -127,7 +158,10 @@ export const readXlsxWorkbook = async (input: Uint8Array | ArrayBuffer | File): 
   const sheet = entries['xl/worksheets/sheet1.xml'];
   if (!sheet) return [];
 
-  const values = parseCellValues(strFromU8(sheet));
+  const sharedStringsEntry = entries['xl/sharedStrings.xml'];
+  const sharedStrings = sharedStringsEntry ? parseSharedStrings(strFromU8(sharedStringsEntry)) : [];
+
+  const values = parseCellValues(strFromU8(sheet), sharedStrings);
   const headerRow = values.get(1);
   if (!headerRow) return [];
 
