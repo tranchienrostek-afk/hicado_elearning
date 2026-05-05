@@ -89,6 +89,7 @@ model Teacher {
   bankName         String?
   salaryRate       Float    // Percentage (e.g., 0.8)
   notes            String?  @db.Text
+  isActive         Boolean  @default(true)
 
   user             User?
   classes          Class[]
@@ -110,6 +111,7 @@ model Student {
   studentPhone   String?
   parentPhone    String?
   zaloUserId     String?
+  isActive       Boolean  @default(true)
 
   user           User?
   classes        ClassStudent[]

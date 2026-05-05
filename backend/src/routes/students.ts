@@ -9,7 +9,7 @@ router.get('/', authenticateToken, async (req: any, res) => {
   try {
     if (req.user.role === 'STUDENT') {
       const students = await prisma.student.findMany({
-        where: { id: req.user.studentId }
+        where: { id: req.user.studentId, isActive: true }
       });
       return res.json(students);
     }
@@ -17,6 +17,7 @@ router.get('/', authenticateToken, async (req: any, res) => {
       return res.status(403).json({ message: 'Insufficient permissions' });
     }
     const students = await prisma.student.findMany({
+      where: { isActive: true },
       include: { classes: { select: { classId: true } } },
     });
     res.json(students);
@@ -47,6 +48,19 @@ router.put('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async 
     res.json(student);
   } catch (error) {
     res.status(400).json({ message: 'Lỗi khi cập nhật học sinh' });
+  }
+});
+
+// Delete student (soft delete)
+router.delete('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    await prisma.student.update({
+      where: { id: req.params.id as string },
+      data: { isActive: false }
+    });
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi khi xóa học sinh' });
   }
 });
 

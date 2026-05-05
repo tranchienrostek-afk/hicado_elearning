@@ -8,6 +8,7 @@ const router = Router();
 router.get('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const teachers = await prisma.teacher.findMany({
+      where: { isActive: true },
       include: { user: { select: { username: true } } }
     });
     res.json(teachers);
@@ -20,7 +21,7 @@ router.get('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (re
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const teacher = await prisma.teacher.findUnique({
-      where: { id: req.params.id as string },
+      where: { id: req.params.id as string, isActive: true },
       include: { classes: true }
     });
     if (!teacher) return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
@@ -52,6 +53,19 @@ router.put('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async 
     res.json(teacher);
   } catch (error) {
     res.status(400).json({ message: 'Lỗi khi cập nhật giáo viên' });
+  }
+});
+
+// Delete teacher (soft delete)
+router.delete('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    await prisma.teacher.update({
+      where: { id: req.params.id as string },
+      data: { isActive: false }
+    });
+    res.status(204).send();
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi khi xóa giáo viên' });
   }
 });
 
