@@ -43,6 +43,7 @@ export interface Student {
 export interface Class {
   id: string;
   name: string;
+  classCode?: string;
   teacherId: string;
   roomId?: string;
   tuitionPerSession: number;

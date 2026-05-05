@@ -1068,19 +1068,21 @@ export const FinancialPage = () => {
                         </td>
                         {monthlyReport.sessions.map((sess, idx) => {
                           const rec = st.records.find(r => r.date === sess.date && r.slot === sess.slot);
-                          const statusCfg = {
+                          const statusCfg: Record<string, { icon: string; cls: string }> = {
                             PRESENT: { icon: '✓', cls: 'bg-emerald-100 text-emerald-700' },
                             ABSENT: { icon: '✗', cls: 'bg-rose-50 text-rose-500' },
                             LEAVE_REQUEST: { icon: '~', cls: 'bg-amber-50 text-amber-500' },
-                          }[rec?.status as any] || { icon: '—', cls: 'bg-slate-50 text-slate-300' };
+                          };
+                          const currentStatus = rec?.status || 'NONE';
+                          const config = statusCfg[currentStatus] || { icon: '—', cls: 'bg-slate-50 text-slate-300' };
 
                           return (
                             <td key={idx} className="px-2 py-3 text-center border-r border-hicado-slate/20">
                               <div className={clsx(
                                 "w-8 h-8 rounded-lg mx-auto flex items-center justify-center font-black text-xs transition-transform group-hover:scale-110",
-                                statusCfg.cls
+                                config.cls
                               )}>
-                                {statusCfg.icon}
+                                {config.icon}
                               </div>
                             </td>
                           );
