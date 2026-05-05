@@ -480,7 +480,7 @@ export const Classes = () => {
                         placeholder="Tìm theo tên hoặc mã học sinh..."
                       />
                     </div>
-                    <div className="flex-1 bg-hicado-slate/10 rounded-[1.5rem] border border-hicado-slate overflow-y-auto custom-scrollbar p-3 space-y-2 min-h-[250px] md:min-h-[350px]">
+                    <div className="bg-hicado-slate/10 rounded-[1.5rem] border border-hicado-slate overflow-y-auto custom-scrollbar p-3 space-y-2 min-h-[200px] max-h-[300px] md:max-h-[420px]">
                       {filteredStudents.map(s => (
                         <div
                           key={s.id}
