@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import { useAuthStore, useCenterStore } from '@/store';
 import { SkeletonTable } from '@/views/components/skeleton';
 import { attendanceSameDay } from '@/utils/attendance-date';
+import { buildBulkAttendancePlan } from '@/utils/center-operations';
 
 type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LEAVE_REQUEST';
 type AttendanceSlot = 'MORNING' | 'AFTERNOON' | 'EVENING' | 'CUSTOM';
@@ -132,6 +133,65 @@ export const AttendancePage = () => {
     });
   };
 
+  const handleBulkMark = async (status: AttendanceStatus, allowOverwrite = false) => {
+    if (!isTeacher || !selectedClassId || classStudentIds.length === 0) return;
+    const plan = buildBulkAttendancePlan({
+      classId: selectedClassId,
+      studentIds: classStudentIds,
+      date,
+      slot,
+      status,
+      sessionUnits,
+      existingRecords: attendance,
+      allowOverwrite,
+    });
+
+    if (plan.blocked.length > 0 && !allowOverwrite) {
+      const shouldOverwrite = window.confirm(
+        `${plan.blocked.length} hoc sinh da co trang thai khac trong ca nay. Ban co muon ghi de khong?`
+      );
+      if (shouldOverwrite) await handleBulkMark(status, true);
+      return;
+    }
+
+    await Promise.all([
+      ...plan.creates.map((item) =>
+        addAttendance({
+          id: `ATT-${selectedClassId}-${item.studentId}-${date}-${slot}`,
+          classId: selectedClassId,
+          studentId: item.studentId,
+          date,
+          slot,
+          sessionUnits: item.sessionUnits,
+          status: item.status,
+          markedByUserId: auth?.id,
+          markedByName: auth?.name,
+          markedByRole: auth?.role,
+          markedAt: new Date().toISOString(),
+        })
+      ),
+      ...plan.updates.map((item) =>
+        updateAttendance(item.id, {
+          status: item.status,
+          sessionUnits: item.sessionUnits,
+          slot,
+          markedByUserId: auth?.id,
+          markedByName: auth?.name,
+          markedByRole: auth?.role,
+          markedAt: new Date().toISOString(),
+          reason: allowOverwrite ? 'teacher-bulk-overwrite' : 'teacher-bulk-update',
+        })
+      ),
+    ]);
+  };
+
+  const handleClearSlot = async () => {
+    if (!isTeacher || classRecords.length === 0) return;
+    const shouldDelete = window.confirm(`Xoa ${classRecords.length} ban ghi diem danh trong ca ${SLOT_LABEL[slot]} ngay ${date}?`);
+    if (!shouldDelete) return;
+    await Promise.all(classRecords.map((record) => deleteAttendance(record.id, 'teacher-clear-slot')));
+  };
+
   if (isLoading) {
     return <div className="space-y-10"><SkeletonTable rows={10} /></div>;
   }
@@ -238,13 +298,40 @@ export const AttendancePage = () => {
       )}
 
       <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
-        <div className="px-8 py-6 border-b border-hicado-slate flex justify-between items-center">
-          <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">
-            Học viên ({classStudents.length})
-          </p>
-          <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">
-            {isTeacher ? 'Điểm danh theo ca' : 'Trạng thái & nhật ký'}
-          </p>
+        <div className="px-8 py-6 border-b border-hicado-slate flex flex-col md:flex-row md:justify-between md:items-center gap-4">
+          <div>
+            <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">
+              Học viên ({classStudents.length})
+            </p>
+            <p className="text-[10px] font-bold text-hicado-navy/30 mt-1">
+              {isTeacher ? 'Điểm danh theo ca' : 'Trạng thái & nhật ký'}
+            </p>
+          </div>
+          {isTeacher && (
+            <div className="flex flex-wrap gap-2 justify-end">
+              <button
+                onClick={() => void handleBulkMark('PRESENT')}
+                disabled={classStudents.length === 0}
+                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-hicado-emerald text-hicado-navy hover:scale-105 transition-all disabled:opacity-40"
+              >
+                Tất cả đi học
+              </button>
+              <button
+                onClick={() => void handleBulkMark('ABSENT')}
+                disabled={classStudents.length === 0}
+                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-rose-500 text-white hover:scale-105 transition-all disabled:opacity-40"
+              >
+                Tất cả vắng
+              </button>
+              <button
+                onClick={() => void handleClearSlot()}
+                disabled={classRecords.length === 0}
+                className="px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest bg-white border border-rose-200 text-rose-500 hover:bg-rose-50 transition-all disabled:opacity-40"
+              >
+                Xóa ca này
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="divide-y divide-hicado-slate/50">

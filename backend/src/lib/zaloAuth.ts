@@ -76,8 +76,8 @@ export const shouldProactiveRefresh = async (): Promise<boolean> => {
   if (!issuedAt) return true;
 
   const ageMs = Date.now() - new Date(issuedAt).getTime();
-  const ageDays = ageMs / (1000 * 60 * 60 * 24);
-  return ageDays > 60;
+  const ageHours = ageMs / (1000 * 60 * 60);
+  return ageHours > 20;
 };
 
 // Create a custom Axios instance
@@ -87,7 +87,7 @@ export const zaloApiClient = axios.create({});
 zaloApiClient.interceptors.response.use(
   async (response: any) => {
     // Zalo API returns HTTP 200 but error codes inside the body when token is invalid/expired
-    if (response.data && (response.data.error === -216 || response.data.error === -124)) {
+    if (response.data && (response.data.error === -216 || response.data.error === -124 || response.data.error === 3)) {
       console.log(`🔄 Zalo Token invalid (${response.data.error}). Auto-refreshing...`);
       
       const config = response.config;

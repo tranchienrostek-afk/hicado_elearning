@@ -129,6 +129,12 @@ export const ZaloCampaignPage = () => {
     fetchZaloTemplates(); fetchZaloConfig(); fetchCampaigns();
   }, [fetchClasses, fetchStudents, fetchTeachers, fetchZaloTemplates, fetchZaloConfig, fetchCampaigns]);
 
+  useEffect(() => {
+    if (activeTab === 'followers' && followers.length === 0 && !followersLoading) {
+      fetchFollowers();
+    }
+  }, [activeTab, fetchFollowers]);
+
   // ── Recipient preview (3 groups) ─────────────────────────────────────────
   const allFiltered = students.filter((s: any) => {
     if (wizardStatuses.length && !wizardStatuses.includes(s.tuitionStatus)) return false;
@@ -192,15 +198,26 @@ export const ZaloCampaignPage = () => {
   };
 
   // ── Followers helpers ──────────────────────────────────────────────────────
-  const fetchFollowers = async () => {
+  const fetchFollowers = useCallback(async () => {
     setFollowersLoading(true);
     try {
       const r = await fetch('/api/zalo/followers', { headers: { 'Authorization': `Bearer ${token}` } });
       const d = await r.json();
-      if (d.followers) setFollowers(d.followers);
-    } catch {}
-    finally { setFollowersLoading(false); }
-  };
+      if (!r.ok) {
+        alert(d.message || `Lỗi ${r.status}: Không thể tải followers`);
+        return;
+      }
+      if (Array.isArray(d.followers)) {
+        setFollowers(d.followers);
+      } else {
+        alert(d.message || 'Phản hồi không hợp lệ từ Zalo OA');
+      }
+    } catch (e: any) {
+      alert('Lỗi kết nối: ' + (e.message || 'Không xác định'));
+    } finally {
+      setFollowersLoading(false);
+    }
+  }, [token]);
 
   const handleLink = async (follower: Follower, studentId: string) => {
     setIsLinking(true);

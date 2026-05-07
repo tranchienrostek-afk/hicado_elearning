@@ -16,6 +16,7 @@ import userRoutes from './routes/users';
 import zaloRoutes from './routes/zalo';
 import configRoutes from './routes/config';
 import campaignRoutes from './routes/campaigns';
+import { shouldProactiveRefresh, refreshZaloToken, getZaloConfig } from './lib/zaloAuth';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -36,7 +37,7 @@ app.use('/api/zalo', zaloRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/campaigns', campaignRoutes);
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
@@ -48,5 +49,30 @@ app.use((_req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`[Server] Running on port ${PORT}`);
+
+  void (async () => {
+    try {
+      if (await shouldProactiveRefresh()) {
+        console.log('[Zalo] Access token > 20 hours or missing. Refreshing on startup...');
+        await refreshZaloToken();
+        console.log('[Zalo] Token refresh succeeded.');
+      }
+    } catch (err: any) {
+      console.warn('[Zalo] Startup refresh skipped:', err.message);
+    }
+  })();
+
+  const ZALO_REFRESH_INTERVAL = 20 * 60 * 60 * 1000; // 20 giờ
+  setInterval(async () => {
+    try {
+      const cfg = await getZaloConfig();
+      if (!cfg.ZALO_REFRESH_TOKEN) return; // không có refresh token → bỏ qua
+      await refreshZaloToken();
+      console.log('✅ [Zalo] Scheduled access token refresh OK');
+    } catch (err: any) {
+      console.warn('[Zalo] Scheduled refresh failed:', err.message);
+    }
+  }, ZALO_REFRESH_INTERVAL);
+
 });

@@ -4,7 +4,6 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 import { formatPhone } from './zalo';
 import FormData from 'form-data';
-import axios from 'axios';
 import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildZaloImageMessage } from '../lib/zaloMessage';
@@ -13,7 +12,7 @@ import { buildZaloImageMessage } from '../lib/zaloMessage';
 async function uploadZaloImage(buffer: Buffer, accessToken: string): Promise<string> {
   const form = new FormData();
   form.append('file', buffer, { filename: 'payment.png', contentType: 'image/png' });
-  const res = await axios.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
+  const res = await zaloApiClient.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
     headers: { ...form.getHeaders(), access_token: accessToken },
   });
   if (res.data?.error !== 0) throw new Error(res.data?.message ?? 'Upload failed');
@@ -276,7 +275,7 @@ router.get('/debug/image-send', authenticateToken, authorizeRoles('ADMIN', 'MANA
     // Upload
     const form = new FormData();
     form.append('file', pngBuffer, { filename: 'payment.png', contentType: 'image/png' });
-    const uploadRes = await axios.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
+    const uploadRes = await zaloApiClient.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
       headers: { ...form.getHeaders(), access_token: cfg.ZALO_ACCESS_TOKEN },
     });
     result.upload = uploadRes.data;
@@ -290,7 +289,7 @@ router.get('/debug/image-send', authenticateToken, authorizeRoles('ADMIN', 'MANA
     // Try 4 CS message formats in parallel
     const tryFormat = async (label: string, message: any) => {
       try {
-        const r = await axios.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`,
+        const r = await zaloApiClient.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`,
           { recipient: { user_id: testUserId }, message }, { headers });
         return { label, error: r.data?.error, message: r.data?.message, data: r.data?.data };
       } catch (e: any) { return { label, exception: e.message }; }

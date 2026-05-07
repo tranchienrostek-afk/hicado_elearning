@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useAuthStore, useCenterStore } from '@/store';
 import { QRCodeModal } from '@/views/components';
+import { calculateStudentTuitionDue, sumPresentSessionUnits } from '@/utils/center-operations';
 
 export const StudentPage = () => {
   const { auth } = useAuthStore();
@@ -23,12 +24,7 @@ export const StudentPage = () => {
   );
 
   const totalDue = useMemo(
-    () => studentClasses.reduce((sum, cls) => {
-      const attended = attendance.filter(
-        a => a.studentId === studentId && a.classId === cls.id && a.status === 'PRESENT'
-      ).length;
-      return sum + attended * cls.tuitionPerSession;
-    }, 0),
+    () => (studentId ? calculateStudentTuitionDue(studentId, studentClasses, attendance) : 0),
     [studentClasses, attendance, studentId]
   );
 
@@ -122,9 +118,9 @@ export const StudentPage = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {studentClasses.map(cls => {
               const room = rooms.find(r => r.id === cls.roomId);
-              const myAttended = attendance.filter(
-                a => a.studentId === studentId && a.classId === cls.id && a.status === 'PRESENT'
-              ).length;
+              const myAttended = sumPresentSessionUnits(attendance.filter(
+                a => a.studentId === studentId && a.classId === cls.id
+              ));
               const myDue = myAttended * cls.tuitionPerSession;
 
               return (

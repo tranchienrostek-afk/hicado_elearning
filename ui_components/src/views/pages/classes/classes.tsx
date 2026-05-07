@@ -13,6 +13,7 @@ import {
 import { downloadXlsxWorkbook } from '@/utils/excel-workbook';
 import { buildImportErrorRows, planImport, type ImportPlan } from '@/utils/import-planner';
 import { ImportPreviewModal } from '@/views/components/import-preview-modal';
+import { calculateStudentTuitionDue } from '@/utils/center-operations';
 
 const classSchema = z.object({
   name: z.string().min(3, 'Tên lớp quá ngắn'),
@@ -633,10 +634,7 @@ const SharedStoryModal = ({ studentId, onClose }: { studentId: string; onClose: 
 
   const studentClasses = scopedClasses.filter(c => c.studentIds.includes(studentId));
 
-  const totalTuition = studentClasses.reduce((acc, cls) => {
-    const attended = attendance.filter(a => a.studentId === studentId && a.classId === cls.id && a.status === 'PRESENT').length;
-    return acc + attended * cls.tuitionPerSession;
-  }, 0);
+  const totalTuition = calculateStudentTuitionDue(studentId, studentClasses, attendance);
 
   const totalPaid = useCenterStore.getState().transactions
     .filter(t => t.studentId === studentId && t.status === 'SUCCESS')

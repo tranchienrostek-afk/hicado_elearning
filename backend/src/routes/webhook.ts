@@ -2,11 +2,27 @@ import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { findStudentByPaymentContent, normalizeSepayWebhookPayload } from '../lib/sepayMatch';
+import { getZaloConfig, ZALO_OA_API, zaloApiClient } from '../lib/zaloAuth';
 
-// Zalo OA Webhook — captures follower user_ids when they message the OA
-// Configure URL in oa.zalo.me → Cài đặt → Webhook
+const digitsOnly = (value: string) => value.replace(/\D/g, '');
+const normalizePhone = (value: string) => {
+  const d = digitsOnly(value);
+  if (!d) return '';
+  if (d.startsWith('84')) return d;
+  if (d.startsWith('0')) return `84${d.slice(1)}`;
+  return `84${d}`;
+};
+const normalizeName = (value: string) =>
+  value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+// Zalo OA Webhook: captures follower user_ids when they message/follow OA
 const handleZaloOA = async (req: any, res: any) => {
-  res.json({ error: 0 });  // ACK immediately
+  res.json({ error: 0 }); // ACK immediately
   try {
     const { event_name, follower } = req.body;
     const userId: string | undefined = follower?.id;
@@ -14,25 +30,106 @@ const handleZaloOA = async (req: any, res: any) => {
 
     console.log(`[Zalo Webhook] event=${event_name} user_id=${userId}`);
 
-    // Auto-link: if follower sent a message containing their system username, link them
+    const linkTeacher = async (teacherId: string, reason: string) => {
+      await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId: userId } });
+      console.log(`[Zalo Webhook] Linked userId=${userId} -> teacherId=${teacherId} (${reason})`);
+    };
+
+    const linkStudent = async (studentId: string, reason: string) => {
+      await prisma.student.update({ where: { id: studentId }, data: { zaloUserId: userId } });
+      console.log(`[Zalo Webhook] Linked userId=${userId} -> studentId=${studentId} (${reason})`);
+    };
+
+    const hasExistingLink = async () => {
+      const [teacher, student] = await Promise.all([
+        prisma.teacher.findFirst({ where: { zaloUserId: userId }, select: { id: true } }),
+        prisma.student.findFirst({ where: { zaloUserId: userId }, select: { id: true } }),
+      ]);
+      return !!teacher || !!student;
+    };
+
+    // Auto-link on incoming text: username first, then phone number
     if (event_name === 'user_send_text') {
-      const text: string = (req.body.message?.text || '').trim().toLowerCase();
+      const rawText: string = (req.body.message?.text || '').trim();
+      const text = rawText.toLowerCase();
+
       if (text) {
         const user = await prisma.user.findFirst({
           where: { username: text },
-          include: { teacher: true, student: true }
+          include: { teacher: true, student: true },
         });
+
         if (user?.teacherId) {
-          await prisma.teacher.update({ where: { id: user.teacherId }, data: { zaloUserId: userId } });
-          console.log(`[Zalo Webhook] Auto-linked userId=${userId} → teacher ${user.name}`);
+          await linkTeacher(user.teacherId, `username:${text}`);
         } else if (user?.studentId) {
-          await prisma.student.update({ where: { id: user.studentId }, data: { zaloUserId: userId } });
-          console.log(`[Zalo Webhook] Auto-linked userId=${userId} → student ${user.name}`);
+          await linkStudent(user.studentId, `username:${text}`);
+        } else {
+          const phone = normalizePhone(rawText);
+          if (phone) {
+            const teachers = await prisma.teacher.findMany({
+              where: { zaloUserId: null, phone: { not: null } },
+              select: { id: true, phone: true },
+            });
+            const students = await prisma.student.findMany({
+              where: {
+                zaloUserId: null,
+                OR: [{ parentPhone: { not: null } }, { studentPhone: { not: null } }],
+              },
+              select: { id: true, parentPhone: true, studentPhone: true },
+            });
+
+            const teacherMatches = teachers.filter(t => normalizePhone(t.phone || '') === phone);
+            const studentMatches = students.filter(s =>
+              [s.parentPhone, s.studentPhone].some(p => normalizePhone(p || '') === phone),
+            );
+
+            if (teacherMatches.length + studentMatches.length === 1) {
+              if (teacherMatches.length === 1) {
+                await linkTeacher(teacherMatches[0].id, `phone:${phone}`);
+              } else {
+                await linkStudent(studentMatches[0].id, `phone:${phone}`);
+              }
+            }
+          }
         }
       }
     }
 
-    // Read receipt: update ZaloMessageLog status → READ and increment campaign readCount
+    // Auto-link by display_name if user follows OA (or sends text) and is still not linked
+    if ((event_name === 'follow' || event_name === 'user_follow_oa' || event_name === 'user_send_text') && !(await hasExistingLink())) {
+      try {
+        const cfg = await getZaloConfig();
+        if (cfg.ZALO_ACCESS_TOKEN) {
+          const profileRes = await zaloApiClient.get<any>(
+            `${ZALO_OA_API}/v2.0/oa/getprofile?data=${encodeURIComponent(JSON.stringify({ user_id: userId }))}`,
+            { headers: { access_token: cfg.ZALO_ACCESS_TOKEN } },
+          );
+
+          const displayName = normalizeName(profileRes.data?.data?.display_name || '');
+          if (displayName) {
+            const [teachers, students] = await Promise.all([
+              prisma.teacher.findMany({ where: { zaloUserId: null }, select: { id: true, name: true } }),
+              prisma.student.findMany({ where: { zaloUserId: null }, select: { id: true, name: true } }),
+            ]);
+
+            const matchedTeachers = teachers.filter(t => normalizeName(t.name) === displayName);
+            const matchedStudents = students.filter(s => normalizeName(s.name) === displayName);
+
+            if (matchedTeachers.length + matchedStudents.length === 1) {
+              if (matchedTeachers.length === 1) {
+                await linkTeacher(matchedTeachers[0].id, `display_name:${displayName}`);
+              } else {
+                await linkStudent(matchedStudents[0].id, `display_name:${displayName}`);
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[Zalo Webhook] profile-link skipped for userId=${userId}: ${err?.message || err}`);
+      }
+    }
+
+    // Read receipt: update ZaloMessageLog status -> READ and increment campaign readCount
     if (event_name === 'user_seen_message') {
       const seenMsgId: string | undefined = req.body.message?.msg_id;
       const log = await (prisma as any).zaloMessageLog.findFirst({
@@ -43,17 +140,20 @@ const handleZaloOA = async (req: any, res: any) => {
         },
         orderBy: { sentAt: 'desc' },
       });
+
       if (log) {
         await (prisma as any).zaloMessageLog.update({
           where: { id: log.id },
           data: { status: 'READ', readAt: new Date() },
         });
+
         if (log.campaignId) {
           await (prisma as any).campaign.update({
             where: { id: log.campaignId },
             data: { readCount: { increment: 1 } },
           });
         }
+
         console.log(`[Zalo Webhook] READ receipt: userId=${userId} logId=${log.id}`);
       }
     }
@@ -62,7 +162,7 @@ const handleZaloOA = async (req: any, res: any) => {
   }
 };
 
-// Core SePay processing logic — shared by webhook and manual endpoint
+// Core SePay processing logic: shared by webhook and manual endpoint
 async function processSepayTransaction(payload: {
   id?: number | null;
   gateway?: string;
@@ -87,7 +187,7 @@ async function processSepayTransaction(payload: {
   const matchedStudent = findStudentByPaymentContent(allStudents, combinedContent);
   if (!matchedStudent) {
     console.warn(`[SePay] No student identifier found in: "${combinedContent}"`);
-    return { success: false, message: `Không tìm thấy mã học sinh trong nội dung: "${combinedContent}"` };
+    return { success: false, message: `Khong tim thay ma hoc sinh trong noi dung: "${combinedContent}"` };
   }
 
   // Match class: find any classCode that appears in the content
@@ -161,7 +261,7 @@ router.post('/sepay', async (req, res) => {
 });
 
 /**
- * Manual transaction entry — for payments missed by webhook (Render sleep, SePay misconfiguration, etc.)
+ * Manual transaction entry: for payments missed by webhook (Render sleep, SePay misconfiguration, etc.)
  * POST /api/webhook/manual-transaction
  * Body: { studentCode, amount, content?, classCode?, transactionDate? }
  */
@@ -174,7 +274,7 @@ router.post('/manual-transaction', authenticateToken, authorizeRoles('ADMIN', 'M
     transactionDate?: string;
   };
 
-  if (!studentCode || !amount) return res.status(400).json({ message: 'Cần studentCode và amount' });
+  if (!studentCode || !amount) return res.status(400).json({ message: 'Can studentCode va amount' });
 
   try {
     const result = await processSepayTransaction({
@@ -188,7 +288,7 @@ router.post('/manual-transaction', authenticateToken, authorizeRoles('ADMIN', 'M
     });
 
     if (!result.success) return res.status(404).json({ message: result.message });
-    res.json({ message: `Đã ghi nhận: ${result.studentName} — ${amount.toLocaleString('vi-VN')}đ`, ...result });
+    res.json({ message: `Da ghi nhan: ${result.studentName} - ${amount.toLocaleString('vi-VN')}d`, ...result });
   } catch (err: any) {
     console.error('[Manual Tx]', err.message);
     res.status(500).json({ message: err.message });

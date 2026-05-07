@@ -3,6 +3,7 @@ import { useAuthStore, useCenterStore } from '@/store';
 import { toast } from 'react-hot-toast';
 import { SkeletonTable, SkeletonCard } from '@/views/components/skeleton';
 import clsx from 'clsx';
+import { sumPresentSessionUnits } from '@/utils/center-operations';
 
 interface FinanceStats {
   totalCollected: number;
@@ -192,8 +193,8 @@ export const FinancialPage = () => {
           item.date.startsWith(selectedMonth)
         );
 
-        const allSessionCount = countUniqueDates(presentRecords.map((item) => item.date));
-        const monthSessionCount = countUniqueDates(monthPresentRecords.map((item) => item.date));
+        const allSessionCount = sumPresentSessionUnits(presentRecords);
+        const monthSessionCount = sumPresentSessionUnits(monthPresentRecords);
 
         const statsRow = financeStats?.collectionByClass.find((item) => item.classId === cls.id);
         const expectedRevenue = statsRow?.expected ?? cls.tuitionPerSession * cls.totalSessions * classStudents.length;
@@ -202,9 +203,8 @@ export const FinancialPage = () => {
         const salaryAllTime = paidRevenue * salaryRate;
         const centerProfit = paidRevenue - salaryAllTime;
 
-        const monthBaseSalary =
-          cls.tuitionPerSession * classStudents.length * monthSessionCount * salaryRate;
-        const expectedMonthAttendance = monthSessionCount * classStudents.length;
+        const monthBaseSalary = cls.tuitionPerSession * monthSessionCount * salaryRate;
+        const expectedMonthAttendance = countUniqueDates(monthPresentRecords.map((item) => item.date)) * classStudents.length;
         const monthAttendanceRate =
           expectedMonthAttendance > 0
             ? monthPresentRecords.length / expectedMonthAttendance

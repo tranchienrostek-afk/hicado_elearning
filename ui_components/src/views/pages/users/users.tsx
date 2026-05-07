@@ -16,6 +16,7 @@ import {
 import { downloadXlsxWorkbook } from '@/utils/excel-workbook';
 import { buildImportErrorRows, planImport, type ImportPlan } from '@/utils/import-planner';
 import { ImportPreviewModal } from '@/views/components/import-preview-modal';
+import { assessProfileDeletion, calculateStudentTuitionDue, sumPresentSessionUnits } from '@/utils/center-operations';
 
 const studentSchema = z.object({
   name: z.string().min(2, 'Tên quá ngắn'),
@@ -151,32 +152,45 @@ export const Users = () => {
     setConfirmDelete({ id, title: name, type: 'PROFILE' });
   };
 
+  const deleteProfileSafely = async (id: string) => {
+    const kind = activeTab === 'STUDENTS' ? 'STUDENT' : 'TEACHER';
+    const assessment = assessProfileDeletion(kind, id, { classes, attendance, transactions });
+
+    if (!assessment.canHardDelete) {
+      toast.error(`Khong the xoa cung: ${assessment.reasons.join('; ')}`);
+      return false;
+    }
+
+    const res = kind === 'STUDENT' ? await deleteStudent(id) : await deleteTeacher(id);
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      toast.error(errorData.message || 'Khong the xoa ho so');
+      return false;
+    }
+
+    return true;
+  };
+
   const executeDelete = () => {
     if (!confirmDelete) return;
     const { id, type } = confirmDelete;
-    
+
     if (type === 'ACCOUNT') {
       deleteAccount(id);
-      toast.success('Đã thu hồi quyền truy cập');
+      toast.success('Da thu hoi quyen truy cap');
     } else if (id === 'BULK') {
       const idsToDelete = Array.from(selectedIds);
-      if (activeTab === 'STUDENTS') {
-        idsToDelete.forEach(id => deleteStudent(id));
-        toast.success(`Đã xóa ${idsToDelete.length} học sinh`);
-      } else {
-        idsToDelete.forEach(id => deleteTeacher(id));
-        toast.success(`Đã xóa ${idsToDelete.length} giáo viên`);
-      }
-      setSelectedIds(new Set());
+      void Promise.all(idsToDelete.map((itemId) => deleteProfileSafely(itemId))).then((results) => {
+        const deletedCount = results.filter(Boolean).length;
+        if (deletedCount > 0) toast.success(`Da xoa ${deletedCount}/${idsToDelete.length} ho so`);
+        setSelectedIds(new Set());
+      });
     } else {
-      if (activeTab === 'STUDENTS') {
-        deleteStudent(id);
-        toast.success('Đã xóa học sinh');
-      } else {
-        deleteTeacher(id);
-        toast.success('Đã xóa giáo viên');
-      }
+      void deleteProfileSafely(id).then((deleted) => {
+        if (deleted) toast.success(activeTab === 'STUDENTS' ? 'Da xoa hoc sinh' : 'Da xoa giao vien');
+      });
     }
+
     setConfirmDelete(null);
   };
 
@@ -268,24 +282,10 @@ export const Users = () => {
     if (!isTeacher) return {};
     const scopedStudentIds = new Set(scopedStudents.map((item) => item.id));
 
-    const monthClassSessions = new Map<string, number>();
-    teacherClasses.forEach((cls) => {
-      const classSessionCount = new Set(
-        attendance
-          .filter((item) => item.classId === cls.id && item.date.startsWith(monthFilter))
-          .map((item) => item.date)
-      ).size;
-      monthClassSessions.set(cls.id, classSessionCount);
-    });
-
     const dueMap = new Map<string, number>();
-    teacherClasses.forEach((cls) => {
-      const sessions = monthClassSessions.get(cls.id) || 0;
-      if (sessions === 0) return;
-
-      Array.from(new Set(cls.studentIds)).forEach((studentId) => {
-        dueMap.set(studentId, (dueMap.get(studentId) || 0) + sessions * cls.tuitionPerSession);
-      });
+    scopedStudents.forEach((student) => {
+      const due = calculateStudentTuitionDue(student.id, teacherClasses, attendance, monthFilter);
+      if (due > 0) dueMap.set(student.id, due);
     });
 
     const paidMap = new Map<string, number>();
@@ -1282,10 +1282,7 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
   const studentAttendance = attendance.filter(a => a.studentId === studentId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   // Calculate financials
-  const totalTuition = studentClasses.reduce((acc, cls) => {
-    const attendedSessions = attendance.filter(a => a.studentId === studentId && a.classId === cls.id && a.status === 'PRESENT').length;
-    return acc + (attendedSessions * cls.tuitionPerSession);
-  }, 0);
+  const totalTuition = calculateStudentTuitionDue(studentId, studentClasses, attendance);
 
   const totalPaid = useCenterStore.getState().transactions
     .filter(t => t.studentId === studentId && t.status === 'SUCCESS')
@@ -1375,12 +1372,12 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-[10px] font-bold text-slate-400 uppercase">
                       <span>Tiến độ</span>
-                      <span>{attendance.filter(a => a.studentId === studentId && a.classId === cls.id && a.status === 'PRESENT').length}/{cls.totalSessions} buổi</span>
+                    <span>{sumPresentSessionUnits(attendance.filter(a => a.studentId === studentId && a.classId === cls.id))}/{cls.totalSessions} ca</span>
                     </div>
                     <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                       <div 
                         className="h-full bg-management-blue transition-all duration-1000" 
-                        style={{ width: `${(attendance.filter(a => a.studentId === studentId && a.classId === cls.id && a.status === 'PRESENT').length / cls.totalSessions) * 100}%` }}
+                        style={{ width: `${(sumPresentSessionUnits(attendance.filter(a => a.studentId === studentId && a.classId === cls.id)) / cls.totalSessions) * 100}%` }}
                       ></div>
                     </div>
                   </div>

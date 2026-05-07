@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Process *)",
+      "Bash(node *)",
+      "Bash(curl *)",
+      "Read(//c/Program Files/Docker/Docker/**)",
+      "Read(//c/Program Files/Docker/**)",
+      "PowerShell(Get-Service *)",
+      "Bash(wsl --list --verbose)",
+      "Bash(wsl -l -v)",
+      "Bash(net stop *)",
+      "Bash(net start *)",
+      "Bash(\"C:/Program Files/Docker/Docker/DockerCli.exe\" -Version)",
+      "Bash(\"C:/Program Files/Docker/Docker/DockerCli.exe\" SwitchLinuxEngine)",
+      "Bash(sc stop *)",
+      "Bash(sc start *)",
+      "Bash(npm run *)",
+      "Bash(npx tsc *)",
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(Get-ChildItem D:\\\\desktop_folder\\\\19_Elearning\\\\ui_components\\\\src\\\\views\\\\pages\\\\classes *)",
+      "Bash(npx prisma *)",
+      "Bash(git commit -m '@ *)",
+      "Bash(grep -E \"\\\\.\\(ts|tsx\\)$\")"
+    ]
+  }
+}

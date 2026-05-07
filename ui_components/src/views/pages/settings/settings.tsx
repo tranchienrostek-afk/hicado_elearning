@@ -5,8 +5,10 @@ type ZaloStatus = { success: boolean; message: string } | null;
 type TokenStatus = {
   issuedAt: string | null;
   ageDays: number | null;
+  ageHours: number | null;
   estimatedExpiresIn: number | null;
   healthStatus: 'ok' | 'warning' | 'critical' | 'unknown';
+  accessTokenStatus: 'ok' | 'warning' | 'expired' | 'unknown';
   hasRefreshToken: boolean;
 };
 
@@ -490,6 +492,21 @@ export const SettingsPage = () => {
                       ? `Cấp lúc: ${new Date(tokenStatus.issuedAt).toLocaleDateString('vi-VN')} | Tuổi token: ${tokenStatus.ageDays} ngày`
                       : 'Chưa ghi nhận thời điểm cấp token.'}
                   </p>
+                  {/* Access token status */}
+                  {tokenStatus?.ageHours != null && (
+                    <div className="flex justify-between items-center text-sm mt-3 pt-3 border-t border-hicado-navy/10">
+                      <span className="text-hicado-navy/50 font-bold">Access token</span>
+                      <span className={`font-black text-[10px] px-2 py-1 rounded-full ${
+                        tokenStatus.accessTokenStatus === 'ok'      ? 'bg-emerald-100 text-emerald-700' :
+                        tokenStatus.accessTokenStatus === 'warning' ? 'bg-amber-100 text-amber-700'   :
+                                                                      'bg-rose-100 text-rose-600'
+                      }`}>
+                        {tokenStatus.accessTokenStatus === 'expired'
+                          ? '⚠ Hết hạn (sẽ tự refresh)'
+                          : `Làm mới ${tokenStatus.ageHours}h trước · còn ~${Math.max(0, 25 - tokenStatus.ageHours)}h`}
+                      </span>
+                    </div>
+                  )}
                   <p className="text-xs mt-1">
                     {tokenStatus?.hasRefreshToken ? 'Có refresh token để gia hạn tự động.' : 'Không có refresh token hợp lệ.'}
                   </p>
@@ -544,7 +561,7 @@ export const SettingsPage = () => {
 
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3">
                   <p className="text-[10px] font-black text-amber-700 uppercase tracking-wider mb-1">Lưu ý</p>
-                  <p className="text-[11px] text-amber-700 leading-relaxed">Token Zalo có hiệu lực <strong>1 giờ</strong>. Refresh token sẽ tự động lấy token mới khi hết hạn (nếu còn hợp lệ). Nếu cả hai đều hết hạn, cần ủy quyền lại.</p>
+                  <p className="text-[11px] text-amber-700 leading-relaxed">Token Zalo có hiệu lực <strong>~25 giờ</strong>. Hệ thống tự refresh mỗi 20 giờ. Refresh token hiệu lực 90 ngày — hết hạn cần ủy quyền lại OAuth.</p>
                 </div>
               </div>
             </div>

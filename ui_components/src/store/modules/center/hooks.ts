@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { CenterStore } from './types';
 import { useAuthStore } from '../auth';
 import { attendanceDateKey } from '@/utils/attendance-date';
+import { calculateTeacherSalaryByUnits } from '@/utils/center-operations';
 
 const fetchWithAuth = (url: string, options: RequestInit = {}): Promise<Response> => {
   const token = useAuthStore.getState().auth?.token;
@@ -146,15 +147,7 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
 
   calculateTeacherSalary: (teacherId, _month) => {
     const state = get();
-    const teacher = state.teachers.find(t => t.id === teacherId);
-    if (!teacher) return 0;
-    let totalSalary = 0;
-    state.classes.filter(c => c.teacherId === teacherId).forEach(cls => {
-      const classAttendance = state.attendance.filter(a => a.classId === cls.id && a.status === 'PRESENT');
-      const sessionsCount = Array.from(new Set(classAttendance.map(a => a.date))).length;
-      totalSalary += (cls.tuitionPerSession * sessionsCount * teacher.salaryRate);
-    });
-    return totalSalary;
+    return calculateTeacherSalaryByUnits(teacherId, state.classes, state.attendance, state.teachers);
   },
 
   importStudents: (newStudents) => set((state) => ({
