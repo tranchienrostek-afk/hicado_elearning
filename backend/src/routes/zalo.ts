@@ -140,6 +140,17 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
   }
 });
 
+// 4b. Unlink: xóa zaloUserId khỏi student hoặc teacher
+router.delete('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { studentId, teacherId } = req.body;
+  if (!studentId && !teacherId) return res.status(400).json({ message: 'Cần studentId hoặc teacherId' });
+  try {
+    if (studentId) await prisma.student.update({ where: { id: studentId }, data: { zaloUserId: null } });
+    if (teacherId) await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId: null } });
+    res.json({ message: 'Đã hủy liên kết' });
+  } catch { res.status(500).json({ message: 'Lỗi hủy liên kết' }); }
+});
+
 // 5. Send OA Customer Service message (works for followers, no ZNS approval needed)
 router.post('/send/cs', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { userIds, message } = req.body;

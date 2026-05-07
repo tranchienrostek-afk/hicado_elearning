@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCenterStore, useAuthStore } from '@/store';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,9 +23,25 @@ interface Follower {
   linkedStudent: { id: string; name: string; parentPhone: string } | null;
 }
 
+// ── Follower mapping helpers ───────────────────────────────────────────────────
+const deaccent = (s: string) =>
+  s.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase().trim();
+
+const nameMatchScore = (a: string, b: string): number => {
+  const na = deaccent(a);
+  const nb = deaccent(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 100;
+  if (na.includes(nb) || nb.includes(na)) return 88;
+  const wa = na.split(/\s+/);
+  const wb = nb.split(/\s+/);
+  const common = wa.filter(w => wb.includes(w)).length;
+  return Math.round((common / Math.max(wa.length, wb.length)) * 75);
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export const ZaloCampaignPage = () => {
-  const { classes, students, teachers, fetchClasses, fetchStudents, fetchTeachers } = useCenterStore();
+  const { classes, students, fetchClasses, fetchStudents, fetchTeachers } = useCenterStore();
   const { auth } = useAuthStore();
   const token = auth?.token;
   const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -51,14 +67,16 @@ export const ZaloCampaignPage = () => {
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ sentCount: number; znsSentCount: number; failedCount: number } | null>(null);
 
-  // ── Followers (existing) ───────────────────────────────────────────────────
+  // ── Followers ──────────────────────────────────────────────────────────────
   const [followers, setFollowers] = useState<Follower[]>([]);
   const [csMessage, setCsMessage] = useState('');
   const [selectedFollowers, setSelectedFollowers] = useState<string[]>([]);
   const [isSendingCs, setIsSendingCs] = useState(false);
-  const [manualUserId, setManualUserId] = useState('');
-  const [manualLinkType, setManualLinkType] = useState('teacher');
-  const [manualLinkId, setManualLinkId] = useState('');
+  const [followersLoading, setFollowersLoading] = useState(false);
+  const [followerFilter, setFollowerFilter] = useState<'all' | 'linked' | 'unlinked'>('all');
+  const [drawerFollower, setDrawerFollower] = useState<Follower | null>(null);
+  const [drawerSearch, setDrawerSearch] = useState('');
+  const [isLinking, setIsLinking] = useState(false);
 
   // ── Config (existing) ──────────────────────────────────────────────────────
   const [config, setConfig] = useState({ ZALO_APP_ID: '', ZALO_SECRET_KEY: '', ZALO_REFRESH_TOKEN: '', ZALO_ACCESS_TOKEN: '' });
@@ -175,22 +193,46 @@ export const ZaloCampaignPage = () => {
 
   // ── Followers helpers ──────────────────────────────────────────────────────
   const fetchFollowers = async () => {
+    setFollowersLoading(true);
     try {
       const r = await fetch('/api/zalo/followers', { headers: { 'Authorization': `Bearer ${token}` } });
       const d = await r.json();
       if (d.followers) setFollowers(d.followers);
     } catch {}
+    finally { setFollowersLoading(false); }
   };
 
-  const handleLinkFollower = async (followerId: string, type: 'teacher' | 'student', id: string) => {
+  const handleLink = async (follower: Follower, studentId: string) => {
+    setIsLinking(true);
     try {
       const r = await fetch('/api/zalo/link', {
         method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ zaloUserId: followerId, teacherId: type === 'teacher' ? id : undefined, studentId: type === 'student' ? id : undefined }),
+        body: JSON.stringify({ zaloUserId: follower.userId, studentId }),
       });
-      alert((await r.json()).message);
-      fetchFollowers();
-    } catch { alert('Lỗi liên kết'); }
+      if (r.ok) {
+        const s = (students as any[]).find(s => s.id === studentId);
+        setFollowers(prev => prev.map(f =>
+          f.userId === follower.userId
+            ? { ...f, linkedStudent: { id: studentId, name: s?.name ?? '', parentPhone: s?.parentPhone ?? '' } }
+            : f
+        ));
+        setDrawerFollower(null);
+        setDrawerSearch('');
+      } else alert(((await r.json()).message) || 'Lỗi liên kết');
+    } catch { alert('Lỗi kết nối'); }
+    finally { setIsLinking(false); }
+  };
+
+  const handleUnlink = async (follower: Follower) => {
+    if (!follower.linkedStudent) return;
+    try {
+      const r = await fetch('/api/zalo/link', {
+        method: 'DELETE', headers: authHeaders,
+        body: JSON.stringify({ studentId: follower.linkedStudent.id }),
+      });
+      if (r.ok) setFollowers(prev => prev.map(f => f.userId === follower.userId ? { ...f, linkedStudent: null } : f));
+      else alert(((await r.json()).message) || 'Lỗi hủy liên kết');
+    } catch { alert('Lỗi kết nối'); }
   };
 
   const toggleFollower = (id: string) =>
@@ -242,6 +284,30 @@ export const ZaloCampaignPage = () => {
     } catch { alert('Lỗi khi gửi'); } finally { setIsSending(false); }
   };
 
+  // ── Follower mapping computed values ─────────────────────────────────────
+  const mappedFollowers = useMemo(() => {
+    if (followerFilter === 'linked') return followers.filter(f => !!f.linkedStudent);
+    if (followerFilter === 'unlinked') return followers.filter(f => !f.linkedStudent);
+    return followers;
+  }, [followers, followerFilter]);
+
+  const drawerStudentList = useMemo(() => {
+    if (!drawerFollower) return { suggestions: [] as { s: any; score: number }[], all: students as any[] };
+    const keyword = drawerSearch.trim().toLowerCase();
+    const suggestions = (students as any[])
+      .map(s => ({ s, score: nameMatchScore(drawerFollower.displayName, s.name) }))
+      .filter(x => x.score >= 60)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+    const all = keyword
+      ? (students as any[]).filter(s =>
+          s.name.toLowerCase().includes(keyword) ||
+          (s.studentCode ?? '').toLowerCase().includes(keyword)
+        )
+      : (students as any[]);
+    return { suggestions, all };
+  }, [drawerFollower, drawerSearch, students]);
+
   // ── Status badge helper ───────────────────────────────────────────────────
   const statusBadge = (status: string) => {
     const m: Record<string, string> = {
@@ -259,6 +325,7 @@ export const ZaloCampaignPage = () => {
   );
 
   return (
+    <>
     <div className="space-y-6">
       {/* Header */}
       <div className="bg-white p-8 rounded-[2.5rem] border border-hicado-slate shadow-premium">
@@ -669,84 +736,136 @@ export const ZaloCampaignPage = () => {
         </div>
       )}
 
-      {/* ══ TAB: FOLLOWERS (existing) ═══════════════════════════════════ */}
+      {/* ══ TAB: FOLLOWERS ══════════════════════════════════════════════ */}
       {activeTab === 'followers' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="space-y-5">
-            <div className="bg-hicado-navy/5 rounded-[1.5rem] border border-hicado-navy/10 p-5">
-              <h2 className="font-black text-hicado-navy mb-1">Liên kết Zalo User ID thủ công</h2>
-              <p className="text-xs text-hicado-navy/50 mb-4">Lấy User ID từ oa.zalo.me → Tin nhắn → click người dùng → copy ID trong URL.</p>
-              <div className="space-y-3">
-                <input type="text" className="w-full border border-hicado-slate rounded-xl p-3 text-sm font-mono bg-white"
-                  placeholder="Zalo User ID" value={manualUserId} onChange={e => setManualUserId(e.target.value)} />
-                <div className="flex gap-3">
-                  <select className="flex-1 border border-hicado-slate rounded-xl p-3 text-sm bg-white" value={manualLinkType} onChange={e => setManualLinkType(e.target.value)}>
-                    <option value="teacher">Giáo viên</option>
-                    <option value="student">Học sinh</option>
-                  </select>
-                  <select className="flex-1 border border-hicado-slate rounded-xl p-3 text-sm bg-white" value={manualLinkId} onChange={e => setManualLinkId(e.target.value)}>
-                    <option value="">-- Chọn --</option>
-                    {manualLinkType === 'teacher'
-                      ? teachers.map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)
-                      : students.slice(0, 100).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                  </select>
-                </div>
-                <button disabled={!manualUserId.trim() || !manualLinkId}
-                  onClick={() => {
-                    handleLinkFollower(manualUserId.trim(), manualLinkType as 'teacher' | 'student', manualLinkId);
-                    if (!selectedFollowers.includes(manualUserId.trim())) setSelectedFollowers(p => [...p, manualUserId.trim()]);
-                    setFollowers(p => p.some(f => f.userId === manualUserId.trim()) ? p : [...p, { userId: manualUserId.trim(), displayName: 'Manual Entry', avatar: '', tags: [], linkedTeacher: null, linkedStudent: null }]);
-                    setManualUserId('');
-                  }}
-                  className="w-full bg-hicado-navy text-white py-3 rounded-xl font-black text-sm disabled:bg-hicado-slate transition-all">
-                  Liên kết
+        <div className="space-y-4">
+          {/* Summary + filter bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2 bg-white border border-hicado-slate rounded-2xl p-1.5">
+              {([['all', `Tất cả (${followers.length})`], ['linked', `✓ Đã liên kết (${followers.filter(f => f.linkedStudent).length})`], ['unlinked', `⚪ Chưa (${followers.filter(f => !f.linkedStudent).length})`]] as const).map(([key, label]) => (
+                <button key={key} onClick={() => setFollowerFilter(key)}
+                  className={`px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all ${followerFilter === key ? 'bg-hicado-navy text-white shadow' : 'text-hicado-navy/40 hover:text-hicado-navy'}`}>
+                  {label}
                 </button>
-              </div>
+              ))}
             </div>
-            <div className="bg-emerald-50 rounded-[1.5rem] border border-emerald-200 p-5">
-              <h2 className="font-black text-hicado-emerald mb-1">Tự động qua Webhook</h2>
-              <p className="text-xs text-gray-600 mb-2">Khi thầy/cô nhắn username của họ vào OA, hệ thống tự động lưu Zalo User ID.</p>
-              <ol className="text-xs text-gray-600 space-y-1 list-decimal list-inside">
-                <li>Cấu hình Webhook URL tại oa.zalo.me → Webhook</li>
-                <li><code className="bg-white px-1 rounded font-mono">/api/webhook/zalo</code></li>
-                <li>Nhắn username (VD: <code className="bg-white px-1 rounded font-mono">thaychien</code>) vào OA</li>
-              </ol>
-            </div>
-            {followers.length > 0 && (
-              <div className="bg-white border border-hicado-slate rounded-[1.5rem] overflow-hidden">
-                <div className="bg-hicado-navy px-5 py-3 flex justify-between">
-                  <span className="text-white font-black text-sm">{followers.length} follower</span>
-                  <span className="text-white/50 text-xs font-bold">{selectedFollowers.length} đã chọn</span>
-                </div>
-                <div className="divide-y divide-hicado-slate/30 max-h-56 overflow-y-auto custom-scrollbar">
-                  {followers.map(f => (
-                    <div key={f.userId} onClick={() => toggleFollower(f.userId)}
-                      className={`flex items-center gap-3 p-3 cursor-pointer hover:bg-hicado-slate/10 transition-all ${selectedFollowers.includes(f.userId) ? 'bg-emerald-50' : ''}`}>
-                      <input type="checkbox" checked={selectedFollowers.includes(f.userId)} readOnly className="accent-hicado-navy" />
-                      <div className="w-8 h-8 rounded-full bg-hicado-navy text-white flex items-center justify-center font-black text-xs">{f.displayName.charAt(0)}</div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-hicado-navy text-sm truncate">{f.displayName}</p>
-                        <p className="text-xs text-hicado-navy/30 font-mono truncate">{f.userId}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            <button onClick={fetchFollowers} className="w-full py-3 border border-hicado-slate rounded-xl font-black text-xs text-hicado-navy/50 hover:bg-hicado-slate transition-all uppercase tracking-widest">
-              Tải Followers từ Zalo OA
+            <button onClick={fetchFollowers} disabled={followersLoading}
+              className="px-5 py-2.5 border border-hicado-slate rounded-2xl text-xs font-black uppercase tracking-widest text-hicado-navy/50 hover:bg-hicado-slate/30 disabled:opacity-50 transition-all">
+              {followersLoading ? 'Đang tải...' : '↺ Tải lại từ Zalo OA'}
             </button>
           </div>
-          <div className="bg-white border border-hicado-slate rounded-[1.5rem] p-5 self-start sticky top-6">
-            <h2 className="font-black text-hicado-navy mb-1">Gửi tin OA (Customer Service)</h2>
-            <p className="text-xs text-hicado-navy/40 mb-4">Gửi trực tiếp cho followers đã liên kết. Không cần ZNS approval.</p>
-            <textarea className="w-full border border-hicado-slate rounded-xl p-3 text-sm resize-none focus:outline-none focus:border-hicado-emerald mb-2" rows={6}
-              placeholder="Nội dung tin nhắn OA..." value={csMessage} onChange={e => setCsMessage(e.target.value)} />
-            <p className="text-xs text-hicado-navy/30 mb-3 font-bold">Người nhận: <strong className="text-hicado-navy">{selectedFollowers.length}</strong></p>
-            <button onClick={handleSendCS} disabled={isSendingCs || !selectedFollowers.length || !csMessage.trim()}
-              className="w-full bg-hicado-emerald text-hicado-navy font-black py-3 rounded-xl disabled:bg-hicado-slate/30 disabled:text-hicado-navy/20 transition-all text-sm">
-              {isSendingCs ? 'Đang gửi...' : `Gửi ${selectedFollowers.length} tin OA`}
-            </button>
+
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+            {/* Mapping table */}
+            <div className="xl:col-span-2">
+              {followers.length === 0 ? (
+                <div className="bg-white border border-hicado-slate rounded-[2rem] p-16 text-center">
+                  <p className="text-5xl mb-4">📱</p>
+                  <p className="font-black text-hicado-navy/30 uppercase tracking-widest text-sm mb-6">Chưa có dữ liệu followers</p>
+                  <button onClick={fetchFollowers} disabled={followersLoading}
+                    className="px-8 py-3 bg-hicado-navy text-white rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-105 transition-all disabled:opacity-50">
+                    {followersLoading ? 'Đang tải...' : 'Tải followers từ Zalo OA'}
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-white rounded-[1.5rem] border border-hicado-slate overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="bg-hicado-slate/20 border-b border-hicado-slate">
+                          <th className="px-4 py-3 text-left text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Followers Zalo OA</th>
+                          <th className="px-4 py-3 text-left text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học sinh đã liên kết</th>
+                          <th className="px-4 py-3 text-left text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Gợi ý tự động</th>
+                          <th className="px-4 py-3 text-right text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Hành động</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-hicado-slate/30">
+                        {mappedFollowers.map(f => {
+                          const topMatch = (() => {
+                            if (f.linkedStudent) return null;
+                            const best = (students as any[])
+                              .map(s => ({ s, score: nameMatchScore(f.displayName, s.name) }))
+                              .filter(x => x.score >= 60)
+                              .sort((a, b) => b.score - a.score)[0];
+                            return best ?? null;
+                          })();
+                          const isSelected = selectedFollowers.includes(f.userId);
+                          return (
+                            <tr key={f.userId} className={`hover:bg-hicado-slate/5 transition-all ${isSelected ? 'bg-emerald-50/30' : ''}`}>
+                              {/* Follower info */}
+                              <td className="px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  <input type="checkbox" checked={isSelected} onChange={() => toggleFollower(f.userId)} className="accent-hicado-navy shrink-0" />
+                                  <div className={`w-9 h-9 rounded-full flex items-center justify-center font-black text-sm shrink-0 ${f.linkedStudent ? 'bg-hicado-emerald text-white' : 'bg-hicado-slate text-hicado-navy/50'}`}>
+                                    {f.displayName.charAt(0)}
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-hicado-navy text-sm truncate">{f.displayName}</p>
+                                    <p className="text-[10px] text-hicado-navy/30 font-mono truncate">{f.userId}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              {/* Linked student */}
+                              <td className="px-4 py-3">
+                                {f.linkedStudent ? (
+                                  <span className="text-xs font-bold text-hicado-emerald">✓ {f.linkedStudent.name}</span>
+                                ) : (
+                                  <span className="text-xs text-hicado-navy/20">—</span>
+                                )}
+                              </td>
+                              {/* Auto suggestion */}
+                              <td className="px-4 py-3">
+                                {topMatch ? (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-bold text-amber-600 truncate max-w-[100px]">💡 {topMatch.s.name}</span>
+                                    <span className="text-[10px] text-amber-400 shrink-0">{topMatch.score}%</span>
+                                    <button onClick={() => handleLink(f, topMatch.s.id)} disabled={isLinking}
+                                      className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-1 rounded-lg hover:bg-emerald-200 disabled:opacity-50 shrink-0 transition-all">
+                                      Chọn
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-xs text-hicado-navy/20">—</span>
+                                )}
+                              </td>
+                              {/* Action */}
+                              <td className="px-4 py-3 text-right">
+                                {f.linkedStudent ? (
+                                  <button onClick={() => handleUnlink(f)}
+                                    className="text-[10px] font-black text-red-400 hover:text-red-600 border border-red-200 hover:border-red-400 px-3 py-1.5 rounded-lg transition-all">
+                                    Hủy
+                                  </button>
+                                ) : (
+                                  <button onClick={() => { setDrawerFollower(f); setDrawerSearch(''); }}
+                                    className="text-[10px] font-black bg-hicado-navy text-white px-3 py-1.5 rounded-lg hover:bg-hicado-emerald hover:text-hicado-navy transition-all">
+                                    Liên kết
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* CS send panel */}
+            <div className="bg-white border border-hicado-slate rounded-[1.5rem] p-5 self-start sticky top-6 space-y-4">
+              <div>
+                <h2 className="font-black text-hicado-navy mb-0.5">Gửi tin OA</h2>
+                <p className="text-xs text-hicado-navy/40">Tích chọn followers trong bảng, sau đó nhập nội dung và gửi.</p>
+              </div>
+              <textarea className="w-full border border-hicado-slate rounded-xl p-3 text-sm resize-none focus:outline-none focus:border-hicado-emerald"
+                rows={6} placeholder="Nội dung tin nhắn OA..." value={csMessage} onChange={e => setCsMessage(e.target.value)} />
+              <p className="text-xs text-hicado-navy/30 font-bold">Người nhận: <strong className="text-hicado-navy">{selectedFollowers.length}</strong></p>
+              <button onClick={handleSendCS} disabled={isSendingCs || !selectedFollowers.length || !csMessage.trim()}
+                className="w-full bg-hicado-emerald text-hicado-navy font-black py-3 rounded-xl disabled:bg-hicado-slate/30 disabled:text-hicado-navy/20 transition-all text-sm">
+                {isSendingCs ? 'Đang gửi...' : `Gửi ${selectedFollowers.length} tin OA`}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -830,5 +949,89 @@ export const ZaloCampaignPage = () => {
         </div>
       )}
     </div>
+
+    {/* ══ SLIDE-IN DRAWER: chọn học sinh để liên kết ══════════════════════ */}
+    {drawerFollower && (
+      <div className="fixed inset-0 z-[200] flex justify-end" onClick={() => setDrawerFollower(null)}>
+        <div className="w-full max-w-md h-full bg-white shadow-2xl flex flex-col animate-in slide-in-from-right duration-300"
+          onClick={e => e.stopPropagation()}>
+          {/* Header */}
+          <div className="p-6 border-b border-hicado-slate flex items-start justify-between shrink-0">
+            <div>
+              <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest mb-1">Liên kết Zalo → Học sinh</p>
+              <div className="flex items-center gap-3 mt-1">
+                <div className="w-10 h-10 rounded-full bg-hicado-slate flex items-center justify-center font-black text-hicado-navy/60">
+                  {drawerFollower.displayName.charAt(0)}
+                </div>
+                <div>
+                  <p className="font-black text-hicado-navy">{drawerFollower.displayName}</p>
+                  <p className="text-[10px] text-hicado-navy/30 font-mono">{drawerFollower.userId}</p>
+                </div>
+              </div>
+            </div>
+            <button onClick={() => setDrawerFollower(null)} className="p-2 text-hicado-navy/30 hover:text-hicado-navy hover:bg-hicado-slate rounded-xl transition-all">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="p-4 border-b border-hicado-slate shrink-0">
+            <input type="text" value={drawerSearch} onChange={e => setDrawerSearch(e.target.value)}
+              placeholder="Tìm tên, mã học sinh..."
+              className="w-full border border-hicado-slate rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-hicado-emerald transition-all bg-hicado-slate/10" />
+          </div>
+
+          {/* Student list */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+            {/* Auto-suggestions (only when not searching) */}
+            {!drawerSearch && drawerStudentList.suggestions.length > 0 && (
+              <>
+                <p className="text-[10px] font-black text-amber-500 uppercase tracking-widest px-1 mb-2">💡 Gợi ý theo tên</p>
+                {drawerStudentList.suggestions.map(({ s, score }) => (
+                  <div key={s.id} className="flex items-center justify-between p-3 rounded-2xl border border-amber-200 bg-amber-50/60">
+                    <div className="min-w-0 mr-3">
+                      <p className="font-bold text-hicado-navy text-sm truncate">{s.name}</p>
+                      <p className="text-xs text-hicado-navy/40">{s.studentCode || '—'} · {s.parentPhone || s.studentPhone || '—'}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs font-black text-amber-500">{score}%</span>
+                      <button onClick={() => handleLink(drawerFollower, s.id)} disabled={isLinking}
+                        className="text-xs font-black bg-hicado-navy text-white px-3 py-1.5 rounded-xl hover:bg-hicado-emerald hover:text-hicado-navy disabled:opacity-50 transition-all">
+                        Chọn
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <div className="border-t border-hicado-slate/50 pt-3 mt-1">
+                  <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest px-1 mb-2">Tất cả học sinh</p>
+                </div>
+              </>
+            )}
+
+            {/* Full list */}
+            {drawerStudentList.all.map((s: any) => (
+              <div key={s.id} className="flex items-center justify-between p-3 rounded-2xl border border-hicado-slate hover:bg-hicado-slate/10 transition-all">
+                <div className="min-w-0 mr-3">
+                  <p className="font-bold text-hicado-navy text-sm truncate">{s.name}</p>
+                  <p className="text-xs text-hicado-navy/40">{s.studentCode || '—'} · {s.parentPhone || s.studentPhone || '—'}</p>
+                  {s.zaloUserId && (
+                    <p className="text-[10px] text-amber-500 font-bold mt-0.5">⚠ Đang liên kết Zalo UID khác</p>
+                  )}
+                </div>
+                <button onClick={() => handleLink(drawerFollower, s.id)} disabled={isLinking}
+                  className="text-xs font-black bg-hicado-slate text-hicado-navy px-3 py-1.5 rounded-xl hover:bg-hicado-navy hover:text-white disabled:opacity-50 transition-all shrink-0">
+                  Chọn
+                </button>
+              </div>
+            ))}
+
+            {drawerStudentList.all.length === 0 && drawerSearch && (
+              <p className="text-center text-sm text-hicado-navy/30 font-bold py-10">Không tìm thấy học sinh phù hợp</p>
+            )}
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
