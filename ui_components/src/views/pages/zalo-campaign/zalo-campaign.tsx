@@ -129,12 +129,6 @@ export const ZaloCampaignPage = () => {
     fetchZaloTemplates(); fetchZaloConfig(); fetchCampaigns();
   }, [fetchClasses, fetchStudents, fetchTeachers, fetchZaloTemplates, fetchZaloConfig, fetchCampaigns]);
 
-  useEffect(() => {
-    if (activeTab === 'followers' && followers.length === 0 && !followersLoading) {
-      fetchFollowers();
-    }
-  }, [activeTab, fetchFollowers]);
-
   // ── Recipient preview (3 groups) ─────────────────────────────────────────
   const allFiltered = students.filter((s: any) => {
     if (wizardStatuses.length && !wizardStatuses.includes(s.tuitionStatus)) return false;
@@ -218,6 +212,12 @@ export const ZaloCampaignPage = () => {
       setFollowersLoading(false);
     }
   }, [token]);
+
+  useEffect(() => {
+    if (activeTab === 'followers' && followers.length === 0 && !followersLoading) {
+      fetchFollowers();
+    }
+  }, [activeTab, fetchFollowers]);
 
   const handleLink = async (follower: Follower, studentId: string) => {
     setIsLinking(true);
