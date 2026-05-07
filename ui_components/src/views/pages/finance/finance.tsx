@@ -40,20 +40,6 @@ interface TrackingSummary {
   totalExpected: number; totalCollected: number;
 }
 
-interface MonthlyReportSession { date: string; slot: string; }
-interface MonthlyReportStudent {
-  id: string; name: string; studentCode: string | null;
-  records: { date: string; slot: string; status: string; sessionUnits: number }[];
-  totalPresent: number; totalSessionUnits: number; tuitionDue: number;
-}
-interface MonthlyReport {
-  classId: string; className: string; classCode: string | null;
-  tuitionPerSession: number; teacher: { name: string }; month: string;
-  sessions: MonthlyReportSession[];
-  students: MonthlyReportStudent[];
-  summary: { totalStudents: number; totalUniqueDates: number; totalSessions: number; avgAttendanceRate: number };
-}
-
 interface FinanceRow {
   classId: string;
   className: string;
@@ -116,10 +102,7 @@ export const FinancialPage = () => {
   const [trackSearch, setTrackSearch] = useState('');
   const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
 
-  // ── Monthly Attendance Report state ───────────────────────────────────────
-  const [reportClassId, setReportClassId] = useState('');
-  const [monthlyReport, setMonthlyReport] = useState<MonthlyReport | null>(null);
-  const [reportLoading, setReportLoading] = useState(false);
+  const [activeFinanceTab, setActiveFinanceTab] = useState<'dashboard' | 'tracking' | 'operations'>('dashboard');
 
   const fetchTracking = () => {
     const token = auth?.token;
@@ -149,25 +132,6 @@ export const FinancialPage = () => {
     fetchTracking();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.token, isTeacher]);
-
-  const fetchMonthlyReport = (classId: string, month: string) => {
-    const token = auth?.token;
-    if (!token || !classId) return;
-    setReportLoading(true);
-    setMonthlyReport(null);
-    fetch(`/api/attendance/monthly-report?classId=${classId}&month=${month}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : Promise.reject())
-      .then(data => setMonthlyReport(data))
-      .catch(() => toast.error('Lỗi tải báo cáo điểm danh'))
-      .finally(() => setReportLoading(false));
-  };
-
-  useEffect(() => {
-    if (reportClassId) fetchMonthlyReport(reportClassId, selectedMonth);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedMonth, reportClassId]);
 
   const scopedClasses = useMemo(
     () =>
@@ -392,218 +356,160 @@ export const FinancialPage = () => {
 
   return (
     <div className="space-y-8 pb-24 md:pb-8 animate-in fade-in duration-700">
-
-      {/* Revenue Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
-        <div className="relative rounded-[2.5rem] overflow-hidden shadow-xl border border-hicado-slate">
-          <div className="premium-gradient p-8">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-hicado-emerald/15 rounded-full -mr-16 -mt-16 blur-2xl" />
-            <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-3 relative z-10">Đã thu</p>
-            <div className="flex items-baseline gap-2 relative z-10">
-              <span className="text-4xl md:text-5xl font-black text-white">{paidCard.value}</span>
-              <span className="text-lg font-bold text-white/40 font-mono">{paidCard.unit}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate">
-          <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-[0.4em] mb-3">Chi lương GV</p>
-          <div className="flex items-baseline gap-2">
-            <span className="text-4xl md:text-5xl font-black text-hicado-navy">{salaryCard.value}</span>
-            <span className="text-lg font-bold text-hicado-navy/30 font-mono">{salaryCard.unit}</span>
-          </div>
-        </div>
-
-        <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate">
-          <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-[0.4em] mb-3">Lợi nhuận gộp</p>
-          <div className="flex items-baseline gap-2">
-            <span className={`text-4xl md:text-5xl font-black ${totalProfitAll >= 0 ? 'text-hicado-emerald text-glow' : 'text-rose-500'}`}>
-              {profitCard.value}
-            </span>
-            <span className="text-lg font-bold text-hicado-navy/30 font-mono">{profitCard.unit}</span>
-          </div>
-          <p className="text-[10px] text-hicado-navy/30 font-bold mt-3">
-            Tổng cần thu: {(totalExpectedAll / 1_000_000).toFixed(1)}M đ
+      {/* Header */}
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
+        <div>
+          <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Financial Center</p>
+          <h2 className="text-3xl font-serif font-black text-hicado-navy tracking-tight">
+            Quản trị Tài chính
+          </h2>
+          <p className="text-sm text-hicado-navy/40 font-bold mt-1">
+            Tổng quan doanh thu, lợi nhuận và theo dõi công nợ học phí.
           </p>
         </div>
+        <div className="flex items-center gap-3 glass-card rounded-2xl px-5 py-3 border border-hicado-slate self-start">
+          <span className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Tháng</span>
+          <input
+            type="month"
+            value={selectedMonth}
+            onChange={(event) => setSelectedMonth(event.target.value)}
+            className="bg-transparent text-sm font-black text-hicado-navy outline-none"
+          />
+        </div>
       </div>
 
-      {/* Webhook Simulator */}
-      <div className="relative group overflow-hidden rounded-[3rem] border border-white/5 shadow-2xl">
-        <div className="absolute inset-0 bg-gradient-to-r from-hicado-emerald/20 via-hicado-navy to-indigo-900/50"></div>
-        <div className="relative bg-[#020617]/95 p-8 md:p-12 flex flex-col lg:flex-row gap-10 items-center rounded-[3rem]">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-hicado-emerald/10 rounded-full blur-[80px] -mr-32 -mt-32 pointer-events-none" />
-
-          <div className="flex-1 space-y-4 relative z-10">
-            <div className="flex items-center gap-3">
-              <span className="w-2 h-2 rounded-full bg-hicado-emerald animate-pulse shadow-[0_0_10px_#10b981]"></span>
-              <p className="text-hicado-emerald text-[10px] font-black uppercase tracking-[0.4em]">Bank Core Node v4.0</p>
-            </div>
-            <h3 className="text-3xl font-serif font-black text-white tracking-tight">Simulator Gạch Nợ Tự Động</h3>
-            <p className="text-white/40 text-sm font-medium leading-relaxed max-w-xl">
-              Giả lập tín hiệu từ cổng thanh toán Napas/VietQR. Hệ thống tự động đối soát mã học sinh và cập nhật trạng thái "Đã thanh toán" tức thì.
-            </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto relative z-10">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Nhập ID (VD: S1) hoặc Tên học sinh"
-                value={targetStudentId}
-                onChange={(event) => setTargetStudentId(event.target.value)}
-                className="bg-white/5 border border-white/10 px-8 py-5 rounded-2xl text-sm font-bold text-white placeholder:text-white/20 outline-none focus:bg-white/10 focus:border-hicado-emerald/50 focus:ring-4 focus:ring-hicado-emerald/5 transition-all w-full lg:w-[360px] font-mono"
-              />
-              <div className="absolute right-5 top-1/2 -translate-y-1/2 text-white/20">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                </svg>
-              </div>
-            </div>
-            <button
-              disabled={isProcessing}
-              onClick={handleSimulateWebhook}
-              className={clsx(
-                'px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-[0.3em] transition-all',
-                isProcessing
-                  ? 'bg-white/5 text-white/20 cursor-not-allowed'
-                  : 'bg-hicado-emerald text-hicado-navy hover:bg-white hover:scale-[1.02] active:scale-[0.98] shadow-[0_0_30px_rgba(16,185,129,0.25)]'
-              )}
-            >
-              {isProcessing ? 'Đang xử lý...' : 'Bắn Webhook'}
+      {/* Tab Navigation */}
+      {!isTeacher && (
+        <div className="flex gap-1 bg-white border border-hicado-slate rounded-2xl p-1.5 mb-6 self-start">
+          {([
+            ['dashboard',  'Tổng quan Lợi nhuận'],
+            ['tracking',   'Tracking & Công nợ'],
+            ['operations', 'Logs & Vận hành'],
+          ] as const).map(([key, label]) => (
+            <button key={key} onClick={() => setActiveFinanceTab(key)}
+              className={`px-5 py-2.5 rounded-xl text-sm font-black uppercase tracking-widest transition-all ${
+                activeFinanceTab === key
+                  ? 'bg-hicado-navy text-white shadow'
+                  : 'text-hicado-navy/40 hover:text-hicado-navy hover:bg-hicado-slate/30'
+              }`}>
+              {label}
             </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Detail Table */}
-      <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
-        <div className="p-8 border-b border-hicado-slate flex justify-between items-center">
-          <div>
-            <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Finance Report</p>
-            <h3 className="text-xl font-black text-hicado-navy tracking-tight">Báo cáo tài chính chi tiết</h3>
-          </div>
-          <button className="px-5 py-3 bg-hicado-navy text-hicado-emerald rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-emerald hover:text-hicado-navy transition-all">
-            Xuất Excel
-          </button>
-        </div>
-        <div className="overflow-x-auto custom-scrollbar">
-          <table className="w-full text-left min-w-[1000px]">
-            <thead>
-              <tr className="border-b border-hicado-slate bg-hicado-slate/20">
-                {['Lớp / Giáo viên', 'Cần thu / Đã nộp', 'Tỷ lệ GV', 'Lương GV', 'Lợi nhuận TT', 'HP/Buổi'].map((h) => (
-                  <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-hicado-slate/50">
-              {financeData.map((row) => {
-                const paidPercent = row.expectedRevenue > 0 ? (row.paidRevenue / row.expectedRevenue) * 100 : 0;
-                const safePaidPercent = Math.max(0, Math.min(100, paidPercent));
-                return (
-                  <tr key={row.classId} className="hover:bg-hicado-slate/20 transition-colors">
-                    <td className="px-6 py-5">
-                      <p className="font-black text-hicado-navy uppercase tracking-tight text-sm">{row.className}</p>
-                      <p className="text-[11px] text-hicado-navy/40 font-bold mt-0.5">{row.teacherName}</p>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[10px] font-black uppercase">
-                          <span className="text-hicado-navy/30">Đã nộp</span>
-                          <span className="text-hicado-emerald">{formatPercent(safePaidPercent)}</span>
-                        </div>
-                        <div className="h-1.5 w-32 bg-hicado-slate rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-hicado-emerald rounded-full transition-all duration-700"
-                            style={{ width: `${safePaidPercent}%` }}
-                          />
-                        </div>
-                        <p className="text-[10px] text-hicado-navy/30 font-mono">
-                          {row.paidRevenue.toLocaleString()} / {row.expectedRevenue.toLocaleString()}
-                        </p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-5 font-black text-hicado-navy/70 text-sm">
-                      {formatPercent(row.salaryRate * 100)}
-                    </td>
-                    <td className="px-6 py-5 font-black text-hicado-navy text-sm">
-                      {row.salaryAllTime.toLocaleString()}
-                    </td>
-                    <td className="px-6 py-5">
-                      <span className={`font-black text-sm ${row.centerProfit >= 0 ? 'text-hicado-emerald' : 'text-rose-500'}`}>
-                        {row.centerProfit.toLocaleString()}
-                      </span>
-                    </td>
-                    <td className="px-6 py-5 text-hicado-navy/40 font-mono text-sm">
-                      {row.tuitionPerSession.toLocaleString('vi-VN')}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {financeData.length === 0 && (
-          <div className="py-16 text-center space-y-3">
-            <div className="text-4xl opacity-20">💰</div>
-            <p className="text-sm font-black text-hicado-navy/30 uppercase tracking-widest italic">
-              Chưa có dữ liệu tài chính.
-            </p>
-          </div>
-        )}
-      </div>
-
-      {/* ── Payment Dashboard (Bank Webhook Stats) ── */}
-      {statsLoading && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {[...Array(2)].map((_, i) => <SkeletonCard key={i} />)}
+          ))}
         </div>
       )}
 
-      {financeStats && !statsLoading && (
-        <>
-          {/* Row 1: Collection Gauge + Monthly Bar Chart */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-            {/* Collection Gauge */}
-            <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate flex flex-col items-center gap-6">
-              <div>
-                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1 text-center">Tỷ lệ thu học phí</p>
-                <h3 className="text-xl font-black text-hicado-navy text-center">Gauge Thu Tiền</h3>
-              </div>
-              <div className="relative flex items-center justify-center" style={{ width: 160, height: 160 }}>
-                <div
-                  className="rounded-full"
-                  style={{
-                    width: 160, height: 160,
-                    background: `conic-gradient(#10b981 ${financeStats.collectionRate}%, #e2e8f0 0%)`,
-                  }}
-                />
-                <div className="absolute inset-[16px] rounded-full bg-white flex flex-col items-center justify-center">
-                  <span className="text-3xl font-black text-hicado-emerald text-glow">{formatPercent(financeStats.collectionRate)}</span>
-                  <span className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mt-0.5">đã thu</span>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4 w-full">
-                <div className="text-center">
-                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Đã thu</p>
-                  <p className="font-black text-hicado-navy">{formatMoney(financeStats.totalCollected)}đ</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Cần thu</p>
-                  <p className="font-black text-hicado-navy">{formatMoney(financeStats.totalExpected)}đ</p>
-                </div>
+      {/* ── TAB 1: DASHBOARD ────────────────────────────────────────────── */}
+      {activeFinanceTab === 'dashboard' && (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {/* Revenue Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-6">
+            <div className="relative rounded-[2.5rem] overflow-hidden shadow-xl bg-hicado-navy text-white p-8">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-hicado-emerald/10 rounded-full -mr-16 -mt-16 blur-2xl" />
+              <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-3 relative z-10">Đã thu</p>
+              <div className="flex items-baseline gap-2 relative z-10">
+                <span className="text-4xl md:text-5xl font-black">{paidCard.value}</span>
+                <span className="text-lg font-bold opacity-40 font-mono">{paidCard.unit}</span>
               </div>
             </div>
 
-            {/* Monthly Bar Chart */}
-            <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate">
+            <div className="bg-white border border-hicado-slate rounded-[2.5rem] p-8">
+              <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-[0.4em] mb-3">Chi lương GV</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-4xl md:text-5xl font-black text-hicado-navy">{salaryCard.value}</span>
+                <span className="text-lg font-bold text-hicado-navy/30 font-mono">{salaryCard.unit}</span>
+              </div>
+            </div>
+
+            <div className="bg-emerald-50 border border-emerald-100 rounded-[2.5rem] p-8">
+              <p className="text-[9px] font-black text-emerald-700/50 uppercase tracking-[0.4em] mb-3">Lợi nhuận gộp</p>
+              <div className="flex items-baseline gap-2">
+                <span className={`text-4xl md:text-5xl font-black ${totalProfitAll >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
+                  {profitCard.value}
+                </span>
+                <span className="text-lg font-bold text-emerald-700/30 font-mono">{profitCard.unit}</span>
+              </div>
+              <p className="text-[10px] text-emerald-700/40 font-bold mt-3">
+                Tổng cần thu: {(totalExpectedAll / 1_000_000).toFixed(1)}M đ
+              </p>
+            </div>
+          </div>
+
+          {/* Detailed Table */}
+          <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+            <div className="p-8 border-b border-hicado-slate flex justify-between items-center">
+              <div>
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Finance Report</p>
+                <h3 className="text-xl font-black text-hicado-navy tracking-tight">Báo cáo tài chính chi tiết</h3>
+              </div>
+              <button className="px-5 py-3 bg-hicado-navy text-hicado-emerald rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-emerald hover:text-hicado-navy transition-all">
+                Xuất Excel
+              </button>
+            </div>
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[1000px]">
+                <thead>
+                  <tr className="border-b border-hicado-slate bg-hicado-slate/20">
+                    {['Lớp / Giáo viên', 'Cần thu / Đã nộp', 'Tỷ lệ GV', 'Lương GV', 'Lợi nhuận TT', 'HP/Buổi'].map((h) => (
+                      <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hicado-slate/50">
+                  {financeData.map((row) => {
+                    const paidPercent = row.expectedRevenue > 0 ? (row.paidRevenue / row.expectedRevenue) * 100 : 0;
+                    const safePaidPercent = Math.max(0, Math.min(100, paidPercent));
+                    return (
+                      <tr key={row.classId} className="hover:bg-hicado-slate/20 transition-colors">
+                        <td className="px-6 py-5">
+                          <p className="font-black text-hicado-navy uppercase tracking-tight text-sm">{row.className}</p>
+                          <p className="text-[11px] text-hicado-navy/40 font-bold mt-0.5">{row.teacherName}</p>
+                        </td>
+                        <td className="px-6 py-5">
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between text-[10px] font-black uppercase">
+                              <span className="text-hicado-navy/30">Đã nộp</span>
+                              <span className="text-hicado-emerald">{formatPercent(safePaidPercent)}</span>
+                            </div>
+                            <div className="h-1.5 w-32 bg-hicado-slate rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-hicado-emerald rounded-full transition-all duration-700"
+                                style={{ width: `${safePaidPercent}%` }}
+                              />
+                            </div>
+                            <p className="text-[10px] text-hicado-navy/30 font-mono">
+                              {row.paidRevenue.toLocaleString()} / {row.expectedRevenue.toLocaleString()}
+                            </p>
+                          </div>
+                        </td>
+                        <td className="px-6 py-5 font-black text-hicado-navy/70 text-sm">
+                          {formatPercent(row.salaryRate * 100)}
+                        </td>
+                        <td className="px-6 py-5 font-black text-hicado-navy text-sm">
+                          {row.salaryAllTime.toLocaleString()}
+                        </td>
+                        <td className="px-6 py-5">
+                          <span className={`font-black text-sm ${row.centerProfit >= 0 ? 'text-hicado-emerald' : 'text-rose-500'}`}>
+                            {row.centerProfit.toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-6 py-5 text-hicado-navy/40 font-mono text-sm">
+                          {row.tuitionPerSession.toLocaleString('vi-VN')}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* 12-Month Chart + Gauge + Debt Widget */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Monthly Bar Chart (2/3) */}
+            <div className="lg:col-span-2 glass-card rounded-[2.5rem] p-8 border border-hicado-slate">
               <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Doanh thu</p>
               <h3 className="text-xl font-black text-hicado-navy mb-6">12 tháng gần nhất</h3>
-              {financeStats.monthlyRevenue.length === 0 ? (
-                <p className="text-sm text-hicado-navy/30 italic text-center py-8">Chưa có giao dịch nào</p>
-              ) : (() => {
+              {financeStats && financeStats.monthlyRevenue.length > 0 ? (() => {
                 const maxAmt = Math.max(...financeStats.monthlyRevenue.map(m => m.amount), 1);
                 return (
                   <div className="flex items-end gap-2 h-40">
@@ -622,140 +528,110 @@ export const FinancialPage = () => {
                     })}
                   </div>
                 );
-              })()}
+              })() : <p className="text-sm text-hicado-navy/30 italic text-center py-8">Chưa có dữ liệu biểu đồ</p>}
             </div>
-          </div>
 
-          {/* Row 2: Per-class Collection Table */}
-          <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
-            <div className="p-8 border-b border-hicado-slate">
-              <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Theo lớp học</p>
-              <h3 className="text-xl font-black text-hicado-navy">Thu học phí theo lớp</h3>
-            </div>
-            <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-left min-w-[700px]">
-                <thead>
-                  <tr className="border-b border-hicado-slate bg-hicado-slate/20">
-                    {['Lớp', 'Cần thu', 'Đã thu', 'Còn thiếu', 'Tiến độ', 'Học sinh'].map(h => (
-                      <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hicado-slate/50">
-                  {financeStats.collectionByClass.map(row => (
-                    <tr key={row.classId} className="hover:bg-hicado-slate/20 transition-colors">
-                      <td className="px-6 py-4 font-black text-hicado-navy text-sm">{row.className}</td>
-                      <td className="px-6 py-4 font-mono text-hicado-navy/60 text-sm">{row.expected.toLocaleString('vi-VN')}</td>
-                      <td className="px-6 py-4 font-mono text-hicado-emerald text-sm font-black">{row.collected.toLocaleString('vi-VN')}</td>
-                      <td className="px-6 py-4 font-mono text-rose-500 text-sm">{row.gap.toLocaleString('vi-VN')}</td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center gap-2">
-                          <div className="h-1.5 w-24 bg-hicado-slate rounded-full overflow-hidden">
-                            <div className="h-full bg-hicado-emerald rounded-full" style={{ width: `${row.rate}%` }} />
-                          </div>
-                          <span className="text-[10px] font-black text-hicado-navy/50">{formatPercent(row.rate)}</span>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-hicado-navy/50 font-bold">
-                        {row.paidCount} đủ / {row.partialCount ?? 0} thiếu / {row.studentCount}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {financeStats.collectionByClass.length === 0 && (
-              <p className="text-center py-8 text-sm text-hicado-navy/30 italic">Chưa có dữ liệu</p>
-            )}
-          </div>
-
-          {/* Row 3: Pending Students */}
-          {financeStats.pendingStudents.length > 0 && (
-            <div className="glass-card rounded-[2.5rem] overflow-hidden border border-rose-200">
-              <div className="p-8 border-b border-rose-100 flex items-center justify-between">
-                <div>
-                  <p className="text-[9px] font-black text-rose-400 uppercase tracking-[0.4em] mb-1">Cần theo dõi</p>
-                  <h3 className="text-xl font-black text-hicado-navy">Học sinh còn thiếu học phí</h3>
-                </div>
-                <span className="px-4 py-2 bg-rose-50 text-rose-500 font-black text-sm rounded-xl border border-rose-200">
-                  {financeStats.pendingStudents.length} học sinh
-                </span>
-              </div>
-              <div className="divide-y divide-hicado-slate/50">
-                {financeStats.pendingStudents.map(s => (
-                  <div key={s.id} className="px-8 py-4 flex items-center justify-between gap-4 hover:bg-rose-50/30 transition-colors">
-                    <div>
-                      <p className="font-black text-hicado-navy text-sm">{s.name}</p>
-                      <p className="text-[11px] text-hicado-navy/40 font-mono mt-0.5">{s.studentCode || s.id}</p>
-                      <p className="text-[10px] text-hicado-navy/30 mt-0.5">{s.classes.map(c => c.name).join(', ')}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="font-black text-rose-500 text-sm">{s.totalDebt.toLocaleString('vi-VN')}đ</p>
-                      <span className={clsx(
-                        'text-[9px] font-black uppercase tracking-widest px-2 py-0.5 rounded-lg mt-1 inline-block',
-                        s.paymentStatus === 'PAID_PARTIAL'
-                          ? 'bg-amber-100 text-amber-600'
-                          : s.tuitionStatus === 'DEBT'
-                            ? 'bg-rose-100 text-rose-600'
-                            : 'bg-slate-100 text-slate-600'
-                      )}>{s.paymentStatus === 'PAID_PARTIAL' ? 'THIẾU' : s.tuitionStatus}</span>
-                    </div>
+            {/* Gauge + Debt Widget (1/3) */}
+            <div className="lg:col-span-1 space-y-6">
+              {/* Collection Gauge */}
+              <div className="glass-card rounded-[2.5rem] p-6 border border-hicado-slate flex flex-col items-center gap-4">
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] text-center">Tỷ lệ thu học phí</p>
+                <div className="relative flex items-center justify-center" style={{ width: 120, height: 120 }}>
+                  <div
+                    className="rounded-full"
+                    style={{
+                      width: 120, height: 120,
+                      background: `conic-gradient(#10b981 ${financeStats?.collectionRate || 0}%, #e2e8f0 0%)`,
+                    }}
+                  />
+                  <div className="absolute inset-[12px] rounded-full bg-white flex flex-col items-center justify-center">
+                    <span className="text-2xl font-black text-hicado-emerald">{formatPercent(financeStats?.collectionRate || 0)}</span>
                   </div>
-                ))}
+                </div>
+                <div className="flex justify-between w-full text-[10px] font-black text-hicado-navy/40 uppercase">
+                  <span>Đã thu: {paidCard.value}{paidCard.unit}</span>
+                </div>
+              </div>
+
+              {/* Compact Debt Widget */}
+              {financeStats && (
+                <div className="bg-rose-50 border border-rose-200 rounded-[2rem] p-6 shadow-sm">
+                  <div className="flex justify-between items-center mb-3">
+                    <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest">⚠ Cần theo dõi</p>
+                    <span className="bg-rose-500 text-white text-[10px] font-black px-2 py-0.5 rounded-lg">
+                      {financeStats.pendingStudents.length} HS
+                    </span>
+                  </div>
+                  <p className="text-sm font-bold text-hicado-navy mb-4">
+                    Có {financeStats.pendingStudents.length} học sinh nợ tổng {formatMoney(financeStats.pendingStudents.reduce((sum, s) => sum + s.totalDebt, 0))}đ
+                  </p>
+                  <button 
+                    onClick={() => setActiveFinanceTab('tracking')}
+                    className="w-full py-2.5 bg-rose-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-rose-600 transition-all flex items-center justify-center gap-2"
+                  >
+                    Xử lý công nợ ngay 
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Per-class Collection Table */}
+          {financeStats && (
+            <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+              <div className="p-8 border-b border-hicado-slate">
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Theo lớp học</p>
+                <h3 className="text-xl font-black text-hicado-navy">Thu học phí theo lớp</h3>
+              </div>
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-left min-w-[700px]">
+                  <thead>
+                    <tr className="border-b border-hicado-slate bg-hicado-slate/20">
+                      {['Lớp', 'Cần thu', 'Đã thu', 'Còn thiếu', 'Tiến độ', 'Học sinh'].map(h => (
+                        <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-hicado-slate/50">
+                    {financeStats.collectionByClass.map(row => (
+                      <tr key={row.classId} className="hover:bg-hicado-slate/20 transition-colors">
+                        <td className="px-6 py-4 font-black text-hicado-navy text-sm">{row.className}</td>
+                        <td className="px-6 py-4 font-mono text-hicado-navy/60 text-sm">{row.expected.toLocaleString('vi-VN')}</td>
+                        <td className="px-6 py-4 font-mono text-hicado-emerald text-sm font-black">{row.collected.toLocaleString('vi-VN')}</td>
+                        <td className="px-6 py-4 font-mono text-rose-500 text-sm">{row.gap.toLocaleString('vi-VN')}</td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-24 bg-hicado-slate rounded-full overflow-hidden">
+                              <div className="h-full bg-hicado-emerald rounded-full" style={{ width: `${row.rate}%` }} />
+                            </div>
+                            <span className="text-[10px] font-black text-hicado-navy/50">{formatPercent(row.rate)}</span>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-hicado-navy/50 font-bold">
+                          {row.paidCount} đủ / {row.partialCount ?? 0} thiếu / {row.studentCount}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
-
-          {/* Row 4: Webhook Transaction Log */}
-          <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
-            <div className="p-8 border-b border-hicado-slate">
-              <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Bank Webhook</p>
-              <h3 className="text-xl font-black text-hicado-navy">Giao dịch gần nhất</h3>
-            </div>
-            <div className="overflow-x-auto custom-scrollbar max-h-96 overflow-y-auto">
-              <table className="w-full text-left min-w-[700px]">
-                <thead className="sticky top-0 z-10">
-                  <tr className="border-b border-hicado-slate bg-white/90 backdrop-blur-sm">
-                    {['Thời gian', 'Học sinh', 'Lớp', 'Số tiền', 'Nội dung'].map(h => (
-                      <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-hicado-slate/50">
-                  {financeStats.recentTransactions.map(tx => (
-                    <tr key={tx.id} className="hover:bg-hicado-slate/20 transition-colors">
-                      <td className="px-6 py-4 text-[11px] font-mono text-hicado-navy/40">
-                        {new Date(tx.date).toLocaleString('vi-VN', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })}
-                      </td>
-                      <td className="px-6 py-4">
-                        <p className="font-black text-hicado-navy text-sm">{tx.studentName}</p>
-                        <p className="text-[10px] font-mono text-hicado-navy/40">{tx.studentCode}</p>
-                      </td>
-                      <td className="px-6 py-4 text-sm text-hicado-navy/60">{tx.classes}</td>
-                      <td className="px-6 py-4 font-black text-hicado-emerald text-sm">{tx.amount.toLocaleString('vi-VN')}đ</td>
-                      <td className="px-6 py-4 text-[11px] text-hicado-navy/40 max-w-[200px] truncate" title={tx.content}>{tx.content}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {financeStats.recentTransactions.length === 0 && (
-              <p className="text-center py-8 text-sm text-hicado-navy/30 italic">Chưa có giao dịch nào được ghi nhận qua webhook</p>
-            )}
-          </div>
-        </>
+        </div>
       )}
 
-      {/* ══ PAYMENT TRACKING ══════════════════════════════════════════════ */}
-      {!isTeacher && (
-        <div className="space-y-5">
-
-          {/* Header + filters */}
+      {/* ── TAB 2: TRACKING & DEBT ──────────────────────────────────────── */}
+      {activeFinanceTab === 'tracking' && (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {/* Filters */}
           <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate space-y-5">
             <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Payment Tracking</p>
-                <h3 className="text-xl font-black text-hicado-navy">Theo dõi thu học phí</h3>
+                <h3 className="text-xl font-black text-hicado-navy">Theo dõi thu học phí & Công nợ</h3>
               </div>
               <button
                 onClick={fetchTracking}
@@ -766,7 +642,6 @@ export const FinancialPage = () => {
               </button>
             </div>
 
-            {/* Filter row */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               <div className="space-y-1 col-span-2 md:col-span-1">
                 <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Tìm học sinh</label>
@@ -813,8 +688,7 @@ export const FinancialPage = () => {
             </button>
           </div>
 
-          {/* Summary cards */}
-          {trackingData && (() => {
+          {trackingLoading ? <SkeletonTable rows={10} /> : trackingData && (() => {
             const { summary } = trackingData;
             const displayStudents = trackingData.students.filter(s =>
               !trackSearch || s.name.toLowerCase().includes(trackSearch.toLowerCase()) ||
@@ -837,24 +711,6 @@ export const FinancialPage = () => {
                   ))}
                 </div>
 
-                {/* Progress bar summary */}
-                <div className="glass-card rounded-[2rem] p-5 border border-hicado-slate flex items-center gap-4 flex-wrap">
-                  <div className="flex-1 min-w-[200px]">
-                    <div className="flex justify-between text-[10px] font-black text-hicado-navy/40 mb-1.5">
-                      <span>Đã thu: {formatMoney(summary.totalCollected)}đ</span>
-                      <span>Cần thu: {formatMoney(summary.totalExpected)}đ</span>
-                    </div>
-                    <div className="h-2 bg-hicado-slate rounded-full overflow-hidden">
-                      <div className="h-full bg-hicado-emerald rounded-full transition-all"
-                        style={{ width: `${trackingRate}%` }} />
-                    </div>
-                  </div>
-                  <span className="text-2xl font-black text-hicado-emerald text-glow">
-                    {formatPercent(trackingRate)}
-                  </span>
-                </div>
-
-                {/* Table */}
                 <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
                   <div className="overflow-x-auto custom-scrollbar">
                     <table className="w-full text-left min-w-[900px]">
@@ -883,30 +739,17 @@ export const FinancialPage = () => {
                                   <p className="font-black text-hicado-navy text-sm">{s.name}</p>
                                   <p className="text-[10px] font-mono text-hicado-navy/40">{s.studentCode || '—'}</p>
                                 </td>
-                                <td className="px-5 py-4 text-sm text-hicado-navy/60 max-w-[140px]">
+                                <td className="px-5 py-4 text-sm text-hicado-navy/60">
                                   {s.classes.map(c => c.className).join(', ') || '—'}
                                 </td>
                                 <td className="px-5 py-4 font-mono text-sm text-hicado-navy/70">{formatMoney(s.totalExpected)}đ</td>
                                 <td className="px-5 py-4 font-black text-sm text-hicado-emerald">{formatMoney(s.totalPaid)}đ</td>
                                 <td className="px-5 py-4 font-mono text-sm text-rose-500">{s.totalBalance > 0 ? formatMoney(s.totalBalance) + 'đ' : '—'}</td>
                                 <td className="px-5 py-4 text-[11px] text-hicado-navy/40">
-                                  {s.lastPaymentDate
-                                    ? new Date(s.lastPaymentDate).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-                                    : '—'}
+                                  {s.lastPaymentDate ? new Date(s.lastPaymentDate).toLocaleDateString('vi-VN') : '—'}
                                 </td>
-                                <td className="px-5 py-4 text-[11px]">
-                                  {s.lastZaloNotification ? (
-                                    <div>
-                                      <span className={clsx('px-2 py-0.5 rounded-lg font-black text-[9px] uppercase',
-                                        s.lastZaloNotification.status === 'READ' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-600'
-                                      )}>
-                                        {s.lastZaloNotification.status === 'READ' ? '✓ Đã đọc' : '✓ Đã gửi'}
-                                      </span>
-                                      <p className="text-hicado-navy/30 mt-0.5 font-mono">
-                                        {new Date(s.lastZaloNotification.sentAt).toLocaleDateString('vi-VN')}
-                                      </p>
-                                    </div>
-                                  ) : <span className="text-hicado-navy/20">—</span>}
+                                <td className="px-5 py-4">
+                                  {s.lastZaloNotification ? '✓ Đã gửi' : '—'}
                                 </td>
                                 <td className="px-5 py-4">
                                   <span className={clsx('px-3 py-1.5 rounded-xl text-[10px] font-black', statusCfg.cls)}>
@@ -914,26 +757,19 @@ export const FinancialPage = () => {
                                   </span>
                                 </td>
                               </tr>
-                              {/* Expanded: transaction history */}
                               {isExpanded && (
                                 <tr key={`${s.id}-expand`} className="bg-hicado-slate/10">
                                   <td colSpan={8} className="px-8 py-4">
-                                    {s.transactions.length === 0 ? (
-                                      <p className="text-sm text-hicado-navy/30 italic">Chưa có giao dịch nào</p>
-                                    ) : (
-                                      <div className="space-y-2">
-                                        <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-2">Lịch sử giao dịch</p>
-                                        {s.transactions.map(tx => (
-                                          <div key={tx.id} className="flex items-center gap-6 text-sm bg-white rounded-xl px-4 py-2.5 border border-hicado-slate/50">
-                                            <span className="font-black text-hicado-emerald">{formatMoney(tx.amount)}đ</span>
-                                            <span className="text-hicado-navy/40 font-mono text-[11px]">
-                                              {new Date(tx.date).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                                            </span>
-                                            {tx.content && <span className="text-hicado-navy/40 text-[11px] italic">{tx.content}</span>}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
+                                    <p className="text-[10px] font-black text-hicado-navy/30 uppercase mb-2">Lịch sử giao dịch</p>
+                                    <div className="space-y-2">
+                                      {s.transactions.map(tx => (
+                                        <div key={tx.id} className="flex gap-4 text-sm bg-white p-2 rounded-lg border">
+                                          <span className="font-black text-emerald-600">{formatMoney(tx.amount)}đ</span>
+                                          <span className="text-gray-400">{new Date(tx.date).toLocaleDateString()}</span>
+                                          <span>{tx.content}</span>
+                                        </div>
+                                      ))}
+                                    </div>
                                   </td>
                                 </tr>
                               )}
@@ -943,193 +779,81 @@ export const FinancialPage = () => {
                       </tbody>
                     </table>
                   </div>
-                  {trackingData.students.length === 0 && !trackingLoading && (
-                    <div className="py-16 text-center space-y-3">
-                      <div className="text-4xl opacity-20">🔍</div>
-                      <p className="text-sm font-black text-hicado-navy/30 uppercase tracking-widest italic">
-                        Không có dữ liệu theo điều kiện lọc
-                      </p>
-                    </div>
-                  )}
                 </div>
               </>
             );
           })()}
+        </div>
+      )}
 
-          {trackingLoading && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[...Array(4)].map((_, i) => <SkeletonCard key={i} />)}
+      {/* ── TAB 3: OPERATIONS ──────────────────────────────────────────── */}
+      {activeFinanceTab === 'operations' && (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {/* Simulator */}
+          <div className="relative group overflow-hidden rounded-[3rem] border border-white/5 shadow-2xl">
+            <div className="absolute inset-0 bg-gradient-to-r from-hicado-emerald/20 via-hicado-navy to-indigo-900/50"></div>
+            <div className="relative bg-[#020617]/95 p-8 md:p-12 flex flex-col lg:flex-row gap-10 items-center rounded-[3rem]">
+              <div className="flex-1 space-y-4">
+                <div className="flex items-center gap-3">
+                  <span className="w-2 h-2 rounded-full bg-hicado-emerald animate-pulse"></span>
+                  <p className="text-hicado-emerald text-[10px] font-black uppercase tracking-[0.4em]">Simulator Node v4.0</p>
+                </div>
+                <h3 className="text-3xl font-serif font-black text-white tracking-tight">Gạch Nợ Simulator</h3>
+                <p className="text-white/40 text-sm max-w-xl">
+                  Giả lập tín hiệu từ VietQR/Napas để kiểm tra logic đối soát tự động.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4 w-full lg:w-auto">
+                <input
+                  type="text"
+                  placeholder="ID hoặc Tên học sinh"
+                  value={targetStudentId}
+                  onChange={(event) => setTargetStudentId(event.target.value)}
+                  className="bg-white/5 border border-white/10 px-8 py-5 rounded-2xl text-sm font-bold text-white outline-none focus:border-hicado-emerald/50"
+                />
+                <button
+                  disabled={isProcessing}
+                  onClick={handleSimulateWebhook}
+                  className="px-8 py-5 rounded-2xl font-black text-xs uppercase tracking-widest bg-hicado-emerald text-hicado-navy"
+                >
+                  {isProcessing ? 'Đang bắn...' : 'Bắn Webhook'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Webhook Logs */}
+          {financeStats && (
+            <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+              <div className="p-8 border-b border-hicado-slate">
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Bank Webhook</p>
+                <h3 className="text-xl font-black text-hicado-navy">Giao dịch gần nhất</h3>
+              </div>
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="border-b border-hicado-slate bg-hicado-slate/20">
+                      {['Thời gian', 'Học sinh', 'Số tiền', 'Nội dung'].map(h => (
+                        <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-hicado-slate/50">
+                    {financeStats.recentTransactions.map(tx => (
+                      <tr key={tx.id}>
+                        <td className="px-6 py-4 text-[11px] font-mono text-hicado-navy/40">{new Date(tx.date).toLocaleString()}</td>
+                        <td className="px-6 py-4 font-black text-hicado-navy text-sm">{tx.studentName}</td>
+                        <td className="px-6 py-4 font-black text-hicado-emerald text-sm">{tx.amount.toLocaleString()}đ</td>
+                        <td className="px-6 py-4 text-[11px] text-hicado-navy/40">{tx.content}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
       )}
-
-      {/* ── MONTHLY ATTENDANCE MATRIX ───────────────────────────────────────── */}
-      <div className="space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Attendance Report</p>
-            <h3 className="text-xl font-black text-hicado-navy tracking-tight">Báo Cáo Điểm Danh Tháng</h3>
-          </div>
-          <div className="flex items-center gap-3 glass-card rounded-2xl px-5 py-3 border border-hicado-slate">
-            <span className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Tháng báo cáo</span>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={(e) => setSelectedMonth(e.target.value)}
-              className="bg-transparent text-sm font-black text-hicado-navy outline-none"
-            />
-          </div>
-        </div>
-
-        {/* Class Selection Grid */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
-          {scopedClasses.map(cls => (
-            <button
-              key={cls.id}
-              onClick={() => setReportClassId(cls.id)}
-              className={clsx(
-                "p-4 rounded-2xl border transition-all text-left group",
-                reportClassId === cls.id
-                  ? "bg-hicado-navy border-hicado-navy shadow-xl scale-[1.02]"
-                  : "bg-white border-hicado-slate hover:border-hicado-navy/30"
-              )}
-            >
-              <p className={clsx(
-                "text-[10px] font-black uppercase tracking-widest mb-1",
-                reportClassId === cls.id ? "text-hicado-emerald" : "text-hicado-navy/40"
-              )}>
-                {cls.classCode || 'Lớp học'}
-              </p>
-              <p className={clsx(
-                "text-xs font-bold truncate",
-                reportClassId === cls.id ? "text-white" : "text-hicado-navy"
-              )}>
-                {cls.name}
-              </p>
-            </button>
-          ))}
-        </div>
-
-        {reportLoading && <SkeletonTable rows={8} />}
-
-        {!reportLoading && monthlyReport && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-6">
-            {/* Summary Bar */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { label: 'Học sinh', value: monthlyReport.summary.totalStudents, unit: 'hs' },
-                { label: 'Số ca dạy', value: monthlyReport.summary.totalSessions, unit: 'buổi' },
-                { label: 'Số ngày dạy', value: monthlyReport.summary.totalUniqueDates, unit: 'ngày' },
-                { label: 'Tỷ lệ đi học', value: monthlyReport.summary.avgAttendanceRate, unit: '%', color: 'text-hicado-emerald' },
-              ].map(s => (
-                <div key={s.label} className="glass-card rounded-2xl p-4 border border-hicado-slate">
-                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">{s.label}</p>
-                  <p className={clsx("text-xl font-black", s.color || "text-hicado-navy")}>
-                    {s.value}<span className="text-[10px] ml-1 opacity-40">{s.unit}</span>
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            {/* The Matrix */}
-            <div className="glass-card rounded-[2.5rem] border border-hicado-slate overflow-hidden bg-white shadow-premium">
-              <div className="overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left border-collapse min-w-max">
-                  <thead>
-                    <tr className="bg-hicado-slate/20 border-b border-hicado-slate">
-                      <th className="sticky left-0 z-20 bg-hicado-slate/10 backdrop-blur-md px-6 py-5 min-w-[200px] border-r border-hicado-slate/50">
-                        <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học sinh</span>
-                      </th>
-                      {monthlyReport.sessions.map((s, idx) => (
-                        <th key={idx} className="px-3 py-4 text-center border-r border-hicado-slate/30 min-w-[70px]">
-                          <p className="text-[11px] font-black text-hicado-navy">
-                            {new Date(s.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' })}
-                          </p>
-                          <p className="text-[9px] font-black text-hicado-navy/30 uppercase">
-                            {s.slot === 'MORNING' ? 'S' : s.slot === 'AFTERNOON' ? 'C' : s.slot === 'EVENING' ? 'T' : 'K'}
-                          </p>
-                        </th>
-                      ))}
-                      <th className="sticky right-[120px] z-20 bg-hicado-slate/10 backdrop-blur-md px-4 py-5 text-center border-l border-hicado-slate/50 min-w-[80px]">
-                        <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Buổi</span>
-                      </th>
-                      <th className="sticky right-0 z-20 bg-hicado-slate/10 backdrop-blur-md px-6 py-5 text-right min-w-[120px]">
-                        <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học phí (đ)</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-hicado-slate/30">
-                    {monthlyReport.students.map((st) => (
-                      <tr key={st.id} className="hover:bg-hicado-slate/10 transition-colors group">
-                        <td className="sticky left-0 z-10 bg-white group-hover:bg-slate-50 px-6 py-4 border-r border-hicado-slate/50">
-                          <p className="text-sm font-black text-hicado-navy">{st.name}</p>
-                          <p className="text-[10px] font-mono text-hicado-navy/30">{st.studentCode || '—'}</p>
-                        </td>
-                        {monthlyReport.sessions.map((sess, idx) => {
-                          const rec = st.records.find(r => r.date === sess.date && r.slot === sess.slot);
-                          const statusCfg: Record<string, { icon: string; cls: string }> = {
-                            PRESENT: { icon: '✓', cls: 'bg-emerald-100 text-emerald-700' },
-                            ABSENT: { icon: '✗', cls: 'bg-rose-50 text-rose-500' },
-                            LEAVE_REQUEST: { icon: '~', cls: 'bg-amber-50 text-amber-500' },
-                          };
-                          const currentStatus = rec?.status || 'NONE';
-                          const config = statusCfg[currentStatus] || { icon: '—', cls: 'bg-slate-50 text-slate-300' };
-
-                          return (
-                            <td key={idx} className="px-2 py-3 text-center border-r border-hicado-slate/20">
-                              <div className={clsx(
-                                "w-8 h-8 rounded-lg mx-auto flex items-center justify-center font-black text-xs transition-transform group-hover:scale-110",
-                                config.cls
-                              )}>
-                                {config.icon}
-                              </div>
-                            </td>
-                          );
-                        })}
-                        <td className="sticky right-[120px] z-10 bg-white group-hover:bg-slate-50 px-4 py-4 text-center font-black text-hicado-navy border-l border-hicado-slate/50">
-                          {st.totalPresent}
-                        </td>
-                        <td className="sticky right-0 z-10 bg-white group-hover:bg-slate-50 px-6 py-4 text-right font-black text-hicado-emerald">
-                          {st.tuitionDue.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-hicado-slate/20 font-black text-hicado-navy/50">
-                      <td className="sticky left-0 z-10 bg-hicado-slate/10 px-6 py-4 border-r border-hicado-slate/50 text-[10px] uppercase tracking-widest">
-                        Tổng cộng/ngày
-                      </td>
-                      {monthlyReport.sessions.map((sess, idx) => {
-                        const count = monthlyReport.students.filter(st => 
-                          st.records.some(r => r.date === sess.date && r.slot === sess.slot && r.status === 'PRESENT')
-                        ).length;
-                        return (
-                          <td key={idx} className="px-2 py-4 text-center border-r border-hicado-slate/20 text-xs">
-                            {count}
-                          </td>
-                        );
-                      })}
-                      <td className="sticky right-[120px] z-10 bg-hicado-slate/10 border-l border-hicado-slate/50"></td>
-                      <td className="sticky right-0 z-10 bg-hicado-slate/10"></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!monthlyReport && !reportLoading && (
-          <div className="glass-card rounded-[2.5rem] border border-dashed border-hicado-slate p-16 text-center">
-            <div className="text-5xl mb-4 opacity-20">📅</div>
-            <p className="text-sm font-black text-hicado-navy/30 uppercase tracking-widest italic">
-              Chọn một lớp học để xem báo cáo điểm danh tháng
-            </p>
-          </div>
-        )}
-      </div>
     </div>
   );
 };
