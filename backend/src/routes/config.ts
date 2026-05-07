@@ -80,15 +80,16 @@ router.get('/zalo', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async
 router.post('/zalo', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { ZALO_APP_ID, ZALO_SECRET_KEY, ZALO_REFRESH_TOKEN, ZALO_ACCESS_TOKEN } = req.body;
+    const trimmedAccessToken = ZALO_ACCESS_TOKEN?.trim();
     const updates = [
-      { key: 'ZALO_APP_ID', value: ZALO_APP_ID },
-      { key: 'ZALO_SECRET_KEY', value: ZALO_SECRET_KEY },
-      { key: 'ZALO_REFRESH_TOKEN', value: ZALO_REFRESH_TOKEN },
-      { key: 'ZALO_ACCESS_TOKEN', value: ZALO_ACCESS_TOKEN },
-      ...(ZALO_ACCESS_TOKEN !== undefined
+      { key: 'ZALO_APP_ID', value: ZALO_APP_ID?.trim() },
+      { key: 'ZALO_SECRET_KEY', value: ZALO_SECRET_KEY?.trim() },
+      { key: 'ZALO_REFRESH_TOKEN', value: ZALO_REFRESH_TOKEN?.trim() },
+      { key: 'ZALO_ACCESS_TOKEN', value: trimmedAccessToken },
+      ...(trimmedAccessToken
         ? [{ key: 'ZALO_ACCESS_TOKEN_ISSUED_AT', value: new Date().toISOString() }]
         : []),
-    ].filter((entry) => entry.value !== undefined);
+    ].filter((entry) => entry.value !== undefined && entry.value !== '');
     await upsertConfigs(updates);
     res.json({ message: 'Cap nhat cau hinh Zalo thanh cong!' });
   } catch {

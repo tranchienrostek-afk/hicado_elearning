@@ -31,11 +31,11 @@ export const refreshZaloToken = async () => {
 
   const response = await axios.post<any>(
     'https://oauth.zaloapp.com/v4/oa/access_token',
-    `app_id=${cfg.ZALO_APP_ID}&grant_type=refresh_token&refresh_token=${cfg.ZALO_REFRESH_TOKEN}`,
+    `app_id=${cfg.ZALO_APP_ID.trim()}&grant_type=refresh_token&refresh_token=${cfg.ZALO_REFRESH_TOKEN.trim()}`,
     {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
-        'secret_key': cfg.ZALO_SECRET_KEY
+        'secret_key': cfg.ZALO_SECRET_KEY.trim()
       }
     }
   );
