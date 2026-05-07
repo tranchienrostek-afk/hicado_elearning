@@ -90,7 +90,6 @@ export const FinancialPage = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
   const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
-  const [statsLoading, setStatsLoading] = useState(false);
 
   // ── Payment Tracking state ────────────────────────────────────────────────
   const [trackingData, setTrackingData] = useState<{ students: TrackingStudent[]; summary: TrackingSummary } | null>(null);
@@ -124,11 +123,9 @@ export const FinancialPage = () => {
     if (isTeacher) return;
     const token = auth?.token;
     if (!token) return;
-    setStatsLoading(true);
     fetch('/api/finance/stats', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setFinanceStats(data); })
-      .finally(() => setStatsLoading(false));
+      .then(data => { if (data) setFinanceStats(data); });
     fetchTracking();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.token, isTeacher]);
@@ -694,7 +691,6 @@ export const FinancialPage = () => {
               !trackSearch || s.name.toLowerCase().includes(trackSearch.toLowerCase()) ||
               (s.studentCode || '').toLowerCase().includes(trackSearch.toLowerCase())
             );
-            const trackingRate = summary.totalExpected > 0 ? (summary.totalCollected / summary.totalExpected) * 100 : 0;
             return (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
