@@ -162,6 +162,19 @@ router.get('/mapping/candidates', authenticateToken, authorizeRoles('ADMIN', 'MA
   }
 });
 
+// 3b. Get mapping audit logs
+router.get('/mapping/audit-log', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const logs = await prisma.zaloMappingAudit.findMany({
+      orderBy: { performedAt: 'desc' },
+      take: 50,
+    });
+    res.json(logs);
+  } catch (err: any) {
+    res.status(500).json({ message: 'Lỗi lấy nhật ký định danh: ' + err.message });
+  }
+});
+
 // 4. Link a Zalo user_id to a teacher or student
 // 4. Link a Zalo user_id to a teacher or student (with conflict detection + audit)
 router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
