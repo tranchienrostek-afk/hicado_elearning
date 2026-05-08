@@ -18,6 +18,10 @@ CREATE TABLE "ZaloMappingAudit" (
 -- PREFLIGHT CHECK (Fail-Fast): Ensure no duplicate zaloUserId exist before creating unique index
 -- If this fails, please run the following query to find duplicates:
 -- SELECT "zaloUserId", COUNT(*) FROM "Student" WHERE "zaloUserId" IS NOT NULL GROUP BY 1 HAVING COUNT(*) > 1;
+-- SELECT "zaloUserId", COUNT(*) FROM "Teacher" WHERE "zaloUserId" IS NOT NULL GROUP BY 1 HAVING COUNT(*) > 1;
+-- SELECT s."zaloUserId", s.id AS "studentId", s.name AS "studentName", t.id AS "teacherId", t.name AS "teacherName"
+-- FROM "Student" s JOIN "Teacher" t ON t."zaloUserId" = s."zaloUserId"
+-- WHERE s."zaloUserId" IS NOT NULL;
 
 DO $$
 BEGIN

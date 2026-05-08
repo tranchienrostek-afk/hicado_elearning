@@ -291,6 +291,7 @@ router.delete('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), as
 
   const user = (req as any).user as { userId: string; name: string };
 
+  try {
     // ATOMIC TRANSACTION: Find -> Lock -> Update -> Audit
     await prisma.$transaction(async (tx) => {
       let targetName = '';
