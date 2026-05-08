@@ -19,7 +19,7 @@ import { ImportPreviewModal } from '@/views/components/import-preview-modal';
 import { assessProfileDeletion, calculateStudentTuitionDue, sumPresentSessionUnits } from '@/utils/center-operations';
 
 const studentSchema = z.object({
-  name: z.string().min(2, 'Tên quá ngắn'),
+  name: z.string().min(2, 'TÃªn quÃ¡ ngáº¯n'),
   birthYear: z.coerce.number().min(1900).max(new Date().getFullYear()).optional(),
   address: z.string().optional(),
   schoolName: z.string().optional(),
@@ -29,8 +29,8 @@ const studentSchema = z.object({
 });
 
 const teacherSchema = z.object({
-  name: z.string().min(2, 'Tên quá ngắn'),
-  phone: z.string().min(10, 'Số điện thoại không hợp lệ'),
+  name: z.string().min(2, 'TÃªn quÃ¡ ngáº¯n'),
+  phone: z.string().min(10, 'Sá»‘ Ä‘iá»‡n thoáº¡i khÃ´ng há»£p lá»‡'),
   specialization: z.string().optional(),
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
@@ -199,7 +199,7 @@ export const Users = () => {
 
   const handleBulkDelete = () => {
     if (selectedIds.size === 0) return;
-    setConfirmDelete({ id: 'BULK', title: `${selectedIds.size} hồ sơ đang chọn` });
+    setConfirmDelete({ id: 'BULK', title: `${selectedIds.size} há»“ sÆ¡ Ä‘ang chá»n` });
   };
 
   const toggleSelect = (id: string) => {
@@ -228,7 +228,7 @@ export const Users = () => {
         errors[issue.path[0]] = issue.message;
       });
       setFormErrors(errors);
-      toast.error('Vui lòng kiểm tra lại thông tin');
+      toast.error('Vui lÃ²ng kiá»ƒm tra láº¡i thÃ´ng tin');
       return;
     }
 
@@ -239,29 +239,29 @@ export const Users = () => {
       if (activeTab === 'STUDENTS') {
         if (isEditMode && selectedId) {
           res = await updateStudent(selectedId, data as any);
-          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi cập nhật học sinh');
-          toast.success('Đã cập nhật học sinh');
+          if (!res.ok) throw new Error((await res.json()).message || 'Lá»—i khi cáº­p nháº­t há»c sinh');
+          toast.success('ÄÃ£ cáº­p nháº­t há»c sinh');
         } else {
           res = await addStudent({
             id: 'S' + Date.now(),
             ...(data as any),
             tuitionStatus: 'DEBT'
           });
-          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi thêm học sinh');
-          toast.success('Đã thêm học sinh mới');
+          if (!res.ok) throw new Error((await res.json()).message || 'Lá»—i khi thÃªm há»c sinh');
+          toast.success('ÄÃ£ thÃªm há»c sinh mới');
         }
       } else {
         if (isEditMode && selectedId) {
           res = await updateTeacher(selectedId, data as any);
-          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi cập nhật giáo viên');
-          toast.success('Đã cập nhật giáo viên');
+          if (!res.ok) throw new Error((await res.json()).message || 'Lá»—i khi cáº­p nháº­t giÃ¡o viÃªn');
+          toast.success('ÄÃ£ cáº­p nháº­t giÃ¡o viÃªn');
         } else {
           res = await addTeacher({
             id: 'T' + Date.now(),
             ...(data as any)
           });
-          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi thêm giáo viên');
-          toast.success('Đã thêm giáo viên mới');
+          if (!res.ok) throw new Error((await res.json()).message || 'Lá»—i khi thÃªm giÃ¡o viÃªn');
+          toast.success('ÄÃ£ thÃªm giÃ¡o viÃªn mới');
         }
       }
 
@@ -272,7 +272,7 @@ export const Users = () => {
       setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 });
     } catch (error: any) {
       console.error('Save failed:', error);
-      toast.error(error.message || 'Không thể lưu thông tin. Vui lòng thử lại.');
+      toast.error(error.message || 'KhÃ´ng thá»ƒ lÆ°u thÃ´ng tin. Vui lÃ²ng thá»­ láº¡i.');
     }
   };
 
@@ -340,31 +340,31 @@ export const Users = () => {
 
   const handleSync = () => {
     if (!sheetUrl.includes('google.com/spreadsheets')) {
-      toast.error('Vui lòng nhập link Google Sheets hợp lệ');
+      toast.error('Vui lÃ²ng nháº­p link Google Sheets há»£p lá»‡');
       return;
     }
     setIsSyncing(true);
     setTimeout(() => {
       const mockImported = [
-        { id: 'S' + Date.now(), name: 'Đá»“ng bộ ' + Date.now(), birthYear: 2012, address: 'Auto', tuitionStatus: 'PAID' },
+        { id: 'S' + Date.now(), name: 'Äá»“ng bá»™ ' + Date.now(), birthYear: 2012, address: 'Auto', tuitionStatus: 'PAID' },
       ] as any;
       const normalizedImported = mockImported.map((item: any) => ({
         ...item,
-        schoolName: item.schoolName || 'THCS Mẫu',
-        schoolClass: item.schoolClass || 'Lớp 8A',
+        schoolName: item.schoolName || 'THCS Máº«u',
+        schoolClass: item.schoolClass || 'Lá»›p 8A',
       }));
       importStudents(normalizedImported);
       setIsSyncing(false);
       setIsImportOpen(false);
       setSheetUrl('');
-      toast.success('Đá»“ng bộ thành công');
+      toast.success('Äá»“ng bá»™ thành công');
     }, 1500);
   };
 
   const handleExportExcel = () => {
     const rows = activeTab === 'STUDENTS' ? filteredStudents : filteredTeachers;
     exportCenterWorkbook(activeTab, rows);
-    toast.success(rows.length === 0 ? 'Đã xuất file template Excel' : 'Đã xuất danh sách Excel');
+    toast.success(rows.length === 0 ? 'ÄÃ£ xuáº¥t file template Excel' : 'ÄÃ£ xuáº¥t danh sÃ¡ch Excel');
   };
 
   const handleImportExcelLegacy = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -379,7 +379,7 @@ export const Users = () => {
         const rows = await readCenterWorkbookRows(file);
         const result = normalizeCenterImportRows('STUDENTS', rows);
         if (result.validRows.length === 0) {
-          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          toast.error(result.errors[0] || 'File Excel khÃ´ng cÃ³ dá»¯ liá»‡u há»£p lá»‡');
           return;
         }
         for (const row of result.validRows) {
@@ -387,15 +387,15 @@ export const Users = () => {
           if (res.ok) importedCount += 1;
         }
         if (result.errors.length > 0) {
-          toast.success(`Đã nhập ${importedCount} dòng. Bỏ qua ${result.errors.length} dòng lỗi.`);
+          toast.success(`ÄÃ£ nháº­p ${importedCount} dÃ²ng. Bá» qua ${result.errors.length} dÃ²ng lá»—i.`);
         } else {
-          toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
+          toast.success(`ÄÃ£ nháº­p ${importedCount} há»“ sÆ¡ tá»« Excel`);
         }
       } else if (activeTab === 'TEACHERS') {
         const rows = await readCenterWorkbookRows(file);
         const result = normalizeCenterImportRows('TEACHERS', rows);
         if (result.validRows.length === 0) {
-          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          toast.error(result.errors[0] || 'File Excel khÃ´ng cÃ³ dá»¯ liá»‡u há»£p lá»‡');
           return;
         }
         for (const row of result.validRows) {
@@ -403,15 +403,15 @@ export const Users = () => {
           if (res.ok) importedCount += 1;
         }
         if (result.errors.length > 0) {
-          toast.success(`Đã nhập ${importedCount} dòng. Bỏ qua ${result.errors.length} dòng lỗi.`);
+          toast.success(`ÄÃ£ nháº­p ${importedCount} dÃ²ng. Bá» qua ${result.errors.length} dÃ²ng lá»—i.`);
         } else {
-          toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
+          toast.success(`ÄÃ£ nháº­p ${importedCount} há»“ sÆ¡ tá»« Excel`);
         }
       }
       setIsImportOpen(false);
     } catch (error) {
       console.error('Excel import failed:', error);
-      toast.error('Không thể đọc file Excel');
+      toast.error('KhÃ´ng thá»ƒ Ä‘á»c file Excel');
     } finally {
       setIsSyncing(false);
     }
@@ -430,7 +430,7 @@ export const Users = () => {
       if (activeTab === 'STUDENTS') {
         const result = normalizeCenterImportRows('STUDENTS', rows);
         if (result.validRows.length === 0) {
-          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          toast.error(result.errors[0] || 'File Excel khÃ´ng cÃ³ dá»¯ liá»‡u há»£p lá»‡');
           return;
         }
         setImportKind('STUDENTS');
@@ -438,7 +438,7 @@ export const Users = () => {
       } else {
         const result = normalizeCenterImportRows('TEACHERS', rows);
         if (result.validRows.length === 0) {
-          toast.error(result.errors[0] || 'File Excel không có dữ liệu hợp lệ');
+          toast.error(result.errors[0] || 'File Excel khÃ´ng cÃ³ dá»¯ liá»‡u há»£p lá»‡');
           return;
         }
         setImportKind('TEACHERS');
@@ -446,7 +446,7 @@ export const Users = () => {
       }
     } catch (error) {
       console.error('Excel import failed:', error);
-      toast.error('Không thể đọc file Excel');
+      toast.error('KhÃ´ng thá»ƒ Ä‘á»c file Excel');
     } finally {
       setIsSyncing(false);
     }
@@ -471,17 +471,17 @@ export const Users = () => {
 
         if (!res.ok) {
           const errorData = await res.json().catch(() => ({}));
-          throw new Error(errorData.message || `Lỗi khi xử lý dòng ${importedCount + 1}`);
+          throw new Error(errorData.message || `Lá»—i khi xá»­ lÃ½ dÃ²ng ${importedCount + 1}`);
         }
 
         importedCount += 1;
       }
-      toast.success(`Đã nhập ${importedCount} hồ sơ từ Excel`);
+      toast.success(`ÄÃ£ nháº­p ${importedCount} há»“ sÆ¡ tá»« Excel`);
       setImportPlan(null);
       setIsImportOpen(false);
     } catch (error: any) {
       console.error('Excel commit failed:', error);
-      toast.error(error.message || 'Có dòng import bị lỗi khi ghi dữ liệu');
+      toast.error(error.message || 'CÃ³ dÃ²ng import bá»‹ lá»—i khi ghi dá»¯ liá»‡u');
     } finally {
       setIsSyncing(false);
     }
@@ -506,13 +506,13 @@ export const Users = () => {
 
   const handleCreateAccount = async () => {
     if (!accountForm.username || !accountForm.password || !accountForm.targetId) {
-      toast.error('Vui lòng chọn đối tượng và nhập tài khoản/mật khẩu');
+      toast.error('Vui lÃ²ng chá»n đối tượng vÃ  nháº­p tài khoản/máº­t kháº©u');
       return;
     }
     
     // Check if username already exists locally
     if (accounts.some(a => a.username === accountForm.username)) {
-      toast.error('Tên tài khoản đã tồn tại');
+      toast.error('TÃªn tài khoản Ä‘Ã£ tá»“n táº¡i');
       return;
     }
 
@@ -522,7 +522,7 @@ export const Users = () => {
       : accounts.some(a => a.studentId === accountForm.targetId);
       
     if (hasAccount) {
-      toast.error('Đối tượng này đã có tài khoản truy cập');
+      toast.error('Äá»‘i tÆ°á»£ng nÃ y Ä‘Ã£ cÃ³ tài khoản truy cập');
       return;
     }
 
@@ -530,7 +530,7 @@ export const Users = () => {
       if (activeTab === 'TEACHERS') {
         const teacher = teachers.find(t => t.id === accountForm.targetId);
         if (!teacher) {
-          toast.error('Không tÃ¬m thấy giáo viên');
+          toast.error('KhÃ´ng tÃ¬m tháº¥y giÃ¡o viÃªn');
           return;
         }
         await addAccount({
@@ -543,7 +543,7 @@ export const Users = () => {
       } else {
         const student = students.find(s => s.id === accountForm.targetId);
         if (!student) {
-          toast.error('Không tÃ¬m thấy học sinh');
+          toast.error('KhÃ´ng tÃ¬m tháº¥y há»c sinh');
           return;
         }
         await addAccount({
@@ -556,10 +556,10 @@ export const Users = () => {
       }
 
       setAccountForm({ targetId: '', username: '', password: '' });
-      toast.success('Đã kích hoạt định danh thành công');
+      toast.success('ÄÃ£ kích hoạt định danh thành công');
     } catch (error: any) {
       console.error('Account creation failed:', error);
-      toast.error(error.message || 'Không thể tạo tài khoản. Có thể do dữ liệu đã tồn tại hoặc lỗi kết nối.');
+      toast.error(error.message || 'KhÃ´ng thá»ƒ táº¡o tài khoản. CÃ³ thá»ƒ do dá»¯ liá»‡u Ä‘Ã£ tá»“n táº¡i hoáº·c lá»—i káº¿t ná»‘i.');
     }
   };
 
@@ -572,7 +572,7 @@ export const Users = () => {
           <FocusLock returnFocus>
             <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="p-6 md:p-8 border-b border-hicado-slate flex justify-between items-center shrink-0 bg-hicado-slate/10">
-              <h3 className="text-xl font-black text-hicado-navy uppercase tracking-tight">{isEditMode ? 'Cập nhật' : 'Thêm'} {activeTab === 'STUDENTS' ? 'Học sinh' : 'Giáo viên'}</h3>
+              <h3 className="text-xl font-black text-hicado-navy uppercase tracking-tight">{isEditMode ? 'Cáº­p nháº­t' : 'ThÃªm'} {activeTab === 'STUDENTS' ? 'Há»c sinh' : 'Giáo viên'}</h3>
               <button onClick={() => { setIsAddModalOpen(false); setIsEditMode(false); }} className="text-slate-500 hover:text-hicado-navy transition-colors">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
               </button>
@@ -580,7 +580,7 @@ export const Users = () => {
 
             <div className="p-5 md:p-8 space-y-4 overflow-y-auto">
               <div className="space-y-1">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Họ và tên</label>
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Há» vÃ  tÃªn</label>
                 <input 
                   type="text" 
                   value={formData.name}
@@ -589,7 +589,7 @@ export const Users = () => {
                     "w-full bg-slate-50 border px-4 py-3 rounded-xl text-sm outline-none transition-all",
                     formErrors.name ? "border-rose-500 focus:ring-rose-500/20" : "border-slate-200 focus:ring-management-blue/20"
                   )}
-                  placeholder="Nhập tên..."
+                  placeholder="Nháº­p tÃªn..."
                 />
                 {formErrors.name && <p className="text-[10px] text-rose-500 font-bold mt-1 uppercase">{formErrors.name}</p>}
               </div>
@@ -598,7 +598,7 @@ export const Users = () => {
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Năm sinh</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">NÄƒm sinh</label>
                       <input 
                         type="number" 
                         value={formData.birthYear}
@@ -607,39 +607,39 @@ export const Users = () => {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Lớp đang học</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Lá»›p Ä‘ang há»c</label>
                       <input
                         type="text"
                         value={formData.schoolClass}
                         onChange={e => setFormData({ ...formData, schoolClass: e.target.value })}
                         className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-management-blue/20 outline-none"
-                        placeholder="VD: Lớp 9A1"
+                        placeholder="VD: LÃ¡Â»â€ºp 9A1"
                       />
                     </div>
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Trường đang học</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">TrÆ°á»ng Ä‘ang há»c</label>
                     <input
                       type="text"
                       value={formData.schoolName}
                       onChange={e => setFormData({ ...formData, schoolName: e.target.value })}
                       className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-management-blue/20 outline-none"
-                      placeholder="VD: THCS Nguyễn Trãi"
+                      placeholder="VD: THCS Nguyá»…n TrÃ£i"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Đá»‹a chá»‰</label>
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Äá»‹a chá»‰</label>
                     <input
                       type="text"
                       value={formData.address}
                       onChange={e => setFormData({ ...formData, address: e.target.value })}
                       className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-management-blue/20 outline-none"
-                      placeholder="Nhập địa chỉ..."
+                      placeholder="Nháº­p Ä‘á»‹a chá»‰..."
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SĐT Phụ huynh</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SÄT Phá»¥ huynh</label>
                       <input
                         type="tel"
                         value={formData.parentPhone}
@@ -649,7 +649,7 @@ export const Users = () => {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SĐT Học sinh</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">SÄT Há»c sinh</label>
                       <input
                         type="tel"
                         value={formData.studentPhone}
@@ -664,7 +664,7 @@ export const Users = () => {
                 <>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Số điện thoại</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sá»‘ Ä‘iá»‡n thoáº¡i</label>
                       <input 
                         type="text" 
                         value={formData.phone}
@@ -684,7 +684,7 @@ export const Users = () => {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ngân hàng</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">NgÃ¢n hÃ ng</label>
                       <input 
                         type="text" 
                         value={formData.bankName}
@@ -693,7 +693,7 @@ export const Users = () => {
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Số tài khoản</label>
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Sá»‘ tài khoản</label>
                       <input 
                         type="text" 
                         value={formData.bankAccount}
@@ -710,13 +710,13 @@ export const Users = () => {
                 onClick={() => { setIsAddModalOpen(false); setIsEditMode(false); }}
                 className="flex-1 px-4 md:px-6 py-3 md:py-4 rounded-2xl font-black text-slate-500 hover:bg-white transition-all uppercase text-[10px] md:text-xs tracking-widest border border-transparent hover:border-hicado-slate"
               >
-                Hủy
+                Há»§y
               </button>
               <button 
                 onClick={handleSave}
                 className="flex-1 bg-hicado-navy text-white px-4 md:px-6 py-3 md:py-4 rounded-2xl font-black shadow-xl shadow-hicado-navy/20 hover:translate-y-[-2px] transition-all uppercase text-[10px] md:text-xs tracking-widest"
               >
-                {isEditMode ? 'Cập nhật' : 'Lưu hồ sơ'}
+                {isEditMode ? 'Cáº­p nháº­t' : 'LÆ°u há»“ sÆ¡'}
               </button>
             </div>
 
@@ -732,7 +732,7 @@ export const Users = () => {
               onClick={() => setActiveTab('STUDENTS')}
               className={`px-8 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${activeTab === 'STUDENTS' ? 'bg-hicado-navy text-white shadow-xl' : 'text-slate-500 hover:text-hicado-navy'}`}
             >
-              Học sinh
+              Há»c sinh
             </button>
             {isStaff && (
               <button 
@@ -751,19 +751,19 @@ export const Users = () => {
                   onClick={() => setIsImportOpen(!isImportOpen)}
                   className="flex-1 sm:flex-none bg-hicado-emerald/10 text-hicado-emerald px-5 py-2.5 rounded-xl font-black border border-hicado-emerald/20 text-[10px] uppercase tracking-widest"
                 >
-                  Nhập Excel
+                  Nháº­p Excel
                 </button>
                 <button
                   onClick={handleExportExcel}
                   className="flex-1 sm:flex-none bg-white text-hicado-navy px-5 py-2.5 rounded-xl font-black border border-hicado-slate text-[10px] uppercase tracking-widest"
                 >
-                  Xuất Excel
+                  Xuáº¥t Excel
                 </button>
                 <button 
                   onClick={() => { setIsAddModalOpen(true); setIsEditMode(false); setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 }); }}
                   className="flex-1 sm:flex-none bg-hicado-navy text-white px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-hicado-navy/20"
                 >
-                  Thêm mới
+                  ThÃªm mới
                 </button>
               </>
             )}
@@ -779,7 +779,7 @@ export const Users = () => {
             </span>
             <input 
               type="text" 
-              placeholder="Tìm kiếm danh tính..." 
+              placeholder="TÃ¬m kiáº¿m danh tÃ­nh..." 
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-12 pr-6 py-4 bg-hicado-slate/20 border border-transparent rounded-2xl text-sm font-bold text-hicado-navy focus:outline-none focus:bg-white focus:border-hicado-slate transition-all"
@@ -791,7 +791,7 @@ export const Users = () => {
               onChange={(e) => setYearFilter(e.target.value)}
               className="bg-hicado-slate/20 border border-transparent px-6 py-4 rounded-2xl text-sm font-black text-slate-600 focus:outline-none focus:bg-white focus:border-hicado-slate transition-all"
             >
-              <option value="">Năm sinh</option>
+              <option value="">NÄƒm sinh</option>
               {[2009, 2010, 2011, 2012, 2013, 2014, 2015].map(y => <option key={y} value={y.toString()}>{y}</option>)}
             </select>
 
@@ -815,7 +815,7 @@ export const Users = () => {
             <div className="flex-1 space-y-2">
               <p className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">Import Excel</p>
               <p className="text-xs font-bold text-hicado-navy/50">
-                Dùng file Excel .xls đã xuất từ nút Xuất Excel. Nếu danh sách đang trống, file xuất ra sẽ là template mẫu.
+                DÃ¹ng file Excel .xls Ä‘Ã£ xuáº¥t tá»« nÃºt Xuáº¥t Excel. Náº¿u danh sÃ¡ch Ä‘ang trá»‘ng, file xuáº¥t ra sáº½ lÃ  template máº«u.
               </p>
               <input
                 ref={fileInputRef}
@@ -826,7 +826,7 @@ export const Users = () => {
               />
             </div>
             <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold uppercase text-xs">
-              {isSyncing ? 'Đang nhập...' : 'Chọn file Excel'}
+              {isSyncing ? 'Äang nháº­p...' : 'Chá»n file Excel'}
             </button>
           </div>
         )}
@@ -843,7 +843,7 @@ export const Users = () => {
               />
             </div>
             <button onClick={handleSync} disabled={isSyncing} className="bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold uppercase text-xs">
-              {isSyncing ? 'Đang bộ...' : 'Đá»“ng bộ'}
+              {isSyncing ? 'Äang bá»™...' : 'Äá»“ng bá»™'}
             </button>
           </div>
         )}
@@ -856,11 +856,11 @@ export const Users = () => {
               <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                 <div>
                   <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-3">Hệ thống an ninh & Truy cập</p>
-                  <h3 className="text-3xl font-black uppercase tracking-tight italic text-slate-800">Quản lý định danh {activeTab === 'TEACHERS' ? 'Giáo viên' : 'Học sinh'}</h3>
+                  <h3 className="text-3xl font-black uppercase tracking-tight italic text-slate-800">Quản lý định danh {activeTab === 'TEACHERS' ? 'Giáo viên' : 'Há»c sinh'}</h3>
                 </div>
                 <div className="flex gap-3">
                   <div className="bg-white/5 border border-white/10 px-6 py-3 rounded-2xl">
-                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Độ phủ tài khoản</p>
+                    <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-1">Äá»™ phá»§ tài khoản</p>
                     <p className="text-xl font-black italic">{accounts.filter(a => activeTab === 'TEACHERS' ? a.role === 'TEACHER' : a.role === 'STUDENT').length} / {(activeTab === 'TEACHERS' ? teachers : students).length}</p>
                   </div>
                 </div>
@@ -869,10 +869,10 @@ export const Users = () => {
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* Create Form */}
                 <div className="lg:col-span-1 bg-slate-50 border border-slate-200 p-8 rounded-[2rem] space-y-6">
-                   <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-widest">Cấp quyền truy cập mới</p>
+                   <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-widest">Cáº¥p quyá»n truy cập mới</p>
                    <div className="space-y-4">
                      <div className="space-y-2">
-                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Chọn đối tượng</label>
+                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest ml-1">Chá»n đối tượng</label>
                        <div className="relative">
                         <input
                           type="text"
@@ -917,7 +917,7 @@ export const Users = () => {
                             value={accountForm.password}
                             onChange={(e) => setAccountForm({ ...accountForm, password: e.target.value })}
                             className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-hicado-emerald transition-all"
-                            placeholder="••••••"
+                            placeholder="â€¢â€¢â€¢â€¢â€¢â€¢"
                           />
                         </div>
                      </div>
@@ -935,7 +935,7 @@ export const Users = () => {
                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 ml-1">Danh bạ tài khoản hiện hành</p>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                     {accountList.length === 0 && (
-                      <div className="col-span-2 py-10 text-center opacity-30 italic text-xs">Chưa có tài khoản nào được cấp</div>
+                      <div className="col-span-2 py-10 text-center opacity-30 italic text-xs">Chưa cÃ³ tài khoản nÃ o Ä‘Æ°á»£c cáº¥p</div>
                     )}
                     {accountList.map((acc) => (
                       <div key={acc.id} className="bg-white border border-slate-200 p-4 rounded-2xl flex justify-between items-center group hover:bg-slate-50 transition-all">
@@ -955,14 +955,14 @@ export const Users = () => {
                               setIsAccountModalOpen(true);
                             }}
                             className="p-2 text-slate-500 hover:text-hicado-emerald hover:bg-slate-100 rounded-lg transition-all"
-                            title="Đổi mật khẩu"
+                            title="Äá»•i máº­t kháº©u"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"></path></svg>
                           </button>
                           <button 
                             onClick={() => setConfirmDelete({ id: acc.id, title: acc.username, type: 'ACCOUNT' })}
                             className="p-2 text-slate-500 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-all"
-                            title="Thu há»“i quyền"
+                            title="Thu há»“i quyá»n"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                           </button>
@@ -983,8 +983,8 @@ export const Users = () => {
               {selectedIds.size}
             </div>
             <div>
-              <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.3em]">Hồ sơ đang chọn</p>
-              <p className="text-sm font-bold opacity-80">Thực hiện hành vụ cho nhóm nhân sự đã chọn</p>
+              <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.3em]">Há»“ sÆ¡ Ä‘ang chá»n</p>
+              <p className="text-sm font-bold opacity-80">Thá»±c hiện hành vá»¥ cho nhÃ³m nhÃ¢n sá»± Ä‘Ã£ chá»n</p>
             </div>
           </div>
           <div className="flex gap-4">
@@ -992,13 +992,13 @@ export const Users = () => {
               onClick={() => setSelectedIds(new Set())}
               className="px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-white/5 transition-colors"
             >
-              Hủy chọn
+              Há»§y chá»n
             </button>
             <button 
               onClick={handleBulkDelete}
               className="bg-rose-500 text-white px-6 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-rose-900/40 hover:bg-rose-600 transition-colors"
             >
-              Xóa hàng loạt
+              XÃ³a hÃ ng loáº¡t
             </button>
           </div>
         </div>
@@ -1013,7 +1013,7 @@ export const Users = () => {
           <div className="p-20 text-center space-y-4">
             <div className="text-6xl grayscale opacity-30">ðŸ“‚</div>
             <p className="text-sm font-black text-slate-500 uppercase tracking-widest italic">
-              Không tÃ¬m thấy hồ sơ nào phù hợp
+              KhÃ´ng tÃ¬m tháº¥y há»“ sÆ¡ nÃ o phÃ¹ há»£p
             </p>
           </div>
         ) : (
@@ -1030,10 +1030,10 @@ export const Users = () => {
               </th>
               <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Hồ sơ chính</th>
               <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Truy cập</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Định danh</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{activeTab === 'STUDENTS' ? 'Học vấn & Vị trí' : 'Chuyên môn'}</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Äá»‹nh danh</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{activeTab === 'STUDENTS' ? 'Há»c váº¥n & Vị trí' : 'Chuyên môn'}</th>
               <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Hành vụ</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Điều hướng</th>
+              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Äiá»u hÆ°á»›ng</th>
             </tr>
           </thead>
 
@@ -1067,7 +1067,7 @@ export const Users = () => {
                   {accounts.find(a => a.studentId === student.id) ? (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-hicado-emerald/10 text-hicado-emerald text-[9px] font-black rounded-full border border-hicado-emerald/20 uppercase tracking-widest">
                       <span className="w-1.5 h-1.5 bg-hicado-emerald rounded-full animate-pulse"></span>
-                      Đã cấp
+                      ÄÃ£ cáº¥p
                     </span>
                   ) : (
                     <span className="inline-flex items-center px-3 py-1 bg-slate-100 text-slate-400 text-[9px] font-black rounded-full border border-slate-200 uppercase tracking-widest">
@@ -1078,7 +1078,7 @@ export const Users = () => {
 
                 <td className="px-6 py-5 font-mono text-xs text-slate-500">{student.cccd || 'CHƯA CẬP NHẬT'}</td>
                 <td className="px-6 py-5 text-sm text-slate-600 font-medium">
-                  <p className="font-bold text-slate-800">{student.schoolName || 'Chưa cập nhật trường'}</p>
+                  <p className="font-bold text-slate-800">{student.schoolName || 'Chưa cáº­p nháº­t trÆ°á»ng'}</p>
                   <p className="text-[11px] text-slate-500">{student.schoolClass || '--'}</p>
                   <p className="text-[11px] text-slate-400">{student.address}</p>
                 </td>
@@ -1089,11 +1089,11 @@ export const Users = () => {
                       tuitionStatus === 'PENDING' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' :
                       'bg-rose-500/10 text-rose-600 border-rose-500/20'
                     } uppercase tracking-widest`}>
-                      {tuitionStatus === 'PAID' ? 'Đã thanh toán' : tuitionStatus === 'PENDING' ? 'Đang đối soát' : 'Đư nợ'}
+                      {tuitionStatus === 'PAID' ? 'ÄÃ£ thanh toÃ¡n' : tuitionStatus === 'PENDING' ? 'Äang Ä‘á»‘i soÃ¡t' : 'Đư nợ'}
                     </span>
                     {isTeacher && (
                       <p className="text-[9px] text-slate-400 font-black uppercase tracking-tighter text-center">
-                        {tuitionSnapshot.paid.toLocaleString()}đ / {tuitionSnapshot.due.toLocaleString()}đ
+                        {tuitionSnapshot.paid.toLocaleString()}Ä‘ / {tuitionSnapshot.due.toLocaleString()}Ä‘
                       </p>
                     )}
                   </div>
@@ -1140,7 +1140,7 @@ export const Users = () => {
                     </div>
                     <div>
                       <p className="font-black text-hicado-navy uppercase tracking-tight leading-tight">{teacher.name}</p>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">SĐT: {teacher.phone}</p>
+                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">SÄT: {teacher.phone}</p>
                     </div>
                   </div>
                 </td>
@@ -1148,7 +1148,7 @@ export const Users = () => {
                   {accounts.find(a => a.teacherId === teacher.id) ? (
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-hicado-emerald/10 text-hicado-emerald text-[9px] font-black rounded-full border border-hicado-emerald/20 uppercase tracking-widest">
                       <span className="w-1.5 h-1.5 bg-hicado-emerald rounded-full animate-pulse"></span>
-                      Đã cấp
+                      ÄÃ£ cáº¥p
                     </span>
                   ) : (
                     <span className="inline-flex items-center px-3 py-1 bg-slate-100 text-slate-400 text-[9px] font-black rounded-full border border-slate-200 uppercase tracking-widest">
@@ -1162,7 +1162,7 @@ export const Users = () => {
                   <p className="text-[10px] text-management-blue font-black uppercase tracking-widest mt-1">{teacher.workplace || 'Hicado Center'}</p>
                 </td>
                 <td className="px-8 py-6">
-                  <span className="px-4 py-1.5 bg-hicado-emerald/10 text-hicado-emerald text-[9px] font-black rounded-lg border border-hicado-emerald/20 uppercase tracking-widest">Đang công tác</span>
+                  <span className="px-4 py-1.5 bg-hicado-emerald/10 text-hicado-emerald text-[9px] font-black rounded-lg border border-hicado-emerald/20 uppercase tracking-widest">Äang công tác</span>
                 </td>
                 <td className="px-8 py-6 text-right">
                   <div className="flex justify-end gap-1">
@@ -1240,7 +1240,7 @@ export const Users = () => {
 
       <ImportPreviewModal
         isOpen={!!importPlan}
-        title={importKind === 'STUDENTS' ? 'Nhập danh sách học sinh' : 'Nhập danh sách giáo viên'}
+        title={importKind === 'STUDENTS' ? 'Nhập danh sách há»c sinh' : 'Nhập danh sách giÃ¡o viÃªn'}
         plan={importPlan}
         isCommitting={isSyncing}
         onConfirm={handleConfirmImport}
@@ -1272,16 +1272,16 @@ const AccountSecurityModal = ({ account, onClose }: { account: any, onClose: () 
 
   const handleReset = async () => {
     if (!newPassword || newPassword.length < 6) {
-      toast.error('Mật khẩu mới phải từ 6 ký tự');
+      toast.error('Máº­t kháº©u mới pháº£i tá»« 6 kÃ½ tá»±');
       return;
     }
     setIsUpdating(true);
     try {
       await updateAccount(account.id, { password: newPassword });
-      toast.success('Đã cập nhật mật khẩu mới');
+      toast.success('ÄÃ£ cáº­p nháº­t máº­t kháº©u mới');
       onClose();
     } catch (error) {
-      toast.error('Lỗi khi cập nhật mật khẩu');
+      toast.error('Lá»—i khi cáº­p nháº­t máº­t kháº©u');
     } finally {
       setIsUpdating(false);
     }
@@ -1293,8 +1293,8 @@ const AccountSecurityModal = ({ account, onClose }: { account: any, onClose: () 
         <div className="bg-white rounded-[2.5rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
           <div className="p-8 bg-hicado-navy text-white flex justify-between items-center shrink-0">
             <div>
-              <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-widest mb-1">Bảo mật & Định danh</p>
-              <h3 className="text-xl font-black uppercase tracking-tight">Thiết lập tài khoản</h3>
+              <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-widest mb-1">Báº£o máº­t & Äá»‹nh danh</p>
+              <h3 className="text-xl font-black uppercase tracking-tight">Thiáº¿t láº­p tài khoản</h3>
             </div>
             <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -1313,13 +1313,13 @@ const AccountSecurityModal = ({ account, onClose }: { account: any, onClose: () 
             </div>
 
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Mật khẩu mới</label>
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Máº­t kháº©u mới</label>
               <input 
                 type="password"
                 value={newPassword}
                 onChange={(e) => setNewPassword(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 px-4 py-4 rounded-2xl text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy transition-all"
-                placeholder="Nhập mật khẩu mới..."
+                placeholder="Nháº­p máº­t kháº©u mới..."
               />
             </div>
 
@@ -1328,14 +1328,14 @@ const AccountSecurityModal = ({ account, onClose }: { account: any, onClose: () 
                 onClick={onClose}
                 className="flex-1 py-4 rounded-2xl text-[10px] font-black text-slate-500 uppercase tracking-widest hover:bg-slate-50 transition-all border border-transparent hover:border-slate-200"
               >
-                Đóng
+                ÄÃ³ng
               </button>
               <button 
                 onClick={handleReset}
                 disabled={isUpdating}
                 className="flex-2 bg-hicado-navy text-white px-8 py-4 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl shadow-hicado-navy/20 hover:scale-[1.02] transition-all disabled:opacity-50"
               >
-                {isUpdating ? 'Đang cập nhật...' : 'Cập nhật bảo mật'}
+                {isUpdating ? 'Äang cáº­p nháº­t...' : 'Cập nhật bảo mật'}
               </button>
             </div>
           </div>
@@ -1373,8 +1373,8 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
 
   const getStatusText = (status: string) => {
     switch (status) {
-      case 'PRESENT': return 'Đi học';
-      case 'ABSENT': return 'Nghỉ không phép';
+      case 'PRESENT': return 'Äi há»c';
+      case 'ABSENT': return 'Nghá»‰ khÃ´ng phÃ©p';
       case 'LEAVE_REQUEST': return 'Xin nghỉ (Có phép)';
       default: return status;
     }
@@ -1392,7 +1392,7 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
                 {student.name.charAt(0)}
               </div>
               <div className="space-y-2">
-                <p className="text-hicado-emerald text-[10px] font-black uppercase tracking-[0.5em] px-1">Hồ sơ chi tiết học viên</p>
+                <p className="text-hicado-emerald text-[10px] font-black uppercase tracking-[0.5em] px-1">Há»“ sÆ¡ chi tiáº¿t há»c viÃªn</p>
                 <h3 className="text-4xl font-black uppercase tracking-tight leading-none italic">{student.name}</h3>
                 <div className="flex gap-4 items-center opacity-40 text-[10px] font-black uppercase tracking-[0.2em] mt-2">
                   <span>REF: #{student.id}</span>
@@ -1411,18 +1411,18 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
 
           <div className="grid grid-cols-4 gap-6 mt-10 relative z-10">
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl">
-              <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-1">Tổng học phí (Định mức)</p>
-              <p className="text-xl font-black italic">{totalTuition.toLocaleString()}đ</p>
+              <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-1">Tá»•ng há»c phÃ­ (Äá»‹nh má»©c)</p>
+              <p className="text-xl font-black italic">{totalTuition.toLocaleString()}Ä‘</p>
             </div>
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl">
-              <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-1">Đã quyết toán</p>
-              <p className="text-xl font-black text-emerald-400 italic">{totalPaid.toLocaleString()}đ</p>
+              <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-1">ÄÃ£ quyáº¿t toÃ¡n</p>
+              <p className="text-xl font-black text-emerald-400 italic">{totalPaid.toLocaleString()}Ä‘</p>
             </div>
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 p-5 rounded-3xl col-span-2">
-              <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-1">Đư nợ hiện tại</p>
+              <p className="text-[10px] font-black opacity-40 uppercase tracking-widest mb-1">Đư nợ hiá»‡n táº¡i</p>
               <div className="flex justify-between items-end">
                 <p className={`text-2xl font-black italic ${debt > 0 ? 'text-rose-400' : 'text-emerald-400'}`}>
-                  {debt > 0 ? `+${debt.toLocaleString()}đ` : 'Hết nợ'}
+                  {debt > 0 ? `+${debt.toLocaleString()}Ä‘` : 'Háº¿t ná»£'}
                 </p>
                 <span className="text-[10px] font-black opacity-40 uppercase tracking-widest">Cập nhật: {new Date().toLocaleDateString('vi-VN')}</span>
               </div>
@@ -1433,7 +1433,7 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
         {/* Content */}
         <div className="flex-1 overflow-hidden flex">
           <div className="w-1/3 p-10 overflow-y-auto border-r border-slate-100 bg-slate-50/50">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-8">Lớp học đang theo ({studentClasses.length})</h4>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-8">Lá»›p há»c Ä‘ang theo ({studentClasses.length})</h4>
             <div className="space-y-6">
               {studentClasses.map(cls => (
                 <div key={cls.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm space-y-4 hover:shadow-md transition-all">
@@ -1461,8 +1461,8 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
           <div className="flex-1 p-10 overflow-y-auto space-y-10">
             <div className="space-y-6">
               <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex justify-between">
-                <span>Dòng thời gian học tập</span>
-                <span className="text-emerald-500">Kỳ học: Spring 2025</span>
+                <span>DÃ²ng thá»i gian há»c táº­p</span>
+                <span className="text-emerald-500">Ká»³ há»c: Spring 2025</span>
               </h4>
               <div className="space-y-8 relative before:absolute before:inset-y-0 before:left-3 before:w-px before:bg-slate-200">
                 {studentAttendance.map((record) => (
