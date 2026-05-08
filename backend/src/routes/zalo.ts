@@ -291,44 +291,57 @@ router.delete('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), as
 
   const user = (req as any).user as { userId: string; name: string };
 
-  try {
-    let targetName = '';
-    let targetId = '';
-    let targetType = '';
-    let zaloUserId = '';
+    // ATOMIC TRANSACTION: Find -> Lock -> Update -> Audit
+    await prisma.$transaction(async (tx) => {
+      let targetName = '';
+      let targetId = '';
+      let targetType = '';
+      let zaloUserId = '';
 
-    if (studentId) {
-      const student = await prisma.student.findUnique({ where: { id: studentId }, select: { name: true, zaloUserId: true } });
-      if (!student) return res.status(404).json({ message: 'Không tìm thấy học sinh' });
-      targetName = student.name;
-      targetId = studentId;
-      targetType = 'STUDENT';
-      zaloUserId = student.zaloUserId ?? '';
-      await prisma.student.update({ where: { id: studentId }, data: { zaloUserId: null } });
-    } else {
-      const teacher = await prisma.teacher.findUnique({ where: { id: teacherId }, select: { name: true, zaloUserId: true } });
-      if (!teacher) return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
-      targetName = teacher.name;
-      targetId = teacherId;
-      targetType = 'TEACHER';
-      zaloUserId = teacher.zaloUserId ?? '';
-      await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId: null } });
-    }
+      if (studentId) {
+        const student = await tx.student.findUnique({ where: { id: studentId }, select: { name: true, zaloUserId: true } });
+        if (!student) throw new Error('NOT_FOUND_STUDENT');
+        targetName = student.name;
+        targetId = studentId;
+        targetType = 'STUDENT';
+        zaloUserId = student.zaloUserId ?? '';
+      } else {
+        const teacher = await tx.teacher.findUnique({ where: { id: teacherId }, select: { name: true, zaloUserId: true } });
+        if (!teacher) throw new Error('NOT_FOUND_TEACHER');
+        targetName = teacher.name;
+        targetId = teacherId;
+        targetType = 'TEACHER';
+        zaloUserId = teacher.zaloUserId ?? '';
+      }
 
-    await prisma.zaloMappingAudit.create({
-      data: {
-        action: 'UNLINK',
-        zaloUserId,
-        targetType,
-        targetId,
-        targetName,
-        performedBy: user.userId,
-        performedByName: user.name ?? user.userId,
-      },
+      if (!zaloUserId) return; // Already unlinked
+
+      // Advisory lock to prevent race during concurrent mapping/unmapping of same UID
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'zalo_mapping_' + zaloUserId}))`;
+
+      if (targetType === 'STUDENT') {
+        await tx.student.update({ where: { id: targetId }, data: { zaloUserId: null } });
+      } else {
+        await tx.teacher.update({ where: { id: targetId }, data: { zaloUserId: null } });
+      }
+
+      await tx.zaloMappingAudit.create({
+        data: {
+          action: 'UNLINK',
+          zaloUserId,
+          targetType,
+          targetId,
+          targetName,
+          performedBy: user.userId,
+          performedByName: user.name ?? user.userId,
+        },
+      });
     });
 
     res.json({ message: 'Đã hủy liên kết' });
   } catch (err: any) {
+    if (err.message === 'NOT_FOUND_STUDENT') return res.status(404).json({ message: 'Không tìm thấy học sinh' });
+    if (err.message === 'NOT_FOUND_TEACHER') return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
     res.status(500).json({ message: 'Lỗi hủy liên kết: ' + err.message });
   }
 });
