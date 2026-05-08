@@ -166,13 +166,23 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
 
   updateStudent: async (id, updates) => {
     const res = await fetchWithAuth(`/api/students/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
-    if (res.ok) await get().fetchStudents();
+    if (res.ok) {
+      set((state) => ({
+        students: state.students.map((s) => (s.id === id ? { ...s, ...updates } : s))
+      }));
+      void get().fetchStudents();
+    }
     return res;
   },
 
   deleteStudent: async (id) => {
     const res = await fetchWithAuth(`/api/students/${id}`, { method: 'DELETE' });
-    if (res.ok) await get().fetchStudents();
+    if (res.ok) {
+      set((state) => ({
+        students: state.students.filter((s) => s.id !== id)
+      }));
+      void get().fetchStudents();
+    }
     return res;
   },
 
@@ -184,13 +194,23 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
 
   updateTeacher: async (id, updates) => {
     const res = await fetchWithAuth(`/api/teachers/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
-    if (res.ok) await get().fetchTeachers();
+    if (res.ok) {
+      set((state) => ({
+        teachers: state.teachers.map((t) => (t.id === id ? { ...t, ...updates } : t))
+      }));
+      void get().fetchTeachers();
+    }
     return res;
   },
 
   deleteTeacher: async (id) => {
     const res = await fetchWithAuth(`/api/teachers/${id}`, { method: 'DELETE' });
-    if (res.ok) await get().fetchTeachers();
+    if (res.ok) {
+      set((state) => ({
+        teachers: state.teachers.filter((t) => t.id !== id)
+      }));
+      void get().fetchTeachers();
+    }
     return res;
   },
 
@@ -228,5 +248,44 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
     const res = await fetchWithAuth(`/api/rooms/${id}`, { method: 'DELETE' });
     if (res.ok) await get().fetchRooms();
     return res;
+  },
+  
+  reorderStudents: async (studentIds) => {
+    const res = await fetchWithAuth('/api/students/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentIds })
+    });
+    if (!res.ok) throw new Error('Failed to reorder students');
+    set((state) => {
+      const sorted = [...state.students].sort((a, b) => studentIds.indexOf(a.id) - studentIds.indexOf(b.id));
+      return { students: sorted };
+    });
+  },
+
+  reorderTeachers: async (teacherIds) => {
+    const res = await fetchWithAuth('/api/teachers/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ teacherIds })
+    });
+    if (!res.ok) throw new Error('Failed to reorder teachers');
+    set((state) => {
+      const sorted = [...state.teachers].sort((a, b) => teacherIds.indexOf(a.id) - teacherIds.indexOf(b.id));
+      return { teachers: sorted };
+    });
+  },
+  
+  reorderClasses: async (classIds) => {
+    const res = await fetchWithAuth('/api/classes/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ classIds })
+    });
+    if (!res.ok) throw new Error('Failed to reorder classes');
+    set((state) => {
+      const sorted = [...state.classes].sort((a, b) => classIds.indexOf(a.id) - classIds.indexOf(b.id));
+      return { classes: sorted };
+    });
   },
 }));

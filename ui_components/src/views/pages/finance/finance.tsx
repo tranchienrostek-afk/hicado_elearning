@@ -100,6 +100,14 @@ export const FinancialPage = () => {
   const [trackStatus, setTrackStatus] = useState('ALL');
   const [trackSearch, setTrackSearch] = useState('');
   const [expandedStudentId, setExpandedStudentId] = useState<string | null>(null);
+  
+  // Adjustment Modal
+  const [isAdjModalOpen, setIsAdjModalOpen] = useState(false);
+  const [adjStudent, setAdjStudent] = useState<TrackingStudent | null>(null);
+  const [adjType, setAdjType] = useState<'CASH' | 'ADJUSTMENT'>('CASH');
+  const [adjAmount, setAdjAmount] = useState('');
+  const [adjNote, setAdjNote] = useState('');
+  const [adjDate, setAdjDate] = useState(new Date().toISOString().slice(0, 10));
 
   const [activeFinanceTab, setActiveFinanceTab] = useState<'dashboard' | 'tracking' | 'operations'>('dashboard');
 
@@ -230,6 +238,43 @@ export const FinancialPage = () => {
       setTargetStudentId('');
       toast.success(`[Webhook] Đã khớp lệnh học phí cho ${student.name.toUpperCase()}`);
     }, 1200);
+  };
+
+  const handleAddAdjustment = async () => {
+    if (!adjStudent || !adjAmount) return;
+    const amount = parseInt(adjAmount.replace(/\D/g, '')) * (adjType === 'ADJUSTMENT' ? -1 : 1);
+    if (isNaN(amount) || amount === 0) return toast.error('Số tiền không hợp lệ');
+
+    setIsProcessing(true);
+    try {
+      const r = await fetch('/api/finance/payment-adjustments', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${auth?.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          studentId: adjStudent.id,
+          amount,
+          source: adjType,
+          note: adjNote,
+          effectiveDate: adjDate
+        })
+      });
+      if (r.ok) {
+        toast.success('Đã lưu điều chỉnh');
+        setIsAdjModalOpen(false);
+        setAdjAmount(''); setAdjNote('');
+        fetchTracking();
+      } else {
+        const d = await r.json();
+        toast.error(d.message || 'Lỗi khi lưu');
+      }
+    } catch {
+      toast.error('Lỗi kết nối');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   if (isLoading) {
@@ -756,15 +801,49 @@ export const FinancialPage = () => {
                               {isExpanded && (
                                 <tr key={`${s.id}-expand`} className="bg-hicado-slate/10">
                                   <td colSpan={8} className="px-8 py-4">
-                                    <p className="text-[10px] font-black text-hicado-navy/30 uppercase mb-2">Lịch sử giao dịch</p>
+                                    <div className="flex justify-between items-center mb-3">
+                                      <p className="text-[10px] font-black text-hicado-navy/30 uppercase">Lịch sử giao dịch & Điều chỉnh</p>
+                                      <button 
+                                        onClick={(e) => { e.stopPropagation(); setAdjStudent(s); setIsAdjModalOpen(true); }}
+                                        className="px-4 py-1.5 bg-hicado-navy text-white rounded-lg text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all"
+                                      >
+                                        + Thêm phiếu thu/Giảm trừ
+                                      </button>
+                                    </div>
                                     <div className="space-y-2">
-                                      {s.transactions.map(tx => (
-                                        <div key={tx.id} className="flex gap-4 text-sm bg-white p-2 rounded-lg border">
-                                          <span className="font-black text-emerald-600">{formatMoney(tx.amount)}đ</span>
-                                          <span className="text-gray-400">{new Date(tx.date).toLocaleDateString()}</span>
-                                          <span>{tx.content}</span>
+                                      {/* Combine transactions and adjustments */}
+                                      {[
+                                        ...s.transactions.map(t => ({ ...t, type: 'TX' })),
+                                        ...((s as any).adjustments || []).map((a: any) => ({ ...a, type: 'ADJ' }))
+                                      ]
+                                      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+                                      .map((item: any) => (
+                                        <div key={item.id} className="flex items-center gap-4 text-sm bg-white p-3 rounded-xl border border-hicado-slate shadow-sm">
+                                          <div className={clsx(
+                                            "w-8 h-8 rounded-full flex items-center justify-center text-xs font-black",
+                                            item.type === 'TX' ? "bg-emerald-100 text-emerald-700" : (item.amount > 0 ? "bg-blue-100 text-blue-700" : "bg-rose-100 text-rose-700")
+                                          )}>
+                                            {item.type === 'TX' ? 'BANK' : (item.amount > 0 ? 'CASH' : 'DISC')}
+                                          </div>
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex justify-between">
+                                              <span className="font-black text-hicado-navy truncate">
+                                                {item.type === 'TX' ? 'Chuyển khoản' : (item.amount > 0 ? 'Nộp tiền mặt' : 'Giảm trừ/Chiết khấu')}
+                                              </span>
+                                              <span className={clsx("font-black ml-2", item.amount >= 0 ? "text-emerald-600" : "text-rose-500")}>
+                                                {item.amount > 0 ? '+' : ''}{formatMoney(item.amount)}đ
+                                              </span>
+                                            </div>
+                                            <div className="flex gap-3 text-[10px] text-hicado-navy/30 font-bold mt-1">
+                                              <span>{new Date(item.date).toLocaleDateString('vi-VN')}</span>
+                                              <span className="truncate italic">{item.content || item.note || '—'}</span>
+                                            </div>
+                                          </div>
                                         </div>
                                       ))}
+                                      {s.transactions.length === 0 && (!((s as any).adjustments) || (s as any).adjustments.length === 0) && (
+                                        <p className="text-center py-4 text-xs font-bold text-hicado-navy/20 italic">Chưa có lịch sử giao dịch</p>
+                                      )}
                                     </div>
                                   </td>
                                 </tr>
@@ -848,6 +927,87 @@ export const FinancialPage = () => {
               </div>
             </div>
           )}
+        </div>
+      )}
+      {/* Adjustment Modal */}
+      {isAdjModalOpen && adjStudent && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-hicado-navy/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden border border-hicado-slate animate-in zoom-in-95 duration-300">
+            <div className="premium-gradient p-6 text-white">
+              <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-widest mb-1">Manual Entry</p>
+              <h3 className="text-xl font-black">Thêm phiếu thu / Giảm trừ</h3>
+              <p className="text-white/60 text-xs font-bold mt-1">Học sinh: {adjStudent.name.toUpperCase()}</p>
+            </div>
+            
+            <div className="p-8 space-y-5">
+              <div className="grid grid-cols-2 gap-2 bg-hicado-slate/20 p-1.5 rounded-2xl">
+                <button 
+                  onClick={() => setAdjType('CASH')}
+                  className={clsx("py-2.5 rounded-xl text-xs font-black transition-all", adjType === 'CASH' ? "bg-white shadow text-hicado-navy" : "text-hicado-navy/40")}>
+                  TIỀN MẶT
+                </button>
+                <button 
+                  onClick={() => setAdjType('ADJUSTMENT')}
+                  className={clsx("py-2.5 rounded-xl text-xs font-black transition-all", adjType === 'ADJUSTMENT' ? "bg-white shadow text-hicado-navy" : "text-hicado-navy/40")}>
+                  GIẢM TRỪ / LỖI
+                </button>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Số tiền (VNĐ)</label>
+                <input 
+                  type="text"
+                  value={adjAmount}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    setAdjAmount(val ? parseInt(val).toLocaleString('vi-VN') : '');
+                  }}
+                  placeholder="VD: 500,000"
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent focus:border-hicado-navy/10 focus:bg-white rounded-2xl px-5 py-4 text-lg font-black text-hicado-navy outline-none transition-all"
+                />
+                <p className="text-[10px] text-hicado-navy/30 font-bold ml-1">
+                  {adjType === 'ADJUSTMENT' ? '⚠️ Sẽ trừ vào số tiền học sinh cần nộp' : '✓ Sẽ cộng vào số tiền học sinh đã nộp'}
+                </p>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Ngày áp dụng</label>
+                <input 
+                  type="date"
+                  value={adjDate}
+                  onChange={(e) => setAdjDate(e.target.value)}
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent focus:border-hicado-navy/10 focus:bg-white rounded-2xl px-5 py-3 text-sm font-black text-hicado-navy outline-none"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Ghi chú</label>
+                <textarea 
+                  value={adjNote}
+                  onChange={(e) => setAdjNote(e.target.value)}
+                  rows={2}
+                  placeholder="Lý do giảm trừ hoặc nguồn tiền..."
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent focus:border-hicado-navy/10 focus:bg-white rounded-2xl px-5 py-3 text-sm font-bold text-hicado-navy outline-none resize-none"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button 
+                  onClick={() => setIsAdjModalOpen(false)}
+                  className="flex-1 py-4 rounded-2xl border border-hicado-slate text-sm font-black text-hicado-navy/40 hover:bg-hicado-slate transition-all"
+                >
+                  HỦY
+                </button>
+                <button 
+                  onClick={handleAddAdjustment}
+                  disabled={isProcessing || !adjAmount}
+                  className="flex-1 py-4 bg-hicado-navy text-white rounded-2xl text-sm font-black uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-40"
+                >
+                  {isProcessing ? 'ĐANG LƯU...' : 'XÁC NHẬN'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

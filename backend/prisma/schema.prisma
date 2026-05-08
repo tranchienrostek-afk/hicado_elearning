@@ -7,6 +7,257 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id        String   @id @default(uuid())
+  username  String   @unique
+  password  String
+  role      Role
+  name      String
+  teacherId String?  @unique
+  studentId String?  @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  isActive  Boolean  @default(true)
+  student   Student? @relation(fields: [studentId], references: [id])
+  teacher   Teacher? @relation(fields: [teacherId], references: [id])
+}
+
+model Teacher {
+  id             String     @id @default(uuid())
+  name           String
+  specialization String?
+  workplace      String?
+  dob            DateTime?
+  gender         Gender?
+  cccd           String?
+  phone          String
+  bankAccount    String?
+  bankName       String?
+  salaryRate     Float
+  notes          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  zaloUserId     String?    @unique
+  isActive       Boolean    @default(true)
+  hourlyRate     Float?
+  salaryType     SalaryType @default(PERCENT)
+  sortOrder      Int        @default(0)
+  classes        Class[]
+  user           User?
+}
+
+model Student {
+  id                 String              @id @default(uuid())
+  name               String
+  birthYear          Int?
+  address            String?
+  schoolName         String?
+  schoolClass        String?
+  cccd               String?
+  tuitionStatus      TuitionStatus       @default(PENDING)
+  studentCode        String?             @unique
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  parentPhone        String?
+  studentPhone       String?
+  zaloUserId         String?             @unique
+  isActive           Boolean             @default(true)
+  notes              String?
+  sortOrder          Int                 @default(0)
+  attendances        Attendance[]
+  classes            ClassStudent[]
+  paymentAdjustments PaymentAdjustment[]
+  transactions       Transaction[]
+  user               User?
+  zaloMessageLogs    ZaloMessageLog[]
+}
+
+model Room {
+  id       String  @id @default(uuid())
+  name     String
+  center   String
+  capacity Int
+  notes    String?
+  classes2 Class[] @relation("ClassRoom2")
+  classes  Class[] @relation("ClassRoom1")
+}
+
+model Class {
+  id                String         @id @default(uuid())
+  name              String
+  tuitionPerSession Int
+  totalSessions     Int
+  classCode         String?        @unique
+  teacherShare      Float?
+  scheduleDays      String[]
+  scheduleTime      String?
+  roomId            String?
+  teacherId         String
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  roomId2           String?
+  scheduleTime2     String?
+  sortOrder         Int            @default(0)
+  attendances       Attendance[]
+  room2             Room?          @relation("ClassRoom2", fields: [roomId2], references: [id])
+  room              Room?          @relation("ClassRoom1", fields: [roomId], references: [id])
+  teacher           Teacher        @relation(fields: [teacherId], references: [id])
+  students          ClassStudent[]
+}
+
+model ClassStudent {
+  classId   String
+  studentId String
+  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([classId, studentId])
+}
+
+model Attendance {
+  id             String            @id @default(uuid())
+  date           DateTime
+  status         AttendanceStatus
+  note           String?
+  markedByUserId String?
+  markedByName   String?
+  markedByRole   String?
+  markedAt       DateTime          @default(now())
+  classId        String
+  studentId      String
+  sessionUnits   Float             @default(1)
+  slot           AttendanceSlot    @default(MORNING)
+  class          Class             @relation(fields: [classId], references: [id])
+  student        Student           @relation(fields: [studentId], references: [id])
+  audits         AttendanceAudit[]
+
+  @@unique([classId, studentId, date, slot])
+}
+
+model AttendanceAudit {
+  id              String                @id @default(uuid())
+  attendanceId    String?
+  action          AttendanceAuditAction
+  reason          String?
+  classId         String
+  studentId       String
+  oldStudentId    String?
+  date            DateTime
+  oldDate         DateTime?
+  slot            AttendanceSlot
+  oldSlot         AttendanceSlot?
+  status          AttendanceStatus
+  oldStatus       AttendanceStatus?
+  sessionUnits    Float
+  oldSessionUnits Float?
+  note            String?
+  oldNote         String?
+  changedByUserId String?
+  changedByName   String?
+  changedByRole   String?
+  changedAt       DateTime              @default(now())
+  attendance      Attendance?           @relation(fields: [attendanceId], references: [id])
+}
+
+model Transaction {
+  id            String            @id @default(uuid())
+  amount        Int
+  date          DateTime          @default(now())
+  status        TransactionStatus @default(SUCCESS)
+  sepayId       Int?              @unique
+  gateway       String?
+  content       String?
+  transferDate  DateTime?
+  referenceCode String?
+  studentId     String
+  classId       String?
+  student       Student           @relation(fields: [studentId], references: [id])
+}
+
+model PaymentAdjustment {
+  id              String                  @id @default(uuid())
+  studentId       String
+  classId         String?
+  source          PaymentAdjustmentSource @default(CASH)
+  amount          Int
+  note            String?
+  effectiveDate   DateTime                @default(now())
+  createdByUserId String?
+  createdByName   String?
+  createdByRole   String?
+  createdAt       DateTime                @default(now())
+  student         Student                 @relation(fields: [studentId], references: [id])
+}
+
+model ZaloTemplate {
+  id           String   @id @default(uuid())
+  templateId   String   @unique
+  templateName String
+  status       String
+  previewUrl   String?
+  price        Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Campaign {
+  id           String           @id @default(uuid())
+  name         String
+  type         String
+  status       String           @default("DRAFT")
+  filtersJson  String           @default("{}")
+  sentCount    Int              @default(0)
+  znsSentCount Int              @default(0)
+  readCount    Int              @default(0)
+  failedCount  Int              @default(0)
+  createdAt    DateTime         @default(now())
+  sentAt       DateTime?
+  logs         ZaloMessageLog[]
+}
+
+model ZaloMessageLog {
+  id          String    @id @default(uuid())
+  phone       String
+  zaloUserId  String?
+  templateId  String
+  trackingId  String    @unique
+  status      String
+  errorReason String?
+  sentAt      DateTime  @default(now())
+  readAt      DateTime?
+  studentId   String?
+  campaignId  String?
+  classId     String?
+  deliveredAt DateTime?
+  zaloMsgId   String?
+  campaign    Campaign? @relation(fields: [campaignId], references: [id])
+  student     Student?  @relation(fields: [studentId], references: [id])
+}
+
+model SystemConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model ZaloMappingAudit {
+  id                 String   @id @default(cuid())
+  action             String
+  zaloUserId         String
+  targetType         String
+  targetId           String
+  targetName         String
+  previousTargetId   String?
+  previousTargetName String?
+  performedBy        String
+  performedByName    String
+  performedAt        DateTime @default(now())
+
+  @@index([zaloUserId])
+  @@index([targetId])
+  @@index([performedAt])
+}
+
 enum Role {
   ADMIN
   MANAGER
@@ -18,6 +269,11 @@ enum Gender {
   Nam
   Nu
   Khac
+}
+
+enum SalaryType {
+  PERCENT
+  HOURLY
 }
 
 enum TuitionStatus {
@@ -53,269 +309,4 @@ enum TransactionStatus {
 enum PaymentAdjustmentSource {
   CASH
   ADJUSTMENT
-}
-
-model User {
-  id        String   @id @default(uuid())
-  username  String   @unique
-  password  String   // In production, this will be hashed
-  role      Role
-  name      String
-  
-  // Relations to Profiles (A user is either a Teacher, Student, or Staff)
-  teacherId String?  @unique
-  teacher   Teacher? @relation(fields: [teacherId], references: [id])
-  
-  studentId String?  @unique
-  student   Student? @relation(fields: [studentId], references: [id])
-
-  isActive  Boolean  @default(true)
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
-model Teacher {
-  id               String   @id @default(uuid())
-  name             String
-  specialization   String?
-  workplace        String?
-  dob              DateTime?
-  gender           Gender?
-  cccd             String?
-  phone            String
-  zaloUserId       String?  @unique
-  bankAccount      String?
-  bankName         String?
-  salaryRate       Float    // Percentage (e.g., 0.8)
-  notes            String?  @db.Text
-  isActive         Boolean  @default(true)
-
-  user             User?
-  classes          Class[]
-
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-}
-
-model Student {
-  id             String   @id @default(uuid())
-  name           String
-  birthYear      Int?
-  address        String?
-  schoolName     String?
-  schoolClass    String?
-  cccd           String?
-  tuitionStatus  TuitionStatus @default(PENDING)
-  studentCode    String?       @unique
-  studentPhone   String?
-  parentPhone    String?
-  zaloUserId     String?   @unique
-  isActive       Boolean  @default(true)
-
-  user           User?
-  classes        ClassStudent[]
-  attendances    Attendance[]
-  transactions   Transaction[]
-  paymentAdjustments PaymentAdjustment[]
-  zaloMessageLogs ZaloMessageLog[]
-
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-}
-
-model Room {
-  id       String  @id @default(uuid())
-  name     String
-  center   String  // Hicado or Vạn Xuân
-  capacity Int
-  notes    String? @db.Text
-
-  classes  Class[]
-}
-
-model Class {
-  id                String   @id @default(uuid())
-  name              String
-  tuitionPerSession Int
-  totalSessions     Int
-  classCode         String?  @unique
-  teacherShare      Float?   // Override teacher's default salaryRate
-  scheduleDays      String[] // e.g. ["Thứ 2", "Thứ 4"]
-  scheduleTime      String?  // e.g. "18:00 - 20:00"
-
-  roomId            String?
-  room              Room?    @relation(fields: [roomId], references: [id])
-  
-  teacherId         String
-  teacher           Teacher  @relation(fields: [teacherId], references: [id])
-
-  students          ClassStudent[]
-  attendances       Attendance[]
-
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-}
-
-// Many-to-Many relation table between Class and Student
-model ClassStudent {
-  classId   String
-  studentId String
-  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
-  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
-
-  @@id([classId, studentId])
-}
-
-model Attendance {
-  id             String           @id @default(uuid())
-  date           DateTime
-  slot           AttendanceSlot   @default(MORNING)
-  sessionUnits   Float            @default(1)
-  status         AttendanceStatus
-  note           String?          @db.Text
-  markedByUserId String?          // Reference to User ID who marked this
-  markedByName   String?
-  markedByRole   String?
-  markedAt       DateTime         @default(now())
-
-  classId        String
-  class          Class    @relation(fields: [classId], references: [id])
-  studentId      String
-  student        Student  @relation(fields: [studentId], references: [id])
-  audits         AttendanceAudit[]
-
-  @@unique([classId, studentId, date, slot])
-}
-
-model AttendanceAudit {
-  id               String               @id @default(uuid())
-  attendanceId     String?
-  attendance       Attendance?          @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
-  action           AttendanceAuditAction
-  reason           String?
-
-  classId          String
-  studentId        String
-  oldStudentId     String?
-  date             DateTime
-  oldDate          DateTime?
-  slot             AttendanceSlot
-  oldSlot          AttendanceSlot?
-  status           AttendanceStatus
-  oldStatus        AttendanceStatus?
-  sessionUnits     Float
-  oldSessionUnits  Float?
-  note             String?
-  oldNote          String?
-
-  changedByUserId  String?
-  changedByName    String?
-  changedByRole    String?
-  changedAt        DateTime             @default(now())
-}
-
-model Transaction {
-  id        String            @id @default(uuid())
-  amount    Int
-  date      DateTime          @default(now())
-  status    TransactionStatus @default(SUCCESS)
-
-  // SePay specific fields
-  sepayId        Int?      @unique
-  gateway        String?
-  content        String?
-  transferDate   DateTime?
-  referenceCode  String?
-
-  classId   String?
-
-  studentId String
-  student   Student @relation(fields: [studentId], references: [id])
-}
-
-model PaymentAdjustment {
-  id              String                  @id @default(uuid())
-  studentId       String
-  student         Student                 @relation(fields: [studentId], references: [id])
-  classId         String?
-  source          PaymentAdjustmentSource @default(CASH)
-  amount          Int
-  note            String?
-  effectiveDate   DateTime                @default(now())
-  createdByUserId String?
-  createdByName   String?
-  createdByRole   String?
-  createdAt       DateTime                @default(now())
-}
-
-model ZaloTemplate {
-  id           String   @id @default(uuid())
-  templateId   String   @unique
-  templateName String
-  status       String   // e.g. "APPROVED", "PENDING"
-  previewUrl   String?
-  price        Int?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-}
-
-model Campaign {
-  id          String   @id @default(uuid())
-  name        String
-  type        String   // "TUITION_REMINDER" | "GENERAL"
-  status      String   @default("DRAFT")
-  filtersJson String   @default("{}")
-  sentCount    Int      @default(0)
-  znsSentCount Int      @default(0)
-  readCount    Int      @default(0)
-  failedCount  Int      @default(0)
-  createdAt    DateTime @default(now())
-  sentAt       DateTime?
-  logs        ZaloMessageLog[]
-}
-
-model ZaloMessageLog {
-  id           String    @id @default(uuid())
-  phone        String
-  zaloUserId   String?
-  templateId   String
-  trackingId   String    @unique
-  status       String    // "SENT" | "DELIVERED" | "READ" | "FAILED"
-  errorReason  String?
-  sentAt       DateTime  @default(now())
-  readAt       DateTime?
-  deliveredAt  DateTime?
-  zaloMsgId    String?
-  classId      String?
-
-  studentId    String?
-  student      Student?  @relation(fields: [studentId], references: [id])
-
-  campaignId   String?
-  campaign     Campaign? @relation(fields: [campaignId], references: [id])
-}
-
-model SystemConfig {
-  key       String   @id
-  value     String   @db.Text
-  updatedAt DateTime @updatedAt
-}
-
-model ZaloMappingAudit {
-  id                 String   @id @default(cuid())
-  action             String   // "LINK" | "UNLINK" | "OVERRIDE"
-  zaloUserId         String
-  targetType         String   // "STUDENT" | "TEACHER"
-  targetId           String
-  targetName         String
-  previousTargetId   String?  // khi OVERRIDE: id của target cũ đang giữ zaloUserId này
-  previousTargetName String?
-  performedBy        String   // userId của admin/manager
-  performedByName    String
-  performedAt        DateTime @default(now())
-
-  @@index([zaloUserId])
-  @@index([targetId])
-  @@index([performedAt])
 }

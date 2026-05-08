@@ -14,6 +14,24 @@ import { downloadXlsxWorkbook } from '@/utils/excel-workbook';
 import { buildImportErrorRows, planImport, type ImportPlan } from '@/utils/import-planner';
 import { ImportPreviewModal } from '@/views/components/import-preview-modal';
 import { calculateStudentTuitionDue } from '@/utils/center-operations';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 
 const classSchema = z.object({
   name: z.string().min(3, 'Tên lớp quá ngắn'),
@@ -25,13 +43,16 @@ const classSchema = z.object({
   schedule: z.object({
     days: z.array(z.string()).min(1, 'Chọn ít nhất 1 ngày học'),
     time: z.string().min(5, 'Giờ học không hợp lệ')
-  })
+  }),
+  scheduleTime2: z.string().optional(),
+  roomId2: z.string().optional(),
+  sortOrder: z.coerce.number().default(0)
 });
 
 const daysOfWeek = ['Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7', 'Chủ Nhật'];
 
 export const Classes = () => {
-  const { classes, teachers, rooms, students, addClass, updateClass, deleteClass, attendance } = useCenterStore();
+  const { classes, teachers, rooms, students, addClass, updateClass, deleteClass, reorderClasses, attendance } = useCenterStore();
   const { auth } = useAuthStore();
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -53,7 +74,10 @@ export const Classes = () => {
     totalSessions: 12,
     studentIds: [] as string[],
     teacherShare: 80,
-    schedule: { days: [] as string[], time: '18:00 - 20:00' }
+    schedule: { days: [] as string[], time: '18:00 - 20:00' },
+    scheduleTime2: '',
+    roomId2: '',
+    sortOrder: 0
   });
 
   const isTeacher = auth?.role === 'TEACHER';
@@ -70,7 +94,11 @@ export const Classes = () => {
     });
   }, [studentSearch, visibleStudents]);
 
-  const resetForm = () => setFormData({ name: '', teacherId: '', roomId: '', tuitionPerSession: 0, totalSessions: 12, studentIds: [], teacherShare: 80, schedule: { days: [], time: '18:00 - 20:00' } });
+  const resetForm = () => setFormData({ 
+    name: '', teacherId: '', roomId: '', tuitionPerSession: 0, totalSessions: 12, 
+    studentIds: [], teacherShare: 80, schedule: { days: [], time: '18:00 - 20:00' },
+    scheduleTime2: '', roomId2: '', sortOrder: 0
+  });
 
   const handleSave = () => {
     const result = classSchema.safeParse(formData);
@@ -171,7 +199,10 @@ export const Classes = () => {
       totalSessions: cls.totalSessions,
       studentIds: cls.studentIds,
       teacherShare: cls.teacherShare != null ? Math.round(cls.teacherShare * 100) : 80,
-      schedule: cls.schedule || { days: [], time: '18:00 - 20:00' }
+      schedule: cls.schedule || { days: [], time: '18:00 - 20:00' },
+      scheduleTime2: cls.scheduleTime2 || '',
+      roomId2: cls.roomId2 || '',
+      sortOrder: cls.sortOrder || 0
     });
     setIsModalOpen(true);
   };
@@ -215,6 +246,29 @@ export const Classes = () => {
   const inputCls = 'w-full bg-hicado-slate/20 border border-transparent px-5 py-3 rounded-2xl text-sm font-bold text-hicado-navy placeholder:text-hicado-navy/20 outline-none focus:bg-white focus:border-hicado-navy/30 focus:ring-4 focus:ring-hicado-navy/5 transition-all';
   const selectCls = `${inputCls} cursor-pointer`;
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndexInFull = classes.findIndex(i => i.id === active.id);
+    const newIndexInFull = classes.findIndex(i => i.id === over.id);
+
+    if (oldIndexInFull !== -1 && newIndexInFull !== -1) {
+      const newList = arrayMove(classes, oldIndexInFull, newIndexInFull);
+      try {
+        await reorderClasses(newList.map(i => i.id));
+        toast.success('Đã cập nhật thứ tự lớp');
+      } catch (error) {
+        toast.error('Lỗi khi cập nhật thứ tự');
+      }
+    }
+  };
+
   return (
     <div className="space-y-8 pb-24 md:pb-8 animate-in fade-in duration-700 relative">
 
@@ -253,77 +307,25 @@ export const Classes = () => {
       </div>
 
       {/* Class Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
-        {visibleClasses.map((cls) => {
-          const room = rooms.find(r => r.id === cls.roomId);
-          const capacity = room?.capacity || 0;
-          return (
-            <div key={cls.id} className="bg-white border border-hicado-slate rounded-[2rem] p-8 shadow-premium hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 group flex flex-col relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-hicado-navy/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-700" />
-
-              <div className="flex justify-between items-start mb-6 relative z-10">
-                <div className="space-y-2">
-                  <h4 className="text-xl font-serif font-black text-hicado-navy uppercase tracking-tight group-hover:text-hicado-emerald transition-colors leading-tight">{cls.name}</h4>
-                  <div className="flex items-center gap-3">
-                    <span className={`w-2 h-2 rounded-full ${cls.studentIds.length > 0 ? 'bg-hicado-emerald shadow-[0_0_8px_#10b981]' : 'bg-hicado-slate'}`} />
-                    <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">
-                      {cls.studentIds.length}/{capacity || '--'} Slots · {room?.center || 'Hicado'}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => setViewingHistoryId(cls.id)} className="p-2 text-hicado-navy/30 hover:text-hicado-navy hover:bg-hicado-slate rounded-xl transition-all" title="Chuyên cần">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-                  </button>
-                  <button onClick={() => setViewingClassStudentsId(cls.id)} className="p-2 text-hicado-navy/30 hover:text-hicado-navy hover:bg-hicado-slate rounded-xl transition-all" title="Học sinh">
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-4 py-6 border-y border-hicado-slate/50 mb-6 relative z-10">
-                <div className="w-12 h-12 bg-hicado-navy rounded-2xl flex items-center justify-center font-serif text-white font-black text-lg shadow-xl shadow-hicado-navy/20">
-                  {teachers.find(t => t.id === cls.teacherId)?.name.charAt(0) || 'N'}
-                </div>
-                <div>
-                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Giảng viên chính</p>
-                  <p className="text-sm font-black text-hicado-navy truncate">
-                    {teachers.find(t => t.id === cls.teacherId)?.name || 'Chưa phân công'}
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex-1 space-y-6 relative z-10">
-                <div>
-                  <span className="text-[9px] font-black uppercase tracking-[0.3em] text-hicado-navy/30 block mb-3">Thời khóa biểu ({cls.totalSessions} buổi)</span>
-                  <div className="flex flex-wrap gap-2">
-                    {cls.schedule?.days.map(day => (
-                      <span key={day} className="px-3 py-1 bg-hicado-slate/30 border border-hicado-slate rounded-lg text-[10px] font-black text-hicado-navy uppercase tracking-widest">{day}</span>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 text-hicado-emerald">
-                  <div className="p-2 bg-hicado-emerald/10 rounded-lg">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                  </div>
-                  <p className="text-xs font-black uppercase tracking-widest">{cls.schedule?.time}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4 mt-8 relative z-10">
-                <button onClick={() => handleEdit(cls)} className="py-4 bg-hicado-navy text-white text-[10px] font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-hicado-navy/10 hover:-translate-y-0.5 transition-all">
-                  Sửa lớp
-                </button>
-                {!isTeacher && (
-                  <button onClick={() => handleDelete(cls.id)} className="px-4 bg-rose-50 text-rose-500 rounded-2xl border border-rose-100 hover:bg-rose-500 hover:text-white transition-all">
-                    <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                  </button>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} modifiers={[restrictToVerticalAxis]}>
+        <SortableContext items={visibleClasses.map(c => c.id)} strategy={verticalListSortingStrategy}>
+          <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-6">
+            {visibleClasses.map((cls) => (
+              <SortableClassCard
+                key={cls.id}
+                cls={cls}
+                teachers={teachers}
+                rooms={rooms}
+                isTeacher={isTeacher}
+                setViewingHistoryId={setViewingHistoryId}
+                setViewingClassStudentsId={setViewingClassStudentsId}
+                handleEdit={handleEdit}
+                handleDelete={handleDelete}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
       {/* Attendance History Modal */}
       {viewingHistoryId && (
@@ -458,11 +460,44 @@ export const Classes = () => {
                         ))}
                       </div>
                       <input
-                        type="text"
-                        value={formData.schedule.time}
-                        onChange={e => setFormData({ ...formData, schedule: { ...formData.schedule, time: e.target.value } })}
-                        className={inputCls}
                         placeholder="VD: 18:00 - 20:00"
+                      />
+                    </div>
+
+                    <div className="space-y-4 pt-4 border-t border-hicado-slate bg-slate-50/50 p-4 rounded-2xl">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-[0.2em] ml-1 block">Lịch bổ sung (Tùy chọn)</label>
+                        <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-1 rounded-md border">Ca 2</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Phòng học 2</label>
+                          <select value={formData.roomId2} onChange={e => setFormData({ ...formData, roomId2: e.target.value })} className={selectCls}>
+                            <option value="">Cùng phòng ca 1</option>
+                            {rooms.map(r => <option key={r.id} value={r.id}>{r.name} ({r.center})</option>)}
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Giờ học 2</label>
+                          <input
+                            type="text"
+                            value={formData.scheduleTime2}
+                            onChange={e => setFormData({ ...formData, scheduleTime2: e.target.value })}
+                            className={inputCls}
+                            placeholder="VD: 19:00 - 21:00"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 pt-4 border-t border-hicado-slate">
+                      <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-[0.2em] ml-1 block">Thứ tự hiển thị (Sắp xếp)</label>
+                      <input
+                        type="number"
+                        value={formData.sortOrder}
+                        onChange={e => setFormData({ ...formData, sortOrder: Number(e.target.value) })}
+                        className={inputCls}
+                        placeholder="Số càng nhỏ càng lên đầu"
                       />
                     </div>
                   </div>
@@ -728,6 +763,108 @@ const SharedStoryModal = ({ studentId, onClose }: { studentId: string; onClose: 
             Đóng hồ sơ
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+const SortableClassCard = ({ cls, teachers, rooms, isTeacher, setViewingHistoryId, setViewingClassStudentsId, handleEdit, handleDelete }: any) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: cls.id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 1,
+    opacity: isDragging ? 0.6 : 1,
+  };
+
+  const room = rooms.find((r: any) => r.id === cls.roomId);
+  const capacity = room?.capacity || 0;
+
+  return (
+    <div ref={setNodeRef} style={style} className="bg-white border border-hicado-slate rounded-[2rem] p-8 shadow-premium hover:shadow-2xl hover:-translate-y-1 transition-all duration-500 group flex flex-col relative overflow-hidden">
+      {/* Drag Handle Overlay */}
+      {!isTeacher && (
+        <div
+          {...attributes}
+          {...listeners}
+          className="absolute top-4 left-4 p-2 text-hicado-navy/20 hover:text-hicado-navy cursor-grab active:cursor-grabbing z-20"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+          </svg>
+        </div>
+      )}
+
+      <div className="absolute top-0 right-0 w-24 h-24 bg-hicado-navy/5 rounded-full -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-700" />
+
+      <div className="flex justify-between items-start mb-6 relative z-10 pl-8">
+        <div className="space-y-2">
+          <h4 className="text-xl font-serif font-black text-hicado-navy uppercase tracking-tight group-hover:text-hicado-emerald transition-colors leading-tight">{cls.name}</h4>
+          <div className="flex items-center gap-3">
+            <span className={`w-2 h-2 rounded-full ${cls.studentIds.length > 0 ? 'bg-hicado-emerald shadow-[0_0_8px_#10b981]' : 'bg-hicado-slate'}`} />
+            <span className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">
+              {cls.studentIds.length}/{capacity || '--'} Slots · {room?.center || 'Hicado'}
+            </span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setViewingHistoryId(cls.id)} className="p-2 text-hicado-navy/30 hover:text-hicado-navy hover:bg-hicado-slate rounded-xl transition-all" title="Chuyên cần">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+          </button>
+          <button onClick={() => setViewingClassStudentsId(cls.id)} className="p-2 text-hicado-navy/30 hover:text-hicado-navy hover:bg-hicado-slate rounded-xl transition-all" title="Học sinh">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4 py-6 border-y border-hicado-slate/50 mb-6 relative z-10">
+        <div className="w-12 h-12 bg-hicado-navy rounded-2xl flex items-center justify-center font-serif text-white font-black text-lg shadow-xl shadow-hicado-navy/20">
+          {teachers.find((t: any) => t.id === cls.teacherId)?.name.charAt(0) || 'N'}
+        </div>
+        <div>
+          <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mb-1">Giảng viên chính</p>
+          <p className="text-sm font-black text-hicado-navy truncate">
+            {teachers.find((t: any) => t.id === cls.teacherId)?.name || 'Chưa phân công'}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex-1 space-y-6 relative z-10">
+        <div>
+          <span className="text-[9px] font-black uppercase tracking-[0.3em] text-hicado-navy/30 block mb-3">Thời khóa biểu ({cls.totalSessions} buổi)</span>
+          <div className="flex flex-wrap gap-2">
+            {cls.schedule?.days.map((day: any) => (
+              <span key={day} className="px-3 py-1 bg-hicado-slate/30 border border-hicado-slate rounded-lg text-[10px] font-black text-hicado-navy uppercase tracking-widest">{day}</span>
+            ))}
+          </div>
+        </div>
+        <div className="flex flex-col gap-3 text-hicado-emerald">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-hicado-emerald/10 rounded-lg">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            </div>
+            <p className="text-xs font-black uppercase tracking-widest">{cls.schedule?.time} (Phòng: {rooms.find((r: any) => r.id === cls.roomId)?.name || '?'})</p>
+          </div>
+          {cls.scheduleTime2 && (
+            <div className="flex items-center gap-3 opacity-70">
+              <div className="p-2 bg-hicado-emerald/10 rounded-lg">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              </div>
+              <p className="text-xs font-black uppercase tracking-widest">{cls.scheduleTime2} (Phòng: {rooms.find((r: any) => r.id === cls.roomId2)?.name || '?'})</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 mt-8 relative z-10">
+        <button onClick={() => handleEdit(cls)} className="py-4 bg-hicado-navy text-white text-[10px] font-black uppercase tracking-widest rounded-2xl shadow-xl shadow-hicado-navy/10 hover:-translate-y-0.5 transition-all">
+          Sửa lớp
+        </button>
+        {!isTeacher && (
+          <button onClick={() => handleDelete(cls.id)} className="px-4 bg-rose-50 text-rose-500 rounded-2xl border border-rose-100 hover:bg-rose-500 hover:text-white transition-all">
+            <svg className="w-5 h-5 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+          </button>
+        )}
       </div>
     </div>
   );

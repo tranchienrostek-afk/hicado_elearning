@@ -20,7 +20,7 @@ router.get('/monthly-report', authenticateToken, async (req, res) => {
       prisma.class.findUnique({
         where: { id: classId },
         include: {
-          teacher: { select: { name: true } },
+          teacher: { select: { name: true, salaryType: true, hourlyRate: true, salaryRate: true } },
           students: { include: { student: { select: { id: true, name: true, studentCode: true } } } },
         },
       }),
@@ -64,10 +64,16 @@ router.get('/monthly-report', authenticateToken, async (req, res) => {
       };
     });
 
-    // Class-level summary
-    const totalUniqueDates = new Set(records.map(r => r.date.toISOString().slice(0, 10))).size;
-    const avgAttendanceRate = students.length > 0 && sessions.length > 0
-      ? Math.round(students.reduce((sum, s) => sum + s.totalPresent, 0) / (students.length * sessions.length) * 100)
+    const totalTuition = students.reduce((sum, s) => sum + s.tuitionDue, 0);
+    const teacherSalary = cls.teacher.salaryType === 'HOURLY'
+      ? sessions.length * (cls.teacher.hourlyRate || 0)
+      : Math.round(totalTuition * (cls.teacher.salaryRate || 0.8));
+
+    const totalUniqueDates = new Set(sessions.map(s => s.date)).size;
+    const totalPresentCount = students.reduce((sum, s) => sum + s.totalPresent, 0);
+    const totalPossibleAttendance = students.length * sessions.length;
+    const avgAttendanceRate = totalPossibleAttendance > 0 
+      ? Math.round((totalPresentCount / totalPossibleAttendance) * 100) 
       : 0;
 
     res.json({
@@ -75,15 +81,21 @@ router.get('/monthly-report', authenticateToken, async (req, res) => {
       className: cls.name,
       classCode: cls.classCode,
       tuitionPerSession: cls.tuitionPerSession,
-      teacher: { name: cls.teacher.name },
+      teacher: { 
+        name: cls.teacher.name,
+        salary: teacherSalary,
+        salaryType: cls.teacher.salaryType
+      },
       month,
-      sessions, // column definitions for the matrix
+      sessions,
       students,
       summary: {
         totalStudents: students.length,
         totalUniqueDates,
         totalSessions: sessions.length,
         avgAttendanceRate,
+        totalTuition,
+        teacherSalary
       },
     });
   } catch (error) {
@@ -110,7 +122,7 @@ router.get('/overview', authenticateToken, async (req, res) => {
       prisma.class.findUnique({
         where: { id: classId },
         include: {
-          teacher: { select: { name: true } },
+          teacher: { select: { name: true, salaryType: true, hourlyRate: true, salaryRate: true } },
           students: { include: { student: { select: { id: true, name: true, studentCode: true } } } },
         },
       }),
@@ -177,6 +189,9 @@ router.get('/overview', authenticateToken, async (req, res) => {
         totalPresent:  students.reduce((sum, s) => sum + s.presentCount, 0),
         totalAbsent:   students.reduce((sum, s) => sum + s.absentCount, 0),
         totalAmount:   students.reduce((sum, s) => sum + s.amount, 0),
+        teacherSalary: cls.teacher.salaryType === 'HOURLY'
+          ? sessions.length * (cls.teacher.hourlyRate || 0)
+          : Math.round(students.reduce((sum, s) => sum + s.amount, 0) * (cls.teacher.salaryRate || 0.8))
       },
       students,
     });
@@ -420,6 +435,27 @@ router.get('/:id/audits', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Khong the lay lich su diem danh' });
+  }
+});
+
+router.get('/audit-log/all', authenticateToken, async (req, res) => {
+  try {
+    const audits = await prisma.attendanceAudit.findMany({
+      orderBy: { changedAt: 'desc' },
+      take: 100,
+      include: {
+        attendance: {
+          select: {
+            student: { select: { name: true } },
+            class: { select: { name: true } }
+          }
+        }
+      }
+    });
+    res.json(audits);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: 'Lỗi khi lấy nhật ký điểm danh' });
   }
 });
 

@@ -88,6 +88,10 @@ export const ZaloCampaignPage = () => {
   const [wizardZnsTemplateId, setWizardZnsTemplateId] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ sentCount: number; znsSentCount: number; failedCount: number } | null>(null);
+  
+  // Date range for tuition reminder
+  const [wizardFromDate, setWizardFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
+  const [wizardToDate, setWizardToDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10));
 
   // ── Followers ──────────────────────────────────────────────────────────────
   const [followers, setFollowers] = useState<Follower[]>([]);
@@ -191,7 +195,7 @@ export const ZaloCampaignPage = () => {
     const amount = cls ? cls.tuitionPerSession * cls.totalSessions : 0;
     return [
       `Kính gửi phụ huynh em ${first.name}!`,
-      `Trung tâm Hicado xin thông báo học phí:\n`,
+      `Trung tâm Hicado xin thông báo học phí (từ ${new Date(wizardFromDate).toLocaleDateString('vi-VN')} đến ${new Date(wizardToDate).toLocaleDateString('vi-VN')}):\n`,
       cls ? `• Lớp ${cls.name}\n  Học phí ước tính: ${amount.toLocaleString('vi-VN')}đ` : '• (Dữ liệu lớp)',
       `\n💰 Tổng: ${amount.toLocaleString('vi-VN')}đ`,
       `📱 Quét QR nộp tiền: [link QR]`,
@@ -214,6 +218,8 @@ export const ZaloCampaignPage = () => {
             message: wizardType === 'GENERAL' ? wizardMessage : undefined,
             fallbackZNS: wizardFallbackZNS,
             znsTemplateId: wizardFallbackZNS ? wizardZnsTemplateId : undefined,
+            fromDate: wizardFromDate,
+            toDate: wizardToDate,
           },
         }),
       });
@@ -606,6 +612,30 @@ export const ZaloCampaignPage = () => {
                   ))}
                 </div>
               </div>
+
+              {wizardType === 'TUITION_REMINDER' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Từ ngày (điểm danh)</label>
+                    <input 
+                      type="date" 
+                      value={wizardFromDate}
+                      onChange={e => setWizardFromDate(e.target.value)}
+                      className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Đến ngày (điểm danh)</label>
+                    <input 
+                      type="date" 
+                      value={wizardToDate}
+                      onChange={e => setWizardToDate(e.target.value)}
+                      className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div onClick={() => setWizardRequireZalo(v => !v)}
                 className="flex items-center gap-4 p-4 bg-hicado-slate/20 rounded-2xl cursor-pointer">
                 <div className={`w-12 h-6 rounded-full transition-colors flex items-center px-0.5 ${wizardRequireZalo ? 'bg-hicado-emerald' : 'bg-gray-300'}`}>

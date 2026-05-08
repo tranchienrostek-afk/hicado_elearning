@@ -214,16 +214,40 @@ router.get('/public/student/:studentId', async (req, res) => {
     const accountNo = bm.BANK_ACC || process.env.BANK_ACC || '';
     const bankName = bm.BANK_NAME || bm.BANK_LABEL || '';
 
+    const { from, to } = req.query as Record<string, string>;
+    const fromDate = from ? new Date(from) : null;
+    const toDate = to ? new Date(to) : null;
+    if (fromDate) fromDate.setHours(0,0,0,0);
+    if (toDate) toDate.setHours(23,59,59,999);
+
     const classQRs = await Promise.all(
       student.classes.map(async cs => {
         const cls = cs.class;
-        const attendedAgg = await prisma.attendance.aggregate({
-          _sum: { sessionUnits: true },
-          where: { studentId: student.id, classId: cls.id, status: 'PRESENT' },
-        });
+        const [attendedAgg, adjustmentAgg] = await Promise.all([
+          prisma.attendance.aggregate({
+            _sum: { sessionUnits: true },
+            where: { 
+              studentId: student.id, classId: cls.id, status: 'PRESENT',
+              ...(fromDate || toDate ? { date: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } } : {})
+            },
+          }),
+          prisma.paymentAdjustment.aggregate({
+            _sum: { amount: true },
+            where: {
+              studentId: student.id, classId: cls.id,
+              ...(fromDate || toDate ? { effectiveDate: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } } : {})
+            }
+          })
+        ]);
+
         const attended = attendedAgg._sum.sessionUnits || 0;
-        const amount = cls.tuitionPerSession * attended;
-        const memo = deaccent(`${student.studentCode ?? student.id} ${cls.classCode ?? cls.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
+        let amount = cls.tuitionPerSession * attended;
+        const paidOrAdj = adjustmentAgg._sum.amount || 0;
+        amount = Math.max(0, amount - paidOrAdj);
+
+        const periodLabel = fromDate && toDate ? ` ${from.slice(5)}den${to.slice(5)}` : '';
+        const memo = deaccent(`${student.studentCode ?? student.id}${periodLabel} ${cls.classCode ?? cls.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
+        
         const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
         const qrImage = await QRCode.toDataURL(qrData, { margin: 1, color: { dark: '#000000', light: '#ffffff' } });
         return { classId: cls.id, className: cls.name, classCode: cls.classCode, attended, amount, memo, qrImage };

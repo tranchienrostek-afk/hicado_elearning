@@ -23,8 +23,11 @@ export interface Teacher {
   bankAccount: string;
   bankName: string;
   salaryRate: number;
+  salaryType?: 'PERCENT' | 'HOURLY';
+  hourlyRate?: number;
   files?: string[];
   notes?: string;
+  sortOrder?: number;
 }
 
 export interface Student {
@@ -35,9 +38,13 @@ export interface Student {
   schoolName?: string;
   schoolClass?: string;
   cccd?: string;
+  studentCode?: string;
+  zaloUserId?: string;
   parentPhone?: string;
   studentPhone?: string;
   tuitionStatus: 'PAID' | 'PENDING' | 'DEBT';
+  notes?: string;
+  sortOrder?: number;
 }
 
 export interface Class {
@@ -54,6 +61,9 @@ export interface Class {
     days: string[];
     time: string;
   };
+  scheduleTime2?: string;
+  roomId2?: string;
+  sortOrder?: number;
 }
 
 export interface Attendance {
@@ -119,4 +129,8 @@ export interface CenterStore {
   addRoom: (room: Partial<Room>) => Promise<Response>;
   updateRoom: (id: string, updates: Partial<Room>) => Promise<Response>;
   deleteRoom: (id: string) => Promise<Response>;
+
+  reorderStudents: (studentIds: string[]) => Promise<void>;
+  reorderTeachers: (teacherIds: string[]) => Promise<void>;
+  reorderClasses: (classIds: string[]) => Promise<void>;
 }

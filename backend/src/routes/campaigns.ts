@@ -58,6 +58,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       message?: string;
       fallbackZNS?: boolean;
       znsTemplateId?: string;
+      fromDate?: string;
+      toDate?: string;
     };
   };
   if (!name || !type) return res.status(400).json({ message: 'Thiếu tên hoặc loại chiến dịch' });
@@ -70,6 +72,11 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   if (filters.tuitionStatuses?.length) where.tuitionStatus = { in: filters.tuitionStatuses };
   if (filters.requireZalo) where.zaloUserId = { not: null };
 
+  const from = filters.fromDate ? new Date(filters.fromDate) : null;
+  const to = filters.toDate ? new Date(filters.toDate) : null;
+  if (from) from.setHours(0,0,0,0);
+  if (to) to.setHours(23,59,59,999);
+
   const students = await prisma.student.findMany({
     where,
     include: {
@@ -77,7 +84,18 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
         ...(filters.classIds?.length ? { where: { classId: { in: filters.classIds } } } : {}),
         include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } },
       },
-      attendances: { where: { status: 'PRESENT' }, select: { classId: true, sessionUnits: true } },
+      attendances: { 
+        where: { 
+          status: 'PRESENT',
+          ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
+        }, 
+        select: { classId: true, sessionUnits: true } 
+      },
+      paymentAdjustments: {
+        where: {
+          ...(from || to ? { effectiveDate: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
+        }
+      }
     },
   });
 
@@ -94,10 +112,13 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   let failedCount = 0;
   const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
 
-  // due_date = last day of current month in DD/MM/YYYY
+  // due_date
   const now = new Date();
-  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const lastDay = to ? to : new Date(now.getFullYear(), now.getMonth() + 1, 0);
   const dueDate = `${String(lastDay.getDate()).padStart(2, '0')}/${String(lastDay.getMonth() + 1).padStart(2, '0')}/${lastDay.getFullYear()}`;
+  const periodStr = from && to 
+    ? `(từ ${from.toLocaleDateString('vi-VN')} đến ${to.toLocaleDateString('vi-VN')})` 
+    : '';
 
   for (const student of students) {
     if (!student.classes.length) { failedCount++; continue; }
@@ -113,6 +134,10 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
         .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
       totalDue += cs.class.tuitionPerSession * attended;
     }
+    // Subtract adjustments/payments in this period
+    const totalAdjustments = (student as any).paymentAdjustments.reduce((sum: number, adj: any) => sum + adj.amount, 0);
+    totalDue -= totalAdjustments;
+    if (totalDue < 0) totalDue = 0; // Don't notify negative due
 
     // ── Branch: ZNS via phone (if no UID, fallbackZNS ON, TUITION_REMINDER) ──
     if (!student.zaloUserId && filters.fallbackZNS && type === 'TUITION_REMINDER' && phone && filters.znsTemplateId) {
@@ -177,7 +202,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           studentName: student.name, studentCode: student.studentCode ?? student.id,
           className: primaryClass?.name ?? '', classCode: primaryClass?.classCode ?? '',
           attended: primaryAttended, tuitionPerSession: primaryClass?.tuitionPerSession ?? 0,
-          amount: primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo, qrData,
+          amount: totalDue, memo, qrData,
         });
         trace[trace.length - 1] = `①PNG_OK(${Math.round(pngBuffer.length / 1024)}KB)`;
 
@@ -190,7 +215,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       } catch (imgErr: any) {
         trace[trace.length - 1] += `_FAIL:${imgErr.message}`;
         trace.push('③FALLBACK=TEXT');
-        message = { text: `Hicado: Hoc phi ${student.name} - ${(primaryAttended * (primaryClass?.tuitionPerSession ?? 0)).toLocaleString('vi-VN')}d. QR: ${appBaseUrl}/pay/${student.id}` };
+        const payUrl = `${appBaseUrl}/pay/${student.id}${from && to ? `?from=${filters.fromDate}&to=${filters.toDate}` : ''}`;
+        message = { text: `Trung tâm Hicado thông báo học phí em ${student.name} ${periodStr}: ${(totalDue).toLocaleString('vi-VN')}đ. QR nộp tiền: ${payUrl}` };
       }
     } else {
       message = { text: filters.message || 'Thông báo từ Trung tâm Hicado' };

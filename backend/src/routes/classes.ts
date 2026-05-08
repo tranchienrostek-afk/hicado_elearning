@@ -101,4 +101,24 @@ router.delete('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asy
   }
 });
 
+// Reorder classes
+router.post('/reorder', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { classIds } = req.body;
+    if (!Array.isArray(classIds)) return res.status(400).json({ message: 'classIds must be an array' });
+
+    await prisma.$transaction(
+      classIds.map((id, index) =>
+        prisma.class.update({
+          where: { id },
+          data: { sortOrder: index }
+        })
+      )
+    );
+    res.json({ message: 'Đã cập nhật thứ tự' });
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi khi cập nhật thứ tự lớp học' });
+  }
+});
+
 export default router;

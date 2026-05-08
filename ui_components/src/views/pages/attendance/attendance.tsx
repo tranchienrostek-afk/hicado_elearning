@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import { useAuthStore, useCenterStore } from '@/store';
 import { SkeletonTable } from '@/views/components/skeleton';
+import { toast } from 'react-hot-toast';
 import { attendanceSameDay } from '@/utils/attendance-date';
 import { buildBulkAttendancePlan } from '@/utils/center-operations';
 
@@ -83,7 +84,7 @@ export const AttendancePage = () => {
     return [];
   }, [auth?.teacherId, classes, isObserver, isTeacher]);
 
-  const [pageTab, setPageTab] = useState<'attendance' | 'overview'>('attendance');
+  const [pageTab, setPageTab] = useState<'attendance' | 'overview' | 'audit'>('attendance');
 
   const [selectedClassId, setSelectedClassId] = useState(accessibleClasses[0]?.id || '');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -101,6 +102,9 @@ export const AttendancePage = () => {
   const [overviewData,     setOverviewData]      = useState<OverviewResponse | null>(null);
   const [overviewLoading,  setOverviewLoading]   = useState(false);
   const [overviewError,    setOverviewError]     = useState('');
+
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
 
   useEffect(() => {
     if (!selectedClassId && accessibleClasses.length > 0) {
@@ -169,7 +173,8 @@ export const AttendancePage = () => {
     classRecords.every((item) => !item.markedByRole || item.markedByRole === 'TEACHER');
 
   const handleToggle = (studentId: string, status: AttendanceStatus) => {
-    if (!isTeacher || !selectedClassId) return;
+    if (!isTeacher && !isObserver) return;
+    if (!selectedClassId) return;
     const existed = recordMap.get(studentId);
     if (existed) {
       if (existed.status === status) {
@@ -196,7 +201,7 @@ export const AttendancePage = () => {
   };
 
   const handleBulkMark = async (status: AttendanceStatus, allowOverwrite = false) => {
-    if (!isTeacher || !selectedClassId || classStudentIds.length === 0) return;
+    if ((!isTeacher && !isObserver) || !selectedClassId || classStudentIds.length === 0) return;
     const plan = buildBulkAttendancePlan({
       classId: selectedClassId,
       studentIds: classStudentIds,
@@ -248,7 +253,7 @@ export const AttendancePage = () => {
   };
 
   const handleClearSlot = async () => {
-    if (!isTeacher || classRecords.length === 0) return;
+    if ((!isTeacher && !isObserver) || classRecords.length === 0) return;
     const shouldDelete = window.confirm(`Xoa ${classRecords.length} ban ghi diem danh trong ca ${SLOT_LABEL[slot]} ngay ${date}?`);
     if (!shouldDelete) return;
     await Promise.all(classRecords.map((record) => deleteAttendance(record.id, 'teacher-clear-slot')));
@@ -291,6 +296,26 @@ export const AttendancePage = () => {
       setOverviewLoading(false);
     }
   };
+
+  const fetchAuditLogs = async () => {
+    setAuditLoading(true);
+    try {
+      const r = await fetch('/api/attendance/audit-log/all', {
+        headers: { Authorization: `Bearer ${auth?.token}` }
+      });
+      const data = await r.json();
+      setAuditLogs(data);
+    } catch (e) {
+      toast.error('Lỗi tải nhật ký');
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (pageTab === 'audit') fetchAuditLogs();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageTab]);
 
   if (isLoading) {
     return <div className="space-y-10"><SkeletonTable rows={10} /></div>;
@@ -347,7 +372,7 @@ export const AttendancePage = () => {
 
       {/* Tab switcher */}
       <div className="flex gap-2">
-        {(['attendance', 'overview'] as const).map((tab) => (
+        {(['attendance', 'overview', 'audit'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setPageTab(tab)}
@@ -358,7 +383,7 @@ export const AttendancePage = () => {
                 : 'bg-white text-hicado-navy/50 border-slate-200 hover:border-hicado-navy/30'
             )}
           >
-            {tab === 'attendance' ? 'Điểm danh' : 'Tổng quan'}
+            {tab === 'attendance' ? 'Điểm danh' : tab === 'overview' ? 'Tổng quan' : 'Nhật ký chỉnh sửa'}
           </button>
         ))}
       </div>
@@ -599,6 +624,89 @@ export const AttendancePage = () => {
         </div>
       )}
 
+      {/* ─── AUDIT TAB ─── */}
+      {pageTab === 'audit' && (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+          <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+            <div className="px-8 py-6 border-b border-hicado-slate flex justify-between items-center">
+              <div>
+                <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Audit Log</p>
+                <h3 className="text-xl font-black text-hicado-navy">Lịch sử chỉnh sửa điểm danh</h3>
+              </div>
+              <button onClick={fetchAuditLogs} className="text-[10px] font-black text-hicado-navy/40 uppercase hover:text-hicado-navy">Làm mới ↻</button>
+            </div>
+            
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[1000px]">
+                <thead>
+                  <tr className="bg-hicado-slate/20 border-b border-hicado-slate">
+                    {['Thời gian', 'Người sửa', 'Học sinh / Lớp', 'Hành động', 'Chi tiết thay đổi', 'Lý do'].map(h => (
+                      <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hicado-slate/50">
+                  {auditLogs.map((log: any) => (
+                    <tr key={log.id} className="hover:bg-hicado-slate/20 transition-colors">
+                      <td className="px-6 py-5 whitespace-nowrap">
+                        <p className="text-xs font-black text-hicado-navy">{new Date(log.changedAt).toLocaleDateString('vi-VN')}</p>
+                        <p className="text-[10px] text-hicado-navy/40 font-bold">{new Date(log.changedAt).toLocaleTimeString('vi-VN')}</p>
+                      </td>
+                      <td className="px-6 py-5">
+                        <p className="text-xs font-black text-hicado-navy uppercase">{log.changedByName || 'Hệ thống'}</p>
+                        <p className="text-[9px] text-hicado-emerald font-black uppercase tracking-widest">{log.changedByRole}</p>
+                      </td>
+                      <td className="px-6 py-5">
+                        <p className="text-xs font-black text-hicado-navy">{log.attendance?.student?.name || 'N/A'}</p>
+                        <p className="text-[10px] text-hicado-navy/40 font-bold">{log.attendance?.class?.name || 'N/A'}</p>
+                      </td>
+                      <td className="px-6 py-5">
+                        <span className={clsx(
+                          "px-2 py-1 rounded-lg text-[9px] font-black uppercase tracking-widest",
+                          log.action === 'CREATE' ? "bg-emerald-100 text-emerald-700" : log.action === 'UPDATE' ? "bg-blue-100 text-blue-700" : "bg-rose-100 text-rose-700"
+                        )}>
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="px-6 py-5 max-w-xs">
+                        <div className="space-y-1 text-[11px]">
+                          {log.status !== log.oldStatus && (
+                            <p className="font-bold">
+                              Trạng thái: <span className="text-rose-400 line-through">{log.oldStatus || 'null'}</span> → <span className="text-hicado-emerald">{log.status}</span>
+                            </p>
+                          )}
+                          {log.sessionUnits !== log.oldSessionUnits && (
+                            <p className="font-bold">
+                              Hệ số: <span className="text-rose-400 line-through">{log.oldSessionUnits}</span> → <span className="text-hicado-emerald">{log.sessionUnits}</span>
+                            </p>
+                          )}
+                          {log.date !== log.oldDate && (
+                            <p className="font-bold">
+                              Ngày: <span className="text-rose-400 line-through">{log.oldDate?.slice(0, 10)}</span> → <span className="text-hicado-emerald">{log.date?.slice(0, 10)}</span>
+                            </p>
+                          )}
+                          {log.status === log.oldStatus && log.sessionUnits === log.oldSessionUnits && log.date === log.oldDate && (
+                            <p className="text-slate-400 italic">Không có thay đổi dữ liệu chính</p>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-5 italic text-[11px] text-hicado-navy/40 font-bold">
+                        {log.reason || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                  {auditLogs.length === 0 && !auditLoading && (
+                    <tr>
+                      <td colSpan={6} className="py-20 text-center text-sm font-bold text-hicado-navy/20 italic">Chưa có nhật ký chỉnh sửa</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ─── ATTENDANCE TAB ─── */}
       {pageTab === 'attendance' && selectedClass && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -665,7 +773,7 @@ export const AttendancePage = () => {
                 {isTeacher ? 'Điểm danh theo ca' : 'Trạng thái & nhật ký'}
               </p>
             </div>
-            {isTeacher && (
+            {(isTeacher || isObserver) && (
               <div className="flex flex-wrap gap-2 justify-end">
                 <button
                   onClick={() => void handleBulkMark('PRESENT')}
@@ -721,13 +829,13 @@ export const AttendancePage = () => {
                     </div>
                   </div>
 
-                  {isTeacher ? (
-                    <div className="grid grid-cols-4 gap-2 w-full md:w-auto">
+                  {(isTeacher || isObserver) ? (
+                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 w-full md:w-auto">
                       {([
                         { status: 'PRESENT' as AttendanceStatus, label: 'Đi học', active: 'bg-hicado-emerald border-hicado-emerald text-hicado-navy shadow-lg shadow-hicado-emerald/20' },
                         { status: 'ABSENT' as AttendanceStatus, label: 'Vắng', active: 'bg-rose-500 border-rose-500 text-white shadow-lg shadow-rose-500/20' },
                         { status: 'LEAVE_REQUEST' as AttendanceStatus, label: 'Xin nghỉ', active: 'bg-amber-400 border-amber-400 text-white shadow-lg shadow-amber-400/20' },
-                      ]).map(({ status, label, active }) => (
+                      ] as const).map(({ status, label, active }) => (
                         <button
                           key={status}
                           onClick={() => handleToggle(student.id, status)}
@@ -742,7 +850,39 @@ export const AttendancePage = () => {
                         </button>
                       ))}
                       <button
-                        onClick={() => { if (record) void deleteAttendance(record.id, 'teacher-delete-wrong'); }}
+                        onClick={() => {
+                          const note = window.prompt('Nhập ghi chú cho buổi học này:', record?.note || '');
+                          if (note !== null) {
+                            if (record) {
+                              void updateAttendance(record.id, { note, reason: 'admin-note' });
+                            } else {
+                              void addAttendance({
+                                id: `ATT-${selectedClassId}-${student.id}-${date}-${slot}`,
+                                classId: selectedClassId,
+                                studentId: student.id,
+                                date,
+                                slot,
+                                sessionUnits,
+                                status: 'PRESENT',
+                                note,
+                                markedByUserId: auth?.id,
+                                markedByName: auth?.name,
+                                markedByRole: auth?.role,
+                                markedAt: new Date().toISOString(),
+                              });
+                            }
+                          }
+                        }}
+                        className={clsx(
+                          'px-3 py-2.5 rounded-xl text-[10px] font-black transition-all border outline-none whitespace-nowrap bg-white border-hicado-slate',
+                          record?.note ? 'text-hicado-emerald border-hicado-emerald/30' : 'text-hicado-navy/40'
+                        )}
+                        title="Ghi chú"
+                      >
+                        {record?.note ? 'Sửa chú' : 'Ghi chú'}
+                      </button>
+                      <button
+                        onClick={() => { if (record) void deleteAttendance(record.id, 'admin-delete'); }}
                         className="px-3 py-2.5 rounded-xl text-[10px] font-black transition-all border outline-none whitespace-nowrap bg-white border-rose-200 text-rose-500 hover:bg-rose-50"
                       >
                         Xóa
