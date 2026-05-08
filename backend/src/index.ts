@@ -17,6 +17,7 @@ import zaloRoutes from './routes/zalo';
 import configRoutes from './routes/config';
 import campaignRoutes from './routes/campaigns';
 import { shouldProactiveRefresh, refreshZaloToken, getZaloConfig } from './lib/zaloAuth';
+import { zaloSearchLimiter } from './middleware/rateLimit';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -33,6 +34,7 @@ app.use('/api/attendance', attendanceRoutes);
 app.use('/api/finance', financeRoutes);
 app.use('/api/webhook', webhookRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/zalo/mapping/candidates', zaloSearchLimiter);
 app.use('/api/zalo', zaloRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/campaigns', campaignRoutes);

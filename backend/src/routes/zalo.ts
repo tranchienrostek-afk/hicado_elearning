@@ -121,35 +121,230 @@ router.get('/followers', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
   }
 });
 
-// 4. Link a Zalo user_id to a teacher or student
-router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
-  const { zaloUserId, teacherId, studentId } = req.body;
-  if (!zaloUserId || (!teacherId && !studentId)) {
-    return res.status(400).json({ message: 'Cần zaloUserId và teacherId hoặc studentId' });
-  }
+// 3b. Candidates for manual mapping
+router.get('/mapping/candidates', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    if (teacherId) {
-      await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId } });
+    const { type = 'STUDENTS', search = '', page = '1' } = req.query as Record<string, string>;
+    const PAGE = 20;
+    const skip = (Math.max(1, Number(page)) - 1) * PAGE;
+    const where = search
+      ? { name: { contains: search, mode: 'insensitive' as const }, isActive: true }
+      : { isActive: true };
+
+    if (type === 'TEACHERS') {
+      const [items, total] = await Promise.all([
+        prisma.teacher.findMany({
+          where,
+          skip,
+          take: PAGE,
+          select: { id: true, name: true, phone: true, zaloUserId: true },
+          orderBy: { name: 'asc' },
+        }),
+        prisma.teacher.count({ where }),
+      ]);
+      return res.json({ type: 'TEACHERS', items, total, page: Number(page), pageSize: PAGE });
     }
-    if (studentId) {
-      await prisma.student.update({ where: { id: studentId }, data: { zaloUserId } });
-    }
-    res.json({ message: 'Liên kết thành công!' });
-  } catch (error) {
-    console.error('Lỗi link Zalo:', error);
-    res.status(500).json({ message: 'Lỗi liên kết' });
+
+    // STUDENTS
+    const [items, total] = await Promise.all([
+      prisma.student.findMany({
+        where,
+        skip,
+        take: PAGE,
+        select: { id: true, name: true, parentPhone: true, schoolClass: true, zaloUserId: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.student.count({ where }),
+    ]);
+    res.json({ type: 'STUDENTS', items, total, page: Number(page), pageSize: PAGE });
+  } catch (err: any) {
+    res.status(500).json({ message: 'Lỗi lấy danh sách candidates: ' + err.message });
   }
 });
 
-// 4b. Unlink: xóa zaloUserId khỏi student hoặc teacher
+// 3b. Get mapping audit logs
+router.get('/mapping/audit-log', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const logs = await prisma.zaloMappingAudit.findMany({
+      orderBy: { performedAt: 'desc' },
+      take: 50,
+    });
+    res.json(logs);
+  } catch (err: any) {
+    res.status(500).json({ message: 'Lỗi lấy nhật ký định danh: ' + err.message });
+  }
+});
+
+// 4. Link a Zalo user_id to a teacher or student
+// 4. Link a Zalo user_id to a teacher or student (with conflict detection + audit)
+router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { zaloUserId: rawId, teacherId, studentId, force = false } = req.body;
+  if (!rawId || (!teacherId && !studentId)) {
+    return res.status(400).json({ message: 'Cần zaloUserId và teacherId hoặc studentId' });
+  }
+
+  const zaloUserId = String(rawId).trim().toLowerCase();
+  const user = (req as any).user as { userId: string; name: string; role: string };
+
+  try {
+    // Resolve target details
+    let targetName = '';
+    let targetId = '';
+    let targetType = '';
+
+    if (teacherId) {
+      const teacher = await prisma.teacher.findUnique({ where: { id: teacherId }, select: { name: true } });
+      if (!teacher) return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
+      targetName = teacher.name;
+      targetId = teacherId;
+      targetType = 'TEACHER';
+    } else {
+      const student = await prisma.student.findUnique({ where: { id: studentId }, select: { name: true } });
+      if (!student) return res.status(404).json({ message: 'Không tìm thấy học sinh' });
+      targetName = student.name;
+      targetId = studentId;
+      targetType = 'STUDENT';
+    }
+
+    // ATOMIC TRANSACTION: Lock -> Check Conflict -> Clear Old (if override) -> Update New -> Audit
+    await prisma.$transaction(async (tx) => {
+      // 1. Acquire advisory lock for this zaloUserId to prevent race conditions across tables (Student & Teacher)
+      // This ensures only one process can link/override this specific UID at a time.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'zalo_mapping_' + zaloUserId}))`;
+
+      const [existingStudent, existingTeacher] = await Promise.all([
+        tx.student.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
+        tx.teacher.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
+      ]);
+
+      const conflictTarget = existingStudent ?? existingTeacher;
+      const conflictType = existingStudent ? 'STUDENT' : existingTeacher ? 'TEACHER' : null;
+      const isSameTarget =
+        (studentId && existingStudent?.id === studentId) ||
+        (teacherId && existingTeacher?.id === teacherId);
+
+      if (conflictTarget && !isSameTarget) {
+        if (!force) {
+          const error: any = new Error('CONFLICT');
+          error.conflictInfo = {
+            conflict: true,
+            conflictType,
+            conflictId: conflictTarget.id,
+            conflictName: conflictTarget.name,
+          };
+          throw error;
+        }
+        // Force override: clear old target first
+        if (conflictType === 'STUDENT') {
+          await tx.student.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
+        } else {
+          await tx.teacher.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
+        }
+      }
+
+      // Update new target
+      if (teacherId) {
+        await tx.teacher.update({ where: { id: teacherId }, data: { zaloUserId } });
+      } else {
+        await tx.student.update({ where: { id: studentId }, data: { zaloUserId } });
+      }
+
+      // Audit log
+      await tx.zaloMappingAudit.create({
+        data: {
+          action: conflictTarget && !isSameTarget ? 'OVERRIDE' : 'LINK',
+          zaloUserId,
+          targetType,
+          targetId,
+          targetName,
+          previousTargetId: conflictTarget && !isSameTarget ? conflictTarget.id : undefined,
+          previousTargetName: conflictTarget && !isSameTarget ? conflictTarget.name : undefined,
+          performedBy: user.userId,
+          performedByName: user.name ?? user.userId,
+        },
+      });
+    });
+
+    res.json({ message: 'Liên kết thành công!', zaloUserId, targetId, targetType });
+  } catch (err: any) {
+    if (err.message === 'CONFLICT') {
+      const { conflictType, conflictId, conflictName } = err.conflictInfo;
+      return res.status(409).json({
+        conflict: true,
+        message: `zalo_user_id này đang được ghép với ${conflictType === 'STUDENT' ? 'học sinh' : 'giáo viên'} "${conflictName}". Xác nhận override?`,
+        conflictType,
+        conflictId,
+        conflictName,
+      });
+    }
+    if (err.code === 'P2002') {
+      return res.status(409).json({ message: 'zalo_user_id này đã được dùng bởi người khác (unique constraint).' });
+    }
+    res.status(500).json({ message: 'Lỗi liên kết: ' + err.message });
+  }
+});
+
+// 4b. Unlink: remove zaloUserId with audit log
 router.delete('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { studentId, teacherId } = req.body;
   if (!studentId && !teacherId) return res.status(400).json({ message: 'Cần studentId hoặc teacherId' });
+
+  const user = (req as any).user as { userId: string; name: string };
+
   try {
-    if (studentId) await prisma.student.update({ where: { id: studentId }, data: { zaloUserId: null } });
-    if (teacherId) await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId: null } });
+    // ATOMIC TRANSACTION: Find -> Lock -> Update -> Audit
+    await prisma.$transaction(async (tx) => {
+      let targetName = '';
+      let targetId = '';
+      let targetType = '';
+      let zaloUserId = '';
+
+      if (studentId) {
+        const student = await tx.student.findUnique({ where: { id: studentId }, select: { name: true, zaloUserId: true } });
+        if (!student) throw new Error('NOT_FOUND_STUDENT');
+        targetName = student.name;
+        targetId = studentId;
+        targetType = 'STUDENT';
+        zaloUserId = student.zaloUserId ?? '';
+      } else {
+        const teacher = await tx.teacher.findUnique({ where: { id: teacherId }, select: { name: true, zaloUserId: true } });
+        if (!teacher) throw new Error('NOT_FOUND_TEACHER');
+        targetName = teacher.name;
+        targetId = teacherId;
+        targetType = 'TEACHER';
+        zaloUserId = teacher.zaloUserId ?? '';
+      }
+
+      if (!zaloUserId) return; // Already unlinked
+
+      // Advisory lock to prevent race during concurrent mapping/unmapping of same UID
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'zalo_mapping_' + zaloUserId}))`;
+
+      if (targetType === 'STUDENT') {
+        await tx.student.update({ where: { id: targetId }, data: { zaloUserId: null } });
+      } else {
+        await tx.teacher.update({ where: { id: targetId }, data: { zaloUserId: null } });
+      }
+
+      await tx.zaloMappingAudit.create({
+        data: {
+          action: 'UNLINK',
+          zaloUserId,
+          targetType,
+          targetId,
+          targetName,
+          performedBy: user.userId,
+          performedByName: user.name ?? user.userId,
+        },
+      });
+    });
+
     res.json({ message: 'Đã hủy liên kết' });
-  } catch { res.status(500).json({ message: 'Lỗi hủy liên kết' }); }
+  } catch (err: any) {
+    if (err.message === 'NOT_FOUND_STUDENT') return res.status(404).json({ message: 'Không tìm thấy học sinh' });
+    if (err.message === 'NOT_FOUND_TEACHER') return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
+    res.status(500).json({ message: 'Lỗi hủy liên kết: ' + err.message });
+  }
 });
 
 // 5. Send OA Customer Service message (works for followers, no ZNS approval needed)
