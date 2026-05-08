@@ -78,6 +78,9 @@ export const SettingsPage = () => {
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
   const oauthHandlerRef = useRef<((e: MessageEvent) => void) | null>(null);
   const zaloAuthButtonRef = useRef<HTMLButtonElement>(null);
+  const [showManualEntry, setShowManualEntry] = useState(false);
+  const [manualTokens, setManualTokens] = useState({ ZALO_ACCESS_TOKEN: '', ZALO_REFRESH_TOKEN: '' });
+  const [isSavingTokens, setIsSavingTokens] = useState(false);
 
   const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -181,6 +184,33 @@ export const SettingsPage = () => {
       setZaloAuthMsg('Không thể gia hạn token lúc này.');
     } finally {
       setIsRefreshingToken(false);
+    }
+  };
+
+  const saveManualTokens = async () => {
+    const access = manualTokens.ZALO_ACCESS_TOKEN.trim();
+    const refresh = manualTokens.ZALO_REFRESH_TOKEN.trim();
+    if (!access) return;
+    setIsSavingTokens(true);
+    setZaloAuthMsg('');
+    try {
+      const body: Record<string, string> = { ZALO_ACCESS_TOKEN: access };
+      if (refresh) body.ZALO_REFRESH_TOKEN = refresh;
+      const r = await fetch('/api/config/zalo', { method: 'POST', headers: authHeaders, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (r.ok) {
+        setZaloAuthMsg('Đã lưu token thủ công. Đang kiểm tra kết nối...');
+        setManualTokens({ ZALO_ACCESS_TOKEN: '', ZALO_REFRESH_TOKEN: '' });
+        setShowManualEntry(false);
+        testZaloConnection();
+        fetchZaloTokenStatus();
+      } else {
+        setZaloAuthMsg('Lỗi lưu token: ' + (d.message || 'Không xác định'));
+      }
+    } catch {
+      setZaloAuthMsg('Không thể kết nối server để lưu token.');
+    } finally {
+      setIsSavingTokens(false);
     }
   };
 
@@ -474,6 +504,50 @@ export const SettingsPage = () => {
                 className="w-full py-2.5 border-2 border-gray-100 text-gray-500 font-semibold rounded-2xl hover:border-blue-200 hover:text-blue-600 transition text-xs">
                 {isTestingZalo ? 'Đang kiểm tra...' : '↻ Kiểm tra lại kết nối'}
               </button>
+
+              {/* Manual token entry — fallback when OAuth is unavailable */}
+              <div className="border-t border-gray-100 pt-3">
+                <button
+                  onClick={() => setShowManualEntry(v => !v)}
+                  className="text-[11px] text-gray-400 hover:text-gray-600 underline underline-offset-2 transition"
+                >
+                  {showManualEntry ? '▲ Ẩn nhập thủ công' : '▼ Nhập token thủ công'}
+                </button>
+                {showManualEntry && (
+                  <div className="mt-3 space-y-3">
+                    <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 leading-relaxed">
+                      Dùng khi OAuth không khả dụng. Lấy token tại <strong>Zalo Developer Portal → OA của bạn → Công cụ → Lấy access token</strong>.
+                    </p>
+                    <div>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Access Token <span className="text-rose-500">*</span></label>
+                      <input
+                        type="text"
+                        value={manualTokens.ZALO_ACCESS_TOKEN}
+                        onChange={e => setManualTokens(t => ({ ...t, ZALO_ACCESS_TOKEN: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[11px] font-mono text-gray-700 focus:outline-none focus:border-blue-300"
+                        placeholder="Dán access token từ Zalo Developer..."
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 block">Refresh Token <span className="text-gray-300">(tuỳ chọn)</span></label>
+                      <input
+                        type="text"
+                        value={manualTokens.ZALO_REFRESH_TOKEN}
+                        onChange={e => setManualTokens(t => ({ ...t, ZALO_REFRESH_TOKEN: e.target.value }))}
+                        className="w-full border border-gray-200 rounded-xl px-3 py-2 text-[11px] font-mono text-gray-700 focus:outline-none focus:border-blue-300"
+                        placeholder="Dán refresh token (nếu có)..."
+                      />
+                    </div>
+                    <button
+                      onClick={saveManualTokens}
+                      disabled={isSavingTokens || !manualTokens.ZALO_ACCESS_TOKEN.trim()}
+                      className="w-full py-2.5 bg-hicado-navy text-white font-black rounded-xl text-[11px] uppercase tracking-widest shadow-sm disabled:opacity-40 hover:bg-hicado-navy/90 transition"
+                    >
+                      {isSavingTokens ? 'Đang lưu...' : 'Lưu & Kết nối'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
 
