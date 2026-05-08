@@ -1,40 +1,30 @@
-const { execFileSync } = require('child_process');
+const { execSync } = require('child_process');
 
 const migrationName = '20260509100000_add_missing_student_notes';
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const cwd = __dirname + '/..';
 
-function runPrisma(args) {
-  return execFileSync(npx, ['prisma', ...args], {
-    cwd: __dirname + '/..',
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
-function runPrismaCapture(args) {
+function run(command) {
   try {
-    return { ok: true, output: runPrisma(args) };
+    const output = execSync(command, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    return { ok: true, output };
   } catch (error) {
     return { ok: false, output: `${error.stdout || ''}\n${error.stderr || error.message || ''}` };
   }
 }
 
-const status = runPrismaCapture(['migrate', 'status']);
-const output = status.output || '';
-const mentionsTarget = output.includes(migrationName);
-const mentionsFailure = /failed|P3009|P3018|migrate found failed migrations/i.test(output);
-
-if (!mentionsTarget && !mentionsFailure) {
-  console.log('[migration-repair] No failed migration marker detected.');
-  process.exit(0);
-}
-
-console.log(`[migration-repair] Attempting rolled-back resolve for ${migrationName}.`);
-const resolved = runPrismaCapture(['migrate', 'resolve', '--rolled-back', migrationName]);
-const resolvedOutput = resolved.output.trim();
-if (resolvedOutput) console.log(resolvedOutput);
+console.log(`[migration-repair] Checking ${migrationName}.`);
+const resolved = run(`${npx} prisma migrate resolve --rolled-back ${migrationName}`);
+const output = resolved.output.trim();
+if (output) console.log(output);
 
 if (!resolved.ok) {
-  const benign = /already.*rolled back|not.*failed|not found|could not be found|is not in a failed state/i.test(resolved.output);
-  if (!benign) process.exit(1);
+  const benign = /already.*rolled back|not.*failed|not found|could not be found|is not in a failed state|P3008/i.test(resolved.output);
+  if (benign) {
+    console.log('[migration-repair] No rollback needed.');
+    process.exit(0);
+  }
+  process.exit(1);
 }
+
+console.log(`[migration-repair] Rolled back failed ${migrationName} marker if it existed.`);
