@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
+import { buildCustomTuitionMessage, CustomTuitionPayload } from '../lib/zaloMessage';
 
 export const formatPhone = (p: string) => {
   const digits = p.replace(/\D/g, '');
@@ -390,6 +392,369 @@ router.post('/send/cs', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), a
   });
 });
 
+// 5b. Send Custom Tuition (Task #9)
+type CustomTuitionItemInput = {
+  studentId: string;
+  sessions: number;
+  pricePerSession: number;
+  totalOverride?: number;
+  note?: string;
+  classId?: string;
+};
+
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
+const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
+const normalizeDateRange = (fromDate?: string, toDate?: string) => {
+  const from = fromDate ? new Date(fromDate) : null;
+  const to = toDate ? new Date(toDate) : null;
+  if (from && Number.isNaN(from.getTime())) throw new Error('fromDate kh?ng h?p l?');
+  if (to && Number.isNaN(to.getTime())) throw new Error('toDate kh?ng h?p l?');
+  if (from) from.setHours(0, 0, 0, 0);
+  if (to) to.setHours(23, 59, 59, 999);
+  return { from, to };
+};
+
+const buildSentAtSql = (from: Date | null, to: Date | null) => {
+  if (from && to) return Prisma.sql`AND "sentAt" BETWEEN ${from} AND ${to}`;
+  if (from) return Prisma.sql`AND "sentAt" >= ${from}`;
+  if (to) return Prisma.sql`AND "sentAt" <= ${to}`;
+  return Prisma.empty;
+};
+
+router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const {
+    items,
+    campaignId,
+    name,
+    sendVia = 'AUTO',
+    templateId,
+    fromDate,
+    toDate,
+    studentCoveredClasses = {},
+    forceResendStudentIds = [],
+  } = req.body as {
+    items: CustomTuitionItemInput[];
+    campaignId?: string;
+    name?: string;
+    sendVia?: 'AUTO' | 'CS' | 'ZNS';
+    templateId?: string;
+    fromDate?: string;
+    toDate?: string;
+    studentCoveredClasses?: Record<string, string[]>;
+    forceResendStudentIds?: string[];
+  };
+
+  if (!Array.isArray(items) || items.length === 0) {
+    return res.status(400).json({ message: 'Danh s?ch h?c sinh kh?ng h?p l?' });
+  }
+  if (!['AUTO', 'CS', 'ZNS'].includes(sendVia)) {
+    return res.status(400).json({ message: 'K?nh g?i kh?ng h?p l?' });
+  }
+
+  let from: Date | null = null;
+  let to: Date | null = null;
+  try {
+    ({ from, to } = normalizeDateRange(fromDate, toDate));
+  } catch (err: any) {
+    return res.status(400).json({ message: err.message });
+  }
+
+  const normalizedItems: CustomTuitionItemInput[] = [];
+  for (const item of items) {
+    if (!isNonEmptyString(item.studentId)) return res.status(400).json({ message: 'studentId kh?ng h?p l?' });
+    if (!isFiniteNumber(item.sessions) || item.sessions < 1) return res.status(400).json({ message: 'S? bu?i ph?i >= 1' });
+    if (!isFiniteNumber(item.pricePerSession) || item.pricePerSession < 0) return res.status(400).json({ message: '??n gi? ph?i >= 0' });
+    if (item.totalOverride !== undefined && (!isFiniteNumber(item.totalOverride) || item.totalOverride < 0)) {
+      return res.status(400).json({ message: 'T?ng ti?n th? c?ng ph?i >= 0' });
+    }
+    normalizedItems.push({ ...item, sessions: Math.round(item.sessions), pricePerSession: Math.round(item.pricePerSession), totalOverride: item.totalOverride === undefined ? undefined : Math.round(item.totalOverride) });
+  }
+
+  const cfg = await getZaloConfig();
+  if (!cfg.ZALO_ACCESS_TOKEN) return res.status(400).json({ message: 'Ch?a c?u h?nh Access Token' });
+  if (sendVia === 'ZNS' && !templateId) return res.status(400).json({ message: 'Thi?u ZNS templateId' });
+
+  const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
+  const forceSet = new Set(forceResendStudentIds);
+  let campaign: any = null;
+  if (campaignId) {
+    campaign = await (prisma as any).campaign.findUnique({ where: { id: campaignId } });
+    if (!campaign) return res.status(404).json({ message: 'Chi?n d?ch kh?ng t?n t?i' });
+  } else {
+    campaign = await (prisma as any).campaign.create({
+      data: {
+        name: name?.trim() || `Thu h?c ph? th? c?ng ${new Date().toLocaleDateString('vi-VN')}`,
+        type: 'CUSTOM_TUITION',
+        status: 'SENDING',
+        filtersJson: JSON.stringify({ fromDate, toDate, sendVia, templateId, studentCoveredClasses }),
+      },
+    });
+  }
+
+  let sentCount = 0;
+  let znsSentCount = 0;
+  let failedCount = 0;
+  let skippedCount = 0;
+  const results: any[] = [];
+
+  for (const item of normalizedItems) {
+    const trackingId = `CT_${campaign.id}_${item.studentId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const coveredClassIds = studentCoveredClasses[item.studentId] ?? (item.classId ? [item.classId] : []);
+    const total = item.totalOverride ?? (item.sessions * item.pricePerSession);
+    const payload: CustomTuitionPayload = { sessions: item.sessions, pricePerSession: item.pricePerSession, total, note: item.note };
+
+    try {
+      const student = await prisma.student.findUnique({ where: { id: item.studentId } });
+      if (!student) {
+        failedCount++;
+        results.push({ studentId: item.studentId, status: 'FAILED', total, channel: 'NONE', error: 'Kh?ng t?m th?y h?c sinh' });
+        continue;
+      }
+
+      if (coveredClassIds.length > 0 && !forceSet.has(student.id)) {
+        const sentAtFilter = buildSentAtSql(from, to);
+        const existing = await prisma.$queryRaw<Array<{ id: string; sentAt: Date; coveredClassIds: string[] }>>`
+          SELECT id, "sentAt", "coveredClassIds"
+          FROM "ZaloMessageLog"
+          WHERE "studentId" = ${student.id}
+            AND status = 'SENT'
+            AND "coveredClassIds" && ARRAY[${Prisma.join(coveredClassIds)}]::text[]
+            ${sentAtFilter}
+          ORDER BY "sentAt" DESC
+          LIMIT 1
+        `;
+        if (existing.length > 0) {
+          skippedCount++;
+          results.push({ studentId: student.id, studentName: student.name, status: 'SKIPPED', total, channel: 'NONE', error: '?? g?i h?c ph? cho m?t l?p trong k? n?y', coveredClassIds });
+          await prisma.zaloMessageLog.create({
+            data: {
+              phone: student.parentPhone || student.studentPhone || '', zaloUserId: student.zaloUserId,
+              templateId: 'CUSTOM_TUITION', trackingId, status: 'SKIPPED', errorReason: 'DEDUP_ALREADY_SENT',
+              studentId: student.id, campaignId: campaign.id, classId: item.classId, coveredClassIds,
+              messageType: 'CUSTOM_TUITION', customPayload: JSON.stringify(payload),
+            }
+          });
+          continue;
+        }
+      }
+
+      const messageText = buildCustomTuitionMessage(student.name, payload);
+      let success = false;
+      let channel: 'CS' | 'ZNS' | 'NONE' = 'NONE';
+      let errorReason = '';
+      let zaloMsgId: string | null = null;
+
+      if ((sendVia === 'AUTO' || sendVia === 'CS') && student.zaloUserId) {
+        try {
+          const r = await zaloApiClient.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`, { recipient: { user_id: student.zaloUserId }, message: { text: messageText } }, { headers });
+          success = r.data?.error === 0;
+          channel = 'CS';
+          errorReason = success ? '' : `${r.data?.message ?? 'CS failed'} (${r.data?.error ?? 'unknown'})`;
+          zaloMsgId = success ? (r.data?.data?.msg_id || r.data?.data?.message_id || null) : null;
+        } catch (err: any) {
+          errorReason = err.response?.data?.message || err.message;
+        }
+      }
+
+      if (!success && (sendVia === 'AUTO' || sendVia === 'ZNS') && (student.parentPhone || student.studentPhone) && templateId) {
+        try {
+          const r = await zaloApiClient.post<any>('https://business.openapi.zalo.me/message/template', {
+            phone: formatPhone(student.parentPhone || student.studentPhone || ''),
+            template_id: templateId,
+            template_data: {
+              student_name: student.name,
+              sessions: String(item.sessions),
+              unit_price: item.pricePerSession.toLocaleString('vi-VN') + '?',
+              amount: total.toLocaleString('vi-VN') + '?',
+              note: item.note || '',
+            },
+            tracking_id: trackingId,
+          }, { headers });
+          success = r.data?.error === 0;
+          channel = 'ZNS';
+          errorReason = success ? '' : `${r.data?.message ?? 'ZNS failed'} (${r.data?.error ?? 'unknown'})`;
+        } catch (err: any) {
+          errorReason = err.response?.data?.message || err.message;
+        }
+      }
+
+      if (!success && !errorReason) {
+        errorReason = sendVia === 'CS'
+          ? 'H?c sinh ch?a c? Zalo UID'
+          : sendVia === 'ZNS'
+            ? 'H?c sinh ch?a c? S?T ho?c thi?u template ZNS'
+            : 'Kh?ng c? Zalo UID, S?T ho?c template ZNS ph? h?p';
+      }
+
+      await prisma.zaloMessageLog.create({
+        data: {
+          phone: student.parentPhone || student.studentPhone || '', zaloUserId: student.zaloUserId,
+          templateId: channel === 'ZNS' && templateId ? `ZNS_${templateId}` : 'CUSTOM_TUITION', trackingId,
+          status: success ? 'SENT' : 'FAILED', errorReason: success ? null : errorReason,
+          studentId: student.id, campaignId: campaign.id, classId: item.classId, coveredClassIds,
+          messageType: 'CUSTOM_TUITION', customPayload: JSON.stringify(payload), zaloMsgId,
+        }
+      });
+
+      if (success) {
+        sentCount++;
+        if (channel === 'ZNS') znsSentCount++;
+        results.push({ studentId: student.id, studentName: student.name, status: 'SENT', total, channel, coveredClassIds });
+      } else {
+        failedCount++;
+        results.push({ studentId: student.id, studentName: student.name, status: 'FAILED', total, channel, error: errorReason, coveredClassIds });
+      }
+    } catch (err: any) {
+      failedCount++;
+      results.push({ studentId: item.studentId, status: 'FAILED', total, channel: 'NONE', error: err.message, coveredClassIds });
+    }
+  }
+
+  const finalCampaign = await (prisma as any).campaign.update({
+    where: { id: campaign.id },
+    data: { status: 'SENT', sentCount, znsSentCount, failedCount, sentAt: new Date() },
+  });
+
+  res.json({
+    message: `?? g?i ${sentCount} tin nh?n, b? qua ${skippedCount}, th?t b?i ${failedCount}`,
+    campaign: { ...finalCampaign, readRate: 0 },
+    sentCount,
+    znsSentCount,
+    skippedCount,
+    failedCount,
+    results,
+  });
+});
+
+// 5c. Check Sent Status (Task #10)
+router.get('/tuition/check-sent', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { studentId, classId, fromDate, toDate } = req.query as Record<string, string>;
+  if (!isNonEmptyString(studentId) || !isNonEmptyString(classId)) return res.status(400).json({ message: 'Thi?u studentId ho?c classId' });
+  let from: Date | null = null;
+  let to: Date | null = null;
+  try { ({ from, to } = normalizeDateRange(fromDate, toDate)); } catch (err: any) { return res.status(400).json({ message: err.message }); }
+  const sentAtFilter = buildSentAtSql(from, to);
+
+  const logs = await prisma.$queryRaw<Array<{ id: string; sentAt: Date; coveredClassIds: string[]; messageType: string | null }>>`
+    SELECT id, "sentAt", "coveredClassIds", "messageType"
+    FROM "ZaloMessageLog"
+    WHERE "studentId" = ${studentId}
+      AND status = 'SENT'
+      AND "coveredClassIds" @> ARRAY[${classId}]::text[]
+      ${sentAtFilter}
+    ORDER BY "sentAt" DESC
+    LIMIT 5
+  `;
+
+  if (logs.length === 0) return res.json({ alreadySent: false });
+
+  const allClassIds = [...new Set(logs.flatMap(l => l.coveredClassIds))];
+  const classes = await prisma.class.findMany({ where: { id: { in: allClassIds } }, select: { id: true, name: true } });
+  const classMap = new Map(classes.map(c => [c.id, c.name]));
+
+  res.json({
+    alreadySent: true,
+    logs: logs.map(l => ({
+      logId: l.id,
+      sentAt: l.sentAt,
+      messageType: l.messageType,
+      coveredClassIds: l.coveredClassIds,
+      coveredClassNames: l.coveredClassIds.map(id => classMap.get(id) ?? id),
+    }))
+  });
+});
+
+// 5d. Preview Multi-class (Task #10)
+router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { classId, fromDate, toDate } = req.query as Record<string, string>;
+  if (!isNonEmptyString(classId)) return res.status(400).json({ message: 'Thi?u classId' });
+  let from: Date | null = null;
+  let to: Date | null = null;
+  try { ({ from, to } = normalizeDateRange(fromDate, toDate)); } catch (err: any) { return res.status(400).json({ message: err.message }); }
+
+  const classStudents = await prisma.classStudent.findMany({
+    where: { classId },
+    include: {
+      student: {
+        include: {
+          classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true } } } },
+          attendances: {
+            where: { status: 'PRESENT', ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}) },
+            select: { classId: true, sessionUnits: true }
+          }
+        }
+      }
+    }
+  });
+
+  const studentIds = classStudents.map(cs => cs.studentId);
+  const sentAtFilter = buildSentAtSql(from, to);
+  const sentLogs = studentIds.length ? await prisma.$queryRaw<Array<{ studentId: string; sentAt: Date; coveredClassIds: string[] }>>`
+    SELECT "studentId", "sentAt", "coveredClassIds"
+    FROM "ZaloMessageLog"
+    WHERE "studentId" = ANY(ARRAY[${Prisma.join(studentIds)}]::text[])
+      AND status = 'SENT'
+      AND "coveredClassIds" @> ARRAY[${classId}]::text[]
+      ${sentAtFilter}
+    ORDER BY "sentAt" DESC
+  ` : [];
+  const sentByStudent = new Map<string, Array<{ sentAt: Date; coveredClassIds: string[] }>>();
+  for (const log of sentLogs) sentByStudent.set(log.studentId, [...(sentByStudent.get(log.studentId) ?? []), { sentAt: log.sentAt, coveredClassIds: log.coveredClassIds }]);
+
+  const results = classStudents.map(cs => {
+    const s = cs.student;
+    const mainAttended = s.attendances.filter(a => a.classId === classId).reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
+    const mainClass = s.classes.find(c => c.classId === classId);
+    const otherClasses = s.classes
+      .filter(c => c.classId !== classId)
+      .map(c => {
+        const attended = s.attendances.filter(a => a.classId === c.classId).reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
+        return { classId: c.classId, className: c.class.name, classCode: c.class.classCode, attended, tuitionPerSession: c.class.tuitionPerSession, subtotal: attended * c.class.tuitionPerSession };
+      });
+    const logs = sentByStudent.get(s.id) ?? [];
+    return {
+      studentId: s.id, studentName: s.name, studentCode: s.studentCode,
+      hasZalo: !!s.zaloUserId,
+      mainClass: { classId, attended: mainAttended, tuitionPerSession: mainClass?.class.tuitionPerSession ?? 0 },
+      otherClasses,
+      alreadySent: logs.length > 0,
+      sentLogs: logs.slice(0, 3).map(l => ({ sentAt: l.sentAt, coveredClassIds: l.coveredClassIds }))
+    };
+  });
+
+  res.json(results);
+});
+
+// 5e. Batch Check Sent (Task #10)
+router.post('/tuition/batch-check-sent', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { studentIds, classId, fromDate, toDate } = req.body as { studentIds?: string[]; classId?: string; fromDate?: string; toDate?: string };
+  if (!Array.isArray(studentIds) || studentIds.some(id => !isNonEmptyString(id)) || !isNonEmptyString(classId)) {
+    return res.status(400).json({ message: 'studentIds ho?c classId kh?ng h?p l?' });
+  }
+  if (studentIds.length === 0) return res.json({});
+  let from: Date | null = null;
+  let to: Date | null = null;
+  try { ({ from, to } = normalizeDateRange(fromDate, toDate)); } catch (err: any) { return res.status(400).json({ message: err.message }); }
+  const sentAtFilter = buildSentAtSql(from, to);
+
+  const logs = await prisma.$queryRaw<Array<{ studentId: string; sentAt: Date; coveredClassIds: string[] }>>`
+    SELECT DISTINCT ON ("studentId") "studentId", "sentAt", "coveredClassIds"
+    FROM "ZaloMessageLog"
+    WHERE "studentId" = ANY(ARRAY[${Prisma.join(studentIds)}]::text[])
+      AND status = 'SENT'
+      AND "coveredClassIds" @> ARRAY[${classId}]::text[]
+      ${sentAtFilter}
+    ORDER BY "studentId", "sentAt" DESC
+  `;
+
+  const result: Record<string, { alreadySent: boolean; sentAt?: Date; coveredClassIds?: string[] }> = {};
+  for (const sid of studentIds) result[sid] = { alreadySent: false };
+  for (const log of logs) result[log.studentId] = { alreadySent: true, sentAt: log.sentAt, coveredClassIds: log.coveredClassIds };
+
+  res.json(result);
+});
+
 // 6. Batch Send Tuition Notification (ZNS - requires app approval)
 router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { studentIds, templateId } = req.body;
@@ -443,13 +808,34 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
         }, { headers: { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' } });
 
         await prisma.zaloMessageLog.create({
-          data: { phone: formattedPhone, zaloUserId: student.zaloUserId, templateId, trackingId, status: r.data.error === 0 ? 'SENT' : 'FAILED', errorReason: r.data.error !== 0 ? `${r.data.message} (${r.data.error})` : null, studentId: student.id }
+          data: {
+            phone: formattedPhone,
+            zaloUserId: student.zaloUserId,
+            templateId,
+            trackingId,
+            status: r.data.error === 0 ? 'SENT' : 'FAILED',
+            errorReason: r.data.error !== 0 ? `${r.data.message} (${r.data.error})` : null,
+            studentId: student.id,
+            classId: req.body.primaryClassId || null,
+            coveredClassIds: (req.body.studentCoveredClasses?.[student.id] as string[]) ?? (req.body.primaryClassId ? [req.body.primaryClassId] : []),
+            messageType: 'TUITION_REMINDER',
+          }
         });
         if (r.data.error === 0) sentCount++; else failedCount++;
       } catch (err: any) {
         failedCount++;
         await prisma.zaloMessageLog.create({
-          data: { phone: formattedPhone, templateId, trackingId, status: 'FAILED', errorReason: err.message, studentId: student.id }
+          data: {
+            phone: formattedPhone,
+            templateId,
+            trackingId,
+            status: 'FAILED',
+            errorReason: err.message,
+            studentId: student.id,
+            classId: req.body.primaryClassId || null,
+            coveredClassIds: (req.body.studentCoveredClasses?.[student.id] as string[]) ?? (req.body.primaryClassId ? [req.body.primaryClassId] : []),
+            messageType: 'TUITION_REMINDER',
+          }
         });
       }
     }

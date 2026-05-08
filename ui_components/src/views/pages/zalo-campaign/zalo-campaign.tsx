@@ -4,7 +4,7 @@ import { useCenterStore, useAuthStore } from '@/store';
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MainTab = 'campaigns' | 'create' | 'tracking' | 'followers' | 'mapping' | 'config';
 type WizardStep = 1 | 2 | 3 | 4 | 5;
-type CampaignType = 'TUITION_REMINDER' | 'GENERAL';
+type CampaignType = 'TUITION_REMINDER' | 'GENERAL' | 'CUSTOM_TUITION';
 
 interface Campaign {
   id: string; name: string; type: CampaignType; status: string;
@@ -16,6 +16,23 @@ interface CampaignLog {
   student: { name: string; studentCode?: string } | null;
 }
 interface CampaignDetail extends Campaign { logs: CampaignLog[] }
+
+interface MultiClassPreviewItem {
+  studentId: string;
+  studentName: string;
+  studentCode?: string;
+  hasZalo: boolean;
+  mainClass: { classId: string; attended: number; tuitionPerSession: number };
+  otherClasses: Array<{ classId: string; className: string; classCode?: string; attended: number; tuitionPerSession: number; subtotal: number }>;
+  alreadySent: boolean;
+  sentLogs: Array<{ sentAt: string; coveredClassIds: string[] }>;
+}
+
+interface MergeOption {
+  extraClassIds: string[];
+  forceResend: boolean;
+}
+
 
 interface Follower {
   userId: string; displayName: string; avatar: string; tags: string[];
@@ -88,10 +105,21 @@ export const ZaloCampaignPage = () => {
   const [wizardZnsTemplateId, setWizardZnsTemplateId] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<{ sentCount: number; znsSentCount: number; failedCount: number } | null>(null);
-  
+
   // Date range for tuition reminder
   const [wizardFromDate, setWizardFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
   const [wizardToDate, setWizardToDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10));
+
+  // Custom Tuition State (Task #9)
+  const [customTuitionItems, setCustomTuitionItems] = useState<Record<string, { sessions: number; pricePerSession: number; totalOverride?: number; note?: string }>>({});
+  const [customGlobalSessions, setCustomGlobalSessions] = useState(8);
+  const [customGlobalPrice, setCustomGlobalPrice] = useState(150000);
+  const [customSendVia, setCustomSendVia] = useState<'AUTO' | 'CS' | 'ZNS'>('AUTO');
+
+  // Multi-class Deduplication State (Task #10)
+  const [multiClassPreview, setMultiClassPreview] = useState<MultiClassPreviewItem[]>([]);
+  const [mergeOptions, setMergeOptions] = useState<Record<string, MergeOption>>({});
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
 
   // ── Followers ──────────────────────────────────────────────────────────────
   const [followers, setFollowers] = useState<Follower[]>([]);
@@ -187,10 +215,58 @@ export const ZaloCampaignPage = () => {
   const noContactGroup = allFiltered.filter((s: any) => !s.zaloUserId && !(s.parentPhone || s.studentPhone));
   const recipientPreview = wizardRequireZalo ? uidGroup : allFiltered;
 
+  const primaryWizardClassId = wizardClassIds[0];
+  const getMergeOption = (studentId: string): MergeOption => mergeOptions[studentId] ?? { extraClassIds: [], forceResend: false };
+  const getCoveredClassIdsForStudent = (studentId: string) => {
+    if (!primaryWizardClassId) return [];
+    const opt = getMergeOption(studentId);
+    return Array.from(new Set([primaryWizardClassId, ...opt.extraClassIds]));
+  };
+  const buildStudentCoveredClasses = () => {
+    const result: Record<string, string[]> = {};
+    recipientPreview.forEach(s => { result[s.id] = getCoveredClassIdsForStudent(s.id); });
+    return result;
+  };
+  const buildForceResendStudentIds = () => recipientPreview.filter(s => getMergeOption(s.id).forceResend).map(s => s.id);
+  const setMergeExtra = (studentId: string, classId: string, checked: boolean) => {
+    setMergeOptions(prev => {
+      const current = prev[studentId] ?? { extraClassIds: [], forceResend: false };
+      const nextExtra = checked
+        ? Array.from(new Set([...current.extraClassIds, classId]))
+        : current.extraClassIds.filter(id => id !== classId);
+      return { ...prev, [studentId]: { ...current, extraClassIds: nextExtra } };
+    });
+  };
+  const setForceResend = (studentId: string, checked: boolean) => {
+    setMergeOptions(prev => {
+      const current = prev[studentId] ?? { extraClassIds: [], forceResend: false };
+      return { ...prev, [studentId]: { ...current, forceResend: checked } };
+    });
+  };
+
+
   const buildSampleMessage = () => {
     const first = recipientPreview[0] as any;
     if (!first) return 'Không có người nhận phù hợp.';
     if (wizardType === 'GENERAL') return wizardMessage || '(Chưa nhập nội dung)';
+
+    if (wizardType === 'CUSTOM_TUITION') {
+      const item = customTuitionItems[first.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+      return [
+        `Kính gửi phụ huynh em ${first.name}!`,
+        ``,
+        `Trung tâm Hicado xin thông báo học phí${item.note ? ` (${item.note})` : ''}:`,
+        ``,
+        `  📚 Số buổi học : ${item.sessions} buổi`,
+        `  💵 Đơn giá/buổi: ${item.pricePerSession.toLocaleString('vi-VN')}đ`,
+        `  ─────────────────────────────`,
+        `  💰 Tổng cộng   : ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}đ`,
+        ``,
+        `Quý phụ huynh vui lòng thanh toán đúng hạn.`,
+        `Trân trọng - Hicado Center 🌱`,
+      ].join('\n');
+    }
+
     const cls = classes.find(c => ((first.classes || []).map((x: any) => x.classId ?? x.id)).includes(c.id));
     const amount = cls ? cls.tuitionPerSession * cls.totalSessions : 0;
     return [
@@ -207,6 +283,41 @@ export const ZaloCampaignPage = () => {
     setIsSending(true);
     setSendResult(null);
     try {
+      if (wizardType === 'CUSTOM_TUITION') {
+        const items = recipientPreview.map(s => {
+          const c = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+          return {
+            studentId: s.id,
+            sessions: c.sessions,
+            pricePerSession: c.pricePerSession,
+            totalOverride: c.totalOverride,
+            note: c.note,
+            classId: primaryWizardClassId,
+          };
+        });
+
+        const r = await fetch('/api/zalo/send/custom-tuition', {
+          method: 'POST', headers: authHeaders,
+          body: JSON.stringify({
+            name: wizardName,
+            items,
+            sendVia: customSendVia,
+            templateId: customSendVia !== 'CS' ? wizardZnsTemplateId : undefined,
+            fromDate: wizardFromDate,
+            toDate: wizardToDate,
+            studentCoveredClasses: buildStudentCoveredClasses(),
+            forceResendStudentIds: buildForceResendStudentIds(),
+          }),
+        });
+        const data = await r.json();
+        if (r.ok) {
+          setSendResult({ sentCount: data.sentCount, znsSentCount: data.znsSentCount ?? 0, failedCount: data.failedCount + (data.skippedCount ?? 0) });
+          fetchCampaigns();
+        } else { alert(data.message || 'Gửi thất bại'); }
+        return;
+      }
+
+      // Normal TUITION_REMINDER or GENERAL
       const r = await fetch('/api/campaigns', {
         method: 'POST', headers: authHeaders,
         body: JSON.stringify({
@@ -220,6 +331,8 @@ export const ZaloCampaignPage = () => {
             znsTemplateId: wizardFallbackZNS ? wizardZnsTemplateId : undefined,
             fromDate: wizardFromDate,
             toDate: wizardToDate,
+            studentCoveredClasses: buildStudentCoveredClasses(),
+            forceResendStudentIds: buildForceResendStudentIds(),
           },
         }),
       });
@@ -234,7 +347,7 @@ export const ZaloCampaignPage = () => {
   const resetWizard = () => {
     setStep(1); setWizardName(''); setWizardType('TUITION_REMINDER');
     setWizardClassIds([]); setWizardStatuses(['PENDING', 'DEBT']); setWizardRequireZalo(true);
-    setWizardMessage(''); setSendResult(null);
+    setWizardMessage(''); setSendResult(null); setCustomTuitionItems({}); setMergeOptions({}); setCustomSendVia('AUTO');
   };
 
   // ── Followers helpers ──────────────────────────────────────────────────────
@@ -298,6 +411,23 @@ export const ZaloCampaignPage = () => {
       fetchMappingAudits();
     }
   }, [activeTab, fetchMappingAudits]);
+
+  // Fetch Multi-class preview when entering Step 3 (Task #10)
+  useEffect(() => {
+    if (activeTab === 'create' && step === 3 && wizardType === 'TUITION_REMINDER' && wizardClassIds.length === 1) {
+      const fetchPreview = async () => {
+        setIsPreviewLoading(true);
+        try {
+          const r = await fetch(`/api/zalo/tuition/preview-multiclass?classId=${wizardClassIds[0]}&fromDate=${wizardFromDate}&toDate=${wizardToDate}`, { headers: authHeaders });
+          if (r.ok) setMultiClassPreview(await r.json());
+        } catch { console.error('Failed to fetch multi-class preview'); }
+        finally { setIsPreviewLoading(false); }
+      };
+      fetchPreview();
+    } else {
+      setMultiClassPreview([]);
+    }
+  }, [activeTab, step, wizardType, wizardClassIds, wizardFromDate, wizardToDate, token]);
 
   const handleLinkManual = async (zaloUserId: string, targetId: string, targetType: string, force = false) => {
     if (!zaloUserId) return;
@@ -567,13 +697,20 @@ export const ZaloCampaignPage = () => {
                   className="w-full bg-hicado-slate/20 border border-transparent rounded-2xl px-5 py-4 text-hicado-navy font-black focus:bg-white focus:border-hicado-navy/30 outline-none"
                   placeholder="VD: Nhắc học phí tháng 5/2026" />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                {(['TUITION_REMINDER', 'GENERAL'] as CampaignType[]).map(t => (
+              <div className="grid grid-cols-1 gap-3">
+                {(['TUITION_REMINDER', 'CUSTOM_TUITION', 'GENERAL'] as CampaignType[]).map(t => (
                   <label key={t} onClick={() => setWizardType(t)}
-                    className={`p-5 border-2 rounded-2xl cursor-pointer transition-all ${wizardType === t ? 'border-hicado-navy bg-hicado-navy/5' : 'border-hicado-slate hover:border-hicado-navy/30'}`}>
-                    <p className="text-2xl mb-2">{t === 'TUITION_REMINDER' ? '💰' : '📢'}</p>
-                    <p className="font-black text-hicado-navy text-sm">{t === 'TUITION_REMINDER' ? 'Nhắc học phí' : 'Thông báo chung'}</p>
-                    <p className="text-xs text-hicado-navy/40 mt-1">{t === 'TUITION_REMINDER' ? 'Số buổi + tổng tiền + QR nộp tiền' : 'Tự soạn nội dung tự do'}</p>
+                    className={`p-4 border-2 rounded-2xl cursor-pointer transition-all flex items-center gap-4 ${wizardType === t ? 'border-hicado-navy bg-hicado-navy/5' : 'border-hicado-slate hover:border-hicado-navy/30'}`}>
+                    <p className="text-2xl">{t === 'TUITION_REMINDER' ? '💰' : t === 'CUSTOM_TUITION' ? '📝' : '📢'}</p>
+                    <div className="flex-1">
+                      <p className="font-black text-hicado-navy text-sm">
+                        {t === 'TUITION_REMINDER' ? 'Nhắc học phí (Tự động)' : t === 'CUSTOM_TUITION' ? 'Thu học phí thủ công' : 'Thông báo chung'}
+                      </p>
+                      <p className="text-[10px] text-hicado-navy/40 font-bold uppercase tracking-widest mt-0.5">
+                        {t === 'TUITION_REMINDER' ? 'Dựa trên điểm danh' : t === 'CUSTOM_TUITION' ? 'Nhập số buổi & giá' : 'Nội dung tự do'}
+                      </p>
+                    </div>
+                    {wizardType === t && <div className="w-5 h-5 rounded-full bg-hicado-navy flex items-center justify-center text-white text-[10px]">✓</div>}
                   </label>
                 ))}
               </div>
@@ -617,8 +754,8 @@ export const ZaloCampaignPage = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Từ ngày (điểm danh)</label>
-                    <input 
-                      type="date" 
+                    <input
+                      type="date"
                       value={wizardFromDate}
                       onChange={e => setWizardFromDate(e.target.value)}
                       className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
@@ -626,8 +763,8 @@ export const ZaloCampaignPage = () => {
                   </div>
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Đến ngày (điểm danh)</label>
-                    <input 
-                      type="date" 
+                    <input
+                      type="date"
                       value={wizardToDate}
                       onChange={e => setWizardToDate(e.target.value)}
                       className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
@@ -687,56 +824,175 @@ export const ZaloCampaignPage = () => {
             </div>
           )}
 
-          {/* Step 3: Preview recipients */}
+          {/* Step 3: Preview recipients / Itemized table */}
           {step === 3 && (
             <div className="space-y-4">
-              <h3 className="text-xl font-serif font-black text-hicado-navy">Danh sách người nhận</h3>
-              <div className="flex flex-wrap gap-3 text-xs font-black">
-                <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl">
-                  ✅ {uidGroup.length} học sinh — Zalo UID (CS)
-                </span>
-                <span className={`px-3 py-1.5 rounded-xl ${wizardFallbackZNS && !wizardRequireZalo ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-500'}`}>
-                  📱 {phoneGroup.length} học sinh — Chỉ có SĐT {wizardFallbackZNS && !wizardRequireZalo ? '(ZNS)' : '(bỏ qua)'}
-                </span>
-                {noContactGroup.length > 0 && (
-                  <span className="px-3 py-1.5 bg-rose-100 text-rose-600 rounded-xl">
-                    ❌ {noContactGroup.length} học sinh — Không có liên hệ
-                  </span>
-                )}
+              <div className="flex justify-between items-end">
+                <h3 className="text-xl font-serif font-black text-hicado-navy">
+                  {wizardType === 'CUSTOM_TUITION' ? 'Chi tiết học phí thủ công' : 'Danh sách người nhận'}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {isPreviewLoading && <div className="w-4 h-4 border-2 border-hicado-navy border-t-transparent rounded-full animate-spin" />}
+                  <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">{recipientPreview.length} học sinh</p>
+                </div>
               </div>
-              <div className="border border-hicado-slate rounded-2xl overflow-hidden max-h-72 overflow-y-auto custom-scrollbar">
+
+              {wizardType !== 'CUSTOM_TUITION' && (
+                <div className="flex flex-wrap gap-3 text-[10px] font-black uppercase tracking-tight">
+                  <span className="px-2 py-1 bg-emerald-100 text-emerald-700 rounded-lg">✅ {uidGroup.length} Zalo UID</span>
+                  <span className="px-2 py-1 bg-amber-100 text-amber-700 rounded-lg">📱 {phoneGroup.length} Phone {wizardFallbackZNS ? '(ZNS)' : ''}</span>
+                  {noContactGroup.length > 0 && <span className="px-2 py-1 bg-rose-100 text-rose-600 rounded-lg">❌ {noContactGroup.length} No Contact</span>}
+                </div>
+              )}
+
+              {wizardType === 'CUSTOM_TUITION' && (
+                <div className="bg-hicado-slate/10 p-4 rounded-2xl space-y-3">
+                  <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest mb-1">Thiết lập nhanh cho toàn bộ</p>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="text-[9px] font-bold text-hicado-navy/50 block mb-1">SỐ BUỔI</label>
+                      <input type="number" value={customGlobalSessions} onChange={e => setCustomGlobalSessions(Number(e.target.value))}
+                        className="w-full bg-white border border-hicado-slate rounded-xl px-3 py-2 text-sm font-bold outline-none" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[9px] font-bold text-hicado-navy/50 block mb-1">ĐƠN GIÁ</label>
+                      <input type="number" value={customGlobalPrice} onChange={e => setCustomGlobalPrice(Number(e.target.value))}
+                        className="w-full bg-white border border-hicado-slate rounded-xl px-3 py-2 text-sm font-bold outline-none" />
+                    </div>
+                    <button onClick={() => {
+                      if (!confirm('Áp dụng số buổi & đơn giá này cho tất cả học sinh đang chọn?')) return;
+                      const next = { ...customTuitionItems };
+                      recipientPreview.forEach(s => {
+                        next[s.id] = { ...next[s.id], sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+                      });
+                      setCustomTuitionItems(next);
+                    }} className="bg-hicado-navy text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase self-end h-[38px]">Áp dụng</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="border border-hicado-slate rounded-2xl overflow-hidden max-h-[400px] overflow-y-auto custom-scrollbar">
                 <table className="w-full text-sm text-left">
-                  <thead className="bg-hicado-slate/20 sticky top-0">
+                  <thead className="bg-hicado-slate/20 sticky top-0 z-10">
                     <tr>
-                      {['Học sinh', 'Lớp', 'Học phí', 'Zalo'].map(h => (
-                        <th key={h} className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
-                      ))}
+                      <th className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học sinh</th>
+                      {wizardType === 'CUSTOM_TUITION' ? (
+                        <>
+                          <th className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest w-20">Buổi</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest w-32">Đơn giá</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest w-32 text-right">Tổng tiền</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Lớp</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học phí</th>
+                          <th className="px-4 py-3 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Zalo</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
-                    {recipientPreview.map(s => (
-                      <tr key={s.id} className="border-t border-hicado-slate/30 hover:bg-hicado-slate/10">
-                        <td className="px-4 py-3 font-bold text-hicado-navy">{s.name}</td>
-                        <td className="px-4 py-3 text-xs text-hicado-navy/40">
-                          {((s as any).classes || []).slice(0, 2).map((c: any) => {
-                            const cls = classes.find(x => x.id === (c.classId ?? c.id));
-                            return cls?.name ?? '—';
-                          }).join(', ')}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${(s as any).tuitionStatus === 'PAID' ? 'bg-green-100 text-green-700' : (s as any).tuitionStatus === 'DEBT' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {(s as any).tuitionStatus}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {(s as any).zaloUserId
-                            ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">✓ Có</span>
-                            : <span className="text-xs text-hicado-navy/20 font-bold">—</span>}
-                        </td>
-                      </tr>
-                    ))}
+                    {recipientPreview.map(s => {
+                      const item = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+                      const total = item.totalOverride ?? (item.sessions * item.pricePerSession);
+                      const mc = multiClassPreview.find(p => p.studentId === s.id);
+
+                      return (
+                        <tr key={s.id} className={`border-t border-hicado-slate/30 hover:bg-hicado-slate/10 ${mc?.alreadySent ? 'bg-amber-50/50' : ''}`}>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <p className="font-bold text-hicado-navy">{s.name}</p>
+                              {mc?.alreadySent && (
+                                <span className="px-1.5 py-0.5 bg-amber-500 text-white text-[8px] font-black uppercase rounded shadow-sm" title={`Đã gửi lúc: ${new Date(mc.sentLogs[0].sentAt).toLocaleString('vi-VN')}`}>Đã gửi</span>
+                              )}
+                              {(mc?.otherClasses?.length ?? 0) > 0 && (
+                                <span className="px-1.5 py-0.5 bg-blue-500 text-white text-[8px] font-black uppercase rounded shadow-sm" title={`Học lớp khác: ${mc?.otherClasses?.map((o: any) => o.className).join(', ') ?? ''}`}>Nhiều lớp</span>
+                              )}
+                            </div>
+                            {mc && wizardType !== 'GENERAL' && (
+                              <div className="mt-2 space-y-1 text-[10px] font-bold">
+                                {mc.alreadySent && (
+                                  <label className="flex items-center gap-2 text-amber-700">
+                                    <input type="checkbox" checked={getMergeOption(s.id).forceResend} onChange={e => setForceResend(s.id, e.target.checked)} />
+                                    V?n g?i l?i h?c ph? k? n?y
+                                  </label>
+                                )}
+                                {mc.otherClasses.length > 0 && (
+                                  <div className="flex flex-wrap gap-2">
+                                    {mc.otherClasses.map((o: any) => (
+                                      <label key={o.classId} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-lg">
+                                        <input type="checkbox" checked={getMergeOption(s.id).extraClassIds.includes(o.classId)} onChange={e => setMergeExtra(s.id, o.classId, e.target.checked)} />
+                                        G?p {o.className} ({o.subtotal.toLocaleString()}?)
+                                      </label>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {wizardType === 'CUSTOM_TUITION' && (
+                              <input type="text" placeholder="Ghi chú (VD: Kèm riêng...)" value={item.note || ''}
+                                onChange={e => setCustomTuitionItems(prev => ({ ...prev, [s.id]: { ...item, note: e.target.value } }))}
+                                className="text-[10px] bg-transparent border-b border-transparent hover:border-hicado-slate focus:border-hicado-navy outline-none w-full text-hicado-navy/50" />
+                            )}
+                          </td>
+                          {wizardType === 'CUSTOM_TUITION' ? (
+                            <>
+                              <td className="px-4 py-3">
+                                <input type="number" min={1} value={item.sessions} onChange={e => setCustomTuitionItems(prev => ({ ...prev, [s.id]: { ...item, sessions: Math.max(1, Number(e.target.value) || 1), totalOverride: undefined } }))}
+                                  className="w-full bg-hicado-slate/20 rounded-lg px-2 py-1 text-xs font-bold outline-none" />
+                              </td>
+                              <td className="px-4 py-3">
+                                <input type="number" min={0} value={item.pricePerSession} onChange={e => setCustomTuitionItems(prev => ({ ...prev, [s.id]: { ...item, pricePerSession: Math.max(0, Number(e.target.value) || 0), totalOverride: undefined } }))}
+                                  className="w-full bg-hicado-slate/20 rounded-lg px-2 py-1 text-xs font-bold outline-none" />
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <input type="number" min={0} value={total} onChange={e => setCustomTuitionItems(prev => ({ ...prev, [s.id]: { ...item, totalOverride: Math.max(0, Number(e.target.value) || 0) } }))}
+                                  className="w-full bg-hicado-navy/10 text-hicado-navy rounded-lg px-2 py-1 text-xs font-black text-right outline-none" />
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-3 text-xs text-hicado-navy/40">
+                                {mc ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-bold text-hicado-navy">{classes.find(c => c.id === wizardClassIds[0])?.name}</span>
+                                    {mc.otherClasses.map((o: any) => (
+                                      <span key={o.classId} className="opacity-60">+ {o.className}</span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  ((s as any).classes || []).slice(0, 2).map((c: any) => {
+                                    const cls = classes.find(x => x.id === (c.classId ?? c.id));
+                                    return cls?.name ?? '—';
+                                  }).join(', ')
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {mc ? (
+                                  <div className="flex flex-col gap-0.5">
+                                    <span className="font-black text-hicado-navy">{(mc.mainClass.attended * mc.mainClass.tuitionPerSession).toLocaleString()}đ</span>
+                                    {mc.otherClasses.map((o: any) => (
+                                      <span key={o.classId} className="text-[10px] opacity-40">+{o.subtotal.toLocaleString()}đ</span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${(s as any).tuitionStatus === 'PAID' ? 'bg-green-100 text-green-700' : (s as any).tuitionStatus === 'DEBT' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    {(s as any).tuitionStatus}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                {(s as any).zaloUserId
+                                  ? <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold">✓ Có</span>
+                                  : <span className="text-xs text-hicado-navy/20 font-bold">—</span>}
+                              </td>
+                            </>
+                          )}
+                        </tr>
+                      );
+                    })}
                     {recipientPreview.length === 0 && (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-hicado-navy/30 text-sm font-bold">Không có học sinh phù hợp điều kiện.</td></tr>
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-hicado-navy/30 text-sm font-bold">Không có học sinh phù hợp điều kiện.</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -755,20 +1011,52 @@ export const ZaloCampaignPage = () => {
           {step === 4 && (
             <div className="space-y-5">
               <h3 className="text-xl font-serif font-black text-hicado-navy">Nội dung tin nhắn</h3>
-              {wizardType === 'TUITION_REMINDER' ? (
+              {wizardType === 'CUSTOM_TUITION' ? (
+                <div className="space-y-3 max-h-[420px] overflow-y-auto custom-scrollbar">
+                  {recipientPreview.slice(0, 20).map(s => {
+                    const item = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+                    const coveredNames = getCoveredClassIdsForStudent(s.id).map(id => classes.find(c => c.id === id)?.name ?? id).join(' + ') || 'Ch?a ch?n l?p';
+                    return (
+                      <details key={s.id} className="border border-hicado-slate rounded-2xl p-4 bg-white" open={recipientPreview.length <= 3}>
+                        <summary className="cursor-pointer font-black text-hicado-navy flex justify-between gap-3">
+                          <span>{s.name}</span>
+                          <span className="text-xs text-hicado-emerald">{((item.totalOverride ?? (item.sessions * item.pricePerSession))).toLocaleString('vi-VN')}?</span>
+                        </summary>
+                        <p className="text-[10px] font-bold text-hicado-navy/40 uppercase mt-2">Cover: {coveredNames}</p>
+                        <div className="mt-3 bg-[#e7f3ff] rounded-xl p-4 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed border border-blue-100">
+                          {[
+                            `K?nh g?i ph? huynh em ${s.name}!`,
+                            ``,
+                            `Trung t?m Hicado xin th?ng b?o h?c ph?${item.note ? ` (${item.note})` : ''}:`,
+                            ``,
+                            `  ?? S? bu?i h?c : ${item.sessions} bu?i`,
+                            `  ?? ??n gi?/bu?i: ${item.pricePerSession.toLocaleString('vi-VN')}?`,
+                            `  ?????????????????????????????`,
+                            `  ?? T?ng c?ng   : ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}?`,
+                            ``,
+                            `Qu? ph? huynh vui l?ng thanh to?n ??ng h?n.`,
+                            `Tr?n tr?ng - Hicado Center ??`,
+                          ].join('\n')}
+                        </div>
+                      </details>
+                    );
+                  })}
+                  {recipientPreview.length > 20 && <p className="text-xs text-hicado-navy/40 font-bold">Ch? hi?n th? 20 preview ??u ti?n ?? gi? trang nh?.</p>}
+                </div>
+              ) : wizardType === 'TUITION_REMINDER' ? (
                 <div>
-                  <p className="text-xs font-bold text-hicado-navy/40 uppercase tracking-widest mb-3">Mẫu tin gửi cho: <strong className="text-hicado-navy">{recipientPreview[0]?.name ?? '—'}</strong></p>
+                  <p className="text-xs font-bold text-hicado-navy/40 uppercase tracking-widest mb-3">M?u tin g?i cho: <strong className="text-hicado-navy">{recipientPreview[0]?.name ?? '?'}</strong></p>
                   <div className="bg-[#e7f3ff] rounded-2xl p-5 font-mono text-sm text-gray-800 whitespace-pre-wrap leading-relaxed border border-blue-100">
                     {buildSampleMessage()}
                   </div>
-                  <p className="text-xs text-hicado-navy/30 mt-3 font-bold">Nội dung thực tế sẽ được tính chính xác từ dữ liệu điểm danh và lớp của từng học sinh.</p>
+                  <p className="text-xs text-hicado-navy/30 mt-3 font-bold">N?i dung th?c t? s? ???c t?nh ch?nh x?c t? d? li?u ?i?m danh v? l?p c?a t?ng h?c sinh.</p>
                 </div>
               ) : (
                 <div>
-                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Nội dung thông báo</label>
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">N?i dung th?ng b?o</label>
                   <textarea value={wizardMessage} onChange={e => setWizardMessage(e.target.value)} rows={6}
                     className="w-full bg-hicado-slate/20 border border-transparent rounded-2xl px-5 py-4 text-hicado-navy font-bold focus:bg-white focus:border-hicado-navy/30 outline-none resize-none"
-                    placeholder="Nhập nội dung thông báo gửi đến phụ huynh/học sinh..." />
+                    placeholder="Nh?p n?i dung th?ng b?o g?i ??n ph? huynh/h?c sinh..." />
                 </div>
               )}
               <div className="flex gap-3">

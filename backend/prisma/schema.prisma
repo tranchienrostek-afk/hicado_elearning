@@ -269,22 +269,25 @@ model Campaign {
 }
 
 model ZaloMessageLog {
-  id          String    @id @default(uuid())
-  phone       String
-  zaloUserId  String?
-  templateId  String
-  trackingId  String    @unique
-  status      String
-  errorReason String?
-  sentAt      DateTime  @default(now())
-  readAt      DateTime?
-  studentId   String?
-  campaignId  String?
-  classId     String?
-  deliveredAt DateTime?
-  zaloMsgId   String?
-  campaign    Campaign? @relation(fields: [campaignId], references: [id])
-  student     Student?  @relation(fields: [studentId], references: [id])
+  id              String    @id @default(uuid())
+  phone           String
+  zaloUserId      String?
+  templateId      String
+  trackingId      String    @unique
+  status          String
+  errorReason     String?
+  sentAt          DateTime  @default(now())
+  readAt          DateTime?
+  studentId       String?
+  campaignId      String?
+  classId         String?
+  deliveredAt     DateTime?
+  zaloMsgId       String?
+  messageType     String?
+  customPayload   String?   @db.Text
+  coveredClassIds String[]  @default([])
+  campaign        Campaign? @relation(fields: [campaignId], references: [id])
+  student         Student?  @relation(fields: [studentId], references: [id])
 }
 
 model SystemConfig {

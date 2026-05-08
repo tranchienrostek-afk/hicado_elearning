@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
@@ -60,6 +61,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       znsTemplateId?: string;
       fromDate?: string;
       toDate?: string;
+      studentCoveredClasses?: Record<string, string[]>;
+      forceResendStudentIds?: string[];
     };
   };
   if (!name || !type) return res.status(400).json({ message: 'Thiếu tên hoặc loại chiến dịch' });
@@ -84,12 +87,12 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
         ...(filters.classIds?.length ? { where: { classId: { in: filters.classIds } } } : {}),
         include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } },
       },
-      attendances: { 
-        where: { 
+      attendances: {
+        where: {
           status: 'PRESENT',
           ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
-        }, 
-        select: { classId: true, sessionUnits: true } 
+        },
+        select: { classId: true, sessionUnits: true }
       },
       paymentAdjustments: {
         where: {
@@ -111,13 +114,21 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   let znsSentCount = 0;
   let failedCount = 0;
   const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
+  const forceResendSet = new Set(filters.forceResendStudentIds ?? []);
+  const sentAtFilter = from && to
+    ? Prisma.sql`AND "sentAt" BETWEEN ${from} AND ${to}`
+    : from
+      ? Prisma.sql`AND "sentAt" >= ${from}`
+      : to
+        ? Prisma.sql`AND "sentAt" <= ${to}`
+        : Prisma.empty;
 
   // due_date
   const now = new Date();
   const lastDay = to ? to : new Date(now.getFullYear(), now.getMonth() + 1, 0);
   const dueDate = `${String(lastDay.getDate()).padStart(2, '0')}/${String(lastDay.getMonth() + 1).padStart(2, '0')}/${lastDay.getFullYear()}`;
-  const periodStr = from && to 
-    ? `(từ ${from.toLocaleDateString('vi-VN')} đến ${to.toLocaleDateString('vi-VN')})` 
+  const periodStr = from && to
+    ? `(từ ${from.toLocaleDateString('vi-VN')} đến ${to.toLocaleDateString('vi-VN')})`
     : '';
 
   for (const student of students) {
@@ -125,6 +136,25 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 
     const primaryClassId = student.classes[0]?.class?.id ?? null;
     const phone = student.parentPhone || student.studentPhone || '';
+    const coveredClassIds = filters.studentCoveredClasses?.[student.id] ?? (primaryClassId ? [primaryClassId] : []);
+
+    if (type === 'TUITION_REMINDER' && coveredClassIds.length > 0 && !forceResendSet.has(student.id)) {
+      const existing = await prisma.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM "ZaloMessageLog"
+        WHERE "studentId" = ${student.id}
+          AND status = 'SENT'
+          AND "coveredClassIds" && ARRAY[${Prisma.join(coveredClassIds)}]::text[]
+          ${sentAtFilter}
+        LIMIT 1
+      `;
+      if (existing.length > 0) {
+        failedCount++;
+        await (prisma as any).zaloMessageLog.create({
+          data: { phone, templateId: `CAMPAIGN_${type}`, trackingId: `CAMP_${campaign.id}_${student.id}_${Date.now()}_SKIP`, status: 'SKIPPED', errorReason: 'DEDUP_ALREADY_SENT', studentId: student.id, campaignId: campaign.id, classId: primaryClassId, coveredClassIds, messageType: 'TUITION_REMINDER' },
+        });
+        continue;
+      }
+    }
 
     // ── Compute tuition amount (used by both CS message and ZNS template_data) ──
     let totalDue = 0;
@@ -168,13 +198,26 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
             studentId: student.id,
             campaignId: campaign.id,
             classId: primaryClassId,
+            coveredClassIds,
+            messageType: 'TUITION_REMINDER',
           },
         });
         if (success) { sentCount++; znsSentCount++; } else failedCount++;
       } catch (err: any) {
         failedCount++;
         await (prisma as any).zaloMessageLog.create({
-          data: { phone: formatPhone(phone), templateId: `ZNS_${filters.znsTemplateId}`, trackingId, status: 'FAILED', errorReason: err.message, studentId: student.id, campaignId: campaign.id, classId: primaryClassId },
+          data: {
+            phone: formatPhone(phone),
+            templateId: `ZNS_${filters.znsTemplateId}`,
+            trackingId,
+            status: 'FAILED',
+            errorReason: err.message,
+            studentId: student.id,
+            campaignId: campaign.id,
+            classId: primaryClassId,
+            coveredClassIds,
+            messageType: 'TUITION_REMINDER',
+          },
         });
       }
       continue;
@@ -248,6 +291,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           campaignId: campaign.id,
           zaloMsgId,
           classId: primaryClassId,
+          coveredClassIds,
+          messageType: 'TUITION_REMINDER',
         },
       });
       if (success) sentCount++; else failedCount++;
@@ -267,6 +312,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           studentId: student.id,
           campaignId: campaign.id,
           classId: primaryClassId,
+          coveredClassIds,
+          messageType: 'TUITION_REMINDER',
         },
       });
     }
