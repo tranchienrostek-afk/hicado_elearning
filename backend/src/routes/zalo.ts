@@ -121,6 +121,47 @@ router.get('/followers', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
   }
 });
 
+// 3b. Candidates for manual mapping
+router.get('/mapping/candidates', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { type = 'STUDENTS', search = '', page = '1' } = req.query as Record<string, string>;
+    const PAGE = 20;
+    const skip = (Math.max(1, Number(page)) - 1) * PAGE;
+    const where = search
+      ? { name: { contains: search, mode: 'insensitive' as const }, isActive: true }
+      : { isActive: true };
+
+    if (type === 'TEACHERS') {
+      const [items, total] = await Promise.all([
+        prisma.teacher.findMany({
+          where,
+          skip,
+          take: PAGE,
+          select: { id: true, name: true, phone: true, zaloUserId: true },
+          orderBy: { name: 'asc' },
+        }),
+        prisma.teacher.count({ where }),
+      ]);
+      return res.json({ type: 'TEACHERS', items, total, page: Number(page), pageSize: PAGE });
+    }
+
+    // STUDENTS
+    const [items, total] = await Promise.all([
+      prisma.student.findMany({
+        where,
+        skip,
+        take: PAGE,
+        select: { id: true, name: true, parentPhone: true, schoolClass: true, zaloUserId: true },
+        orderBy: { name: 'asc' },
+      }),
+      prisma.student.count({ where }),
+    ]);
+    res.json({ type: 'STUDENTS', items, total, page: Number(page), pageSize: PAGE });
+  } catch (err: any) {
+    res.status(500).json({ message: 'Lỗi lấy danh sách candidates: ' + err.message });
+  }
+});
+
 // 4. Link a Zalo user_id to a teacher or student
 router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { zaloUserId, teacherId, studentId } = req.body;
