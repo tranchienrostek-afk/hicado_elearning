@@ -7,6 +7,59 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum Role {
+  ADMIN
+  MANAGER
+  TEACHER
+  STUDENT
+}
+
+enum Gender {
+  Nam
+  Nu
+  Khac
+}
+
+enum SalaryType {
+  PERCENT
+  HOURLY
+}
+
+enum TuitionStatus {
+  PAID
+  PENDING
+  DEBT
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LEAVE_REQUEST
+}
+
+enum AttendanceSlot {
+  MORNING
+  AFTERNOON
+  EVENING
+  CUSTOM
+}
+
+enum AttendanceAuditAction {
+  CREATE
+  UPDATE
+  DELETE
+}
+
+enum TransactionStatus {
+  SUCCESS
+  FAILED
+}
+
+enum PaymentAdjustmentSource {
+  CASH
+  ADJUSTMENT
+}
+
 model User {
   id        String   @id @default(uuid())
   username  String   @unique
@@ -34,7 +87,7 @@ model Teacher {
   bankAccount    String?
   bankName       String?
   salaryRate     Float
-  notes          String?
+  notes          String?    @db.Text
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
   zaloUserId     String?    @unique
@@ -62,7 +115,7 @@ model Student {
   studentPhone       String?
   zaloUserId         String?             @unique
   isActive           Boolean             @default(true)
-  notes              String?
+  notes              String?             @db.Text
   sortOrder          Int                 @default(0)
   attendances        Attendance[]
   classes            ClassStudent[]
@@ -77,9 +130,9 @@ model Room {
   name     String
   center   String
   capacity Int
-  notes    String?
-  classes2 Class[] @relation("ClassRoom2")
+  notes    String? @db.Text
   classes  Class[] @relation("ClassRoom1")
+  classes2 Class[] @relation("ClassRoom2")
 }
 
 model Class {
@@ -99,8 +152,8 @@ model Class {
   scheduleTime2     String?
   sortOrder         Int            @default(0)
   attendances       Attendance[]
-  room2             Room?          @relation("ClassRoom2", fields: [roomId2], references: [id])
   room              Room?          @relation("ClassRoom1", fields: [roomId], references: [id])
+  room2             Room?          @relation("ClassRoom2", fields: [roomId2], references: [id])
   teacher           Teacher        @relation(fields: [teacherId], references: [id])
   students          ClassStudent[]
 }
@@ -118,7 +171,7 @@ model Attendance {
   id             String            @id @default(uuid())
   date           DateTime
   status         AttendanceStatus
-  note           String?
+  note           String?           @db.Text
   markedByUserId String?
   markedByName   String?
   markedByRole   String?
@@ -150,13 +203,13 @@ model AttendanceAudit {
   oldStatus       AttendanceStatus?
   sessionUnits    Float
   oldSessionUnits Float?
-  note            String?
-  oldNote         String?
+  note            String?               @db.Text
+  oldNote         String?               @db.Text
   changedByUserId String?
   changedByName   String?
   changedByRole   String?
   changedAt       DateTime              @default(now())
-  attendance      Attendance?           @relation(fields: [attendanceId], references: [id])
+  attendance      Attendance?           @relation(fields: [attendanceId], references: [id], onDelete: SetNull)
 }
 
 model Transaction {
@@ -180,7 +233,7 @@ model PaymentAdjustment {
   classId         String?
   source          PaymentAdjustmentSource @default(CASH)
   amount          Int
-  note            String?
+  note            String?                 @db.Text
   effectiveDate   DateTime                @default(now())
   createdByUserId String?
   createdByName   String?
@@ -236,7 +289,7 @@ model ZaloMessageLog {
 
 model SystemConfig {
   key       String   @id
-  value     String
+  value     String   @db.Text
   updatedAt DateTime @updatedAt
 }
 
@@ -256,57 +309,4 @@ model ZaloMappingAudit {
   @@index([zaloUserId])
   @@index([targetId])
   @@index([performedAt])
-}
-
-enum Role {
-  ADMIN
-  MANAGER
-  TEACHER
-  STUDENT
-}
-
-enum Gender {
-  Nam
-  Nu
-  Khac
-}
-
-enum SalaryType {
-  PERCENT
-  HOURLY
-}
-
-enum TuitionStatus {
-  PAID
-  PENDING
-  DEBT
-}
-
-enum AttendanceStatus {
-  PRESENT
-  ABSENT
-  LEAVE_REQUEST
-}
-
-enum AttendanceSlot {
-  MORNING
-  AFTERNOON
-  EVENING
-  CUSTOM
-}
-
-enum AttendanceAuditAction {
-  CREATE
-  UPDATE
-  DELETE
-}
-
-enum TransactionStatus {
-  SUCCESS
-  FAILED
-}
-
-enum PaymentAdjustmentSource {
-  CASH
-  ADJUSTMENT
 }
