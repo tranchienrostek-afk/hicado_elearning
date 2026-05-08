@@ -125,12 +125,33 @@ router.get('/overview', authenticateToken, async (req, res) => {
     const sessionSet = new Set(records.map(r => `${r.date.toISOString().slice(0, 10)}__${r.slot}`));
     const totalClassSessions = sessionSet.size;
 
+    const SLOT_ORDER: Record<string, number> = { MORNING: 1, AFTERNOON: 2, EVENING: 3, CUSTOM: 4 };
+    const sessions = Array.from(sessionSet)
+      .map(s => {
+        const [date, slot] = s.split('__');
+        return { date, slot };
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date.localeCompare(b.date);
+        return (SLOT_ORDER[a.slot] || 99) - (SLOT_ORDER[b.slot] || 99);
+      });
+
     const students = cls.students.map(({ student: s }) => {
       const stuRecs = records.filter(r => r.studentId === s.id);
+      
+      const sessionRecords = sessions.map(sess => {
+        const rec = stuRecs.find(r => r.date.toISOString().slice(0, 10) === sess.date && r.slot === sess.slot);
+        return {
+          date: sess.date,
+          slot: sess.slot,
+          status: rec ? rec.status : null
+        };
+      });
+
       const presentRecs = stuRecs.filter(r => r.status === 'PRESENT');
-      // Only count explicit ABSENT/LEAVE_REQUEST records — missing records are not auto-counted as absent
       const absentRecs  = stuRecs.filter(r => r.status === 'ABSENT' || r.status === 'LEAVE_REQUEST');
       const totalSessionUnits = presentRecs.reduce((sum, r) => sum + r.sessionUnits, 0);
+
       return {
         studentId:    s.id,
         studentName:  s.name,
@@ -139,6 +160,7 @@ router.get('/overview', authenticateToken, async (req, res) => {
         presentCount: presentRecs.length,
         absentCount:  absentRecs.length,
         amount:       Math.round(totalSessionUnits * cls.tuitionPerSession),
+        sessionRecords,
       };
     });
 
@@ -149,6 +171,7 @@ router.get('/overview', authenticateToken, async (req, res) => {
       fromDate,
       toDate,
       totalClassSessions,
+      sessions,
       summary: {
         studentCount:  students.length,
         totalPresent:  students.reduce((sum, s) => sum + s.presentCount, 0),

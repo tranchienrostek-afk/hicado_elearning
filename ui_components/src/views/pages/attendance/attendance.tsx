@@ -9,6 +9,15 @@ type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LEAVE_REQUEST';
 type AttendanceSlot = 'MORNING' | 'AFTERNOON' | 'EVENING' | 'CUSTOM';
 type PeriodType = 'month' | 'multiMonth' | 'dateRange';
 
+interface SessionCol {
+  date: string;
+  slot: string;
+}
+interface SessionRecord {
+  date: string;
+  slot: string;
+  status: string | null;
+}
 interface OverviewStudent {
   studentId: string;
   studentName: string;
@@ -17,6 +26,7 @@ interface OverviewStudent {
   presentCount: number;
   absentCount: number;
   amount: number;
+  sessionRecords: SessionRecord[];
 }
 interface OverviewResponse {
   classId: string;
@@ -25,6 +35,7 @@ interface OverviewResponse {
   fromDate: string;
   toDate: string;
   totalClassSessions: number;
+  sessions: SessionCol[];
   summary: { studentCount: number; totalPresent: number; totalAbsent: number; totalAmount: number };
   students: OverviewStudent[];
 }
@@ -40,6 +51,13 @@ const SLOT_LABEL: Record<AttendanceSlot, string> = {
   AFTERNOON: 'Chiều',
   EVENING: 'Tối',
   CUSTOM: 'Ca khác',
+};
+
+const SLOT_SHORT: Record<string, string> = {
+  MORNING: 'Sáng',
+  AFTERNOON: 'Chiều',
+  EVENING: 'Tối',
+  CUSTOM: 'Khác',
 };
 
 const formatDateTime = (value?: string) => {
@@ -503,45 +521,78 @@ export const AttendancePage = () => {
                   </p>
                 </div>
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="text-left px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Học sinh</th>
-                      <th className="text-center px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Buổi</th>
-                      <th className="text-center px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Có mặt</th>
-                      <th className="text-center px-4 py-3">
-                        <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Vắng</p>
-                        <p className="text-[9px] font-bold text-slate-400 normal-case tracking-normal">đã ghi nhận</p>
-                      </th>
-                      <th className="text-right px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Số tiền</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {overviewData.students.map((s) => (
-                      <tr key={s.studentId} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <p className="font-bold text-slate-800">{s.studentName}</p>
-                          {s.studentCode && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{s.studentCode}</p>}
-                        </td>
-                        <td className="text-center px-4 py-4 font-bold text-slate-600">{s.sessionCount}</td>
-                        <td className="text-center px-4 py-4 font-bold text-hicado-emerald">{s.presentCount}</td>
-                        <td className="text-center px-4 py-4 font-bold text-rose-500">{s.absentCount}</td>
-                        <td className="text-right px-6 py-4 font-black text-hicado-emerald">{formatVND(s.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-slate-50 border-t-2 border-slate-200">
-                      <td className="px-6 py-4 text-[11px] font-black text-slate-700 uppercase tracking-widest">
-                        Tổng ({overviewData.summary.studentCount} học sinh)
-                      </td>
-                      <td className="text-center px-4 py-4 text-slate-400 font-bold">—</td>
-                      <td className="text-center px-4 py-4 font-black text-hicado-emerald">{overviewData.summary.totalPresent}</td>
-                      <td className="text-center px-4 py-4 font-black text-rose-500">{overviewData.summary.totalAbsent}</td>
-                      <td className="text-right px-6 py-4 font-black text-hicado-emerald">{formatVND(overviewData.summary.totalAmount)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
+                <>
+                  <div className="overflow-x-auto relative scrollbar-thin scrollbar-thumb-slate-200">
+                    <table className="w-full text-sm border-separate border-spacing-0">
+                      <thead>
+                        <tr className="bg-slate-50">
+                          <th className="sticky left-0 bg-slate-50 z-20 text-left px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-r border-slate-200 min-w-[180px]">
+                            Học sinh
+                          </th>
+                          {overviewData.sessions.map((sess, idx) => {
+                            const d = new Date(sess.date);
+                            return (
+                              <th key={idx} className="text-center px-2 py-3 border-b border-r border-slate-200 min-w-[64px]">
+                                <p className="text-[10px] font-black text-slate-700">{d.getDate()}/{d.getMonth() + 1}</p>
+                                <p className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">{SLOT_SHORT[sess.slot] || sess.slot}</p>
+                              </th>
+                            );
+                          })}
+                          <th className="text-center px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-r border-slate-200 min-w-[80px]">Có mặt</th>
+                          <th className="text-center px-4 py-3 border-b border-r border-slate-200 min-w-[80px]">
+                            <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Vắng</p>
+                            <p className="text-[9px] font-bold text-slate-400 normal-case tracking-normal">ghi nhận</p>
+                          </th>
+                          <th className="text-right px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest border-b border-slate-200 min-w-[120px]">Số tiền</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {overviewData.students.map((s) => (
+                          <tr key={s.studentId} className="hover:bg-slate-50 transition-colors group">
+                            <td className="sticky left-0 bg-white group-hover:bg-slate-50 z-10 px-6 py-4 border-r border-slate-100 transition-colors">
+                              <p className="font-bold text-slate-800 truncate max-w-[150px]">{s.studentName}</p>
+                              {s.studentCode && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{s.studentCode}</p>}
+                            </td>
+                            {s.sessionRecords.map((rec, idx) => (
+                              <td key={idx} className="text-center px-2 py-4 border-r border-slate-50">
+                                {rec.status === 'PRESENT' ? (
+                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-hicado-emerald/10 text-hicado-emerald font-black text-xs">✓</span>
+                                ) : rec.status === 'ABSENT' || rec.status === 'LEAVE_REQUEST' ? (
+                                  <span className="inline-flex items-center justify-center w-6 h-6 rounded-lg bg-rose-50 text-rose-500 font-black text-xs">✗</span>
+                                ) : (
+                                  <span className="text-slate-300 font-bold">—</span>
+                                )}
+                              </td>
+                            ))}
+                            <td className="text-center px-4 py-4 font-bold text-hicado-emerald border-r border-slate-50">{s.presentCount}</td>
+                            <td className="text-center px-4 py-4 font-bold text-rose-500 border-r border-slate-50">{s.absentCount}</td>
+                            <td className="text-right px-6 py-4 font-black text-hicado-emerald">{formatVND(s.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr className="bg-slate-50 font-black">
+                          <td className="sticky left-0 bg-slate-50 z-10 px-6 py-5 text-[11px] text-slate-700 uppercase tracking-widest border-t-2 border-r border-slate-200">
+                            Tổng ({overviewData.summary.studentCount} hs)
+                          </td>
+                          {overviewData.sessions.map((_, idx) => (
+                            <td key={idx} className="border-t-2 border-r border-slate-200" />
+                          ))}
+                          <td className="text-center px-4 py-5 text-hicado-emerald border-t-2 border-r border-slate-200">{overviewData.summary.totalPresent}</td>
+                          <td className="text-center px-4 py-5 text-rose-500 border-t-2 border-r border-slate-200">{overviewData.summary.totalAbsent}</td>
+                          <td className="text-right px-6 py-5 text-hicado-emerald border-t-2 border-slate-200">{formatVND(overviewData.summary.totalAmount)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                  {overviewData.sessions.length > 15 && (
+                    <div className="px-6 py-3 bg-slate-50/50 border-t border-slate-100 flex items-center justify-center gap-2">
+                      <div className="w-1 h-1 rounded-full bg-slate-300" />
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Cuộn ngang để xem thêm tất cả các buổi học</p>
+                      <div className="w-1 h-1 rounded-full bg-slate-300" />
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
