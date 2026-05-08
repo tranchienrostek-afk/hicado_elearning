@@ -187,36 +187,10 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
   const user = (req as any).user as { userId: string; name: string; role: string };
 
   try {
-    // Conflict check: is this zaloUserId already used by someone else?
-    const [existingStudent, existingTeacher] = await Promise.all([
-      prisma.student.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
-      prisma.teacher.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
-    ]);
-
-    const conflictTarget = existingStudent ?? existingTeacher;
-    const conflictType = existingStudent ? 'STUDENT' : existingTeacher ? 'TEACHER' : null;
-
-    // Conflict exists and is NOT the same target being re-linked
-    const isSameTarget =
-      (studentId && existingStudent?.id === studentId) ||
-      (teacherId && existingTeacher?.id === teacherId);
-
-    if (conflictTarget && !isSameTarget && !force) {
-      return res.status(409).json({
-        conflict: true,
-        message: `zalo_user_id này đang được ghép với ${conflictType === 'STUDENT' ? 'học sinh' : 'giáo viên'} "${conflictTarget.name}". Xác nhận override?`,
-        conflictType,
-        conflictId: conflictTarget.id,
-        conflictName: conflictTarget.name,
-      });
-    }
-
-    // Resolve target details for audit
+    // Resolve target details
     let targetName = '';
     let targetId = '';
     let targetType = '';
-    let previousTargetId: string | undefined;
-    let previousTargetName: string | undefined;
 
     if (teacherId) {
       const teacher = await prisma.teacher.findUnique({ where: { id: teacherId }, select: { name: true } });
@@ -224,50 +198,81 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       targetName = teacher.name;
       targetId = teacherId;
       targetType = 'TEACHER';
-      if (conflictTarget && !isSameTarget) {
-        previousTargetId = conflictTarget.id;
-        previousTargetName = conflictTarget.name;
-      }
-      await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId } });
     } else {
       const student = await prisma.student.findUnique({ where: { id: studentId }, select: { name: true } });
       if (!student) return res.status(404).json({ message: 'Không tìm thấy học sinh' });
       targetName = student.name;
       targetId = studentId;
       targetType = 'STUDENT';
+    }
+
+    // ATOMIC TRANSACTION: Check Conflict -> Clear Old (if override) -> Update New -> Audit
+    await prisma.$transaction(async (tx) => {
+      const [existingStudent, existingTeacher] = await Promise.all([
+        tx.student.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
+        tx.teacher.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
+      ]);
+
+      const conflictTarget = existingStudent ?? existingTeacher;
+      const conflictType = existingStudent ? 'STUDENT' : existingTeacher ? 'TEACHER' : null;
+      const isSameTarget =
+        (studentId && existingStudent?.id === studentId) ||
+        (teacherId && existingTeacher?.id === teacherId);
+
       if (conflictTarget && !isSameTarget) {
-        previousTargetId = conflictTarget.id;
-        previousTargetName = conflictTarget.name;
+        if (!force) {
+          const error: any = new Error('CONFLICT');
+          error.conflictInfo = {
+            conflict: true,
+            conflictType,
+            conflictId: conflictTarget.id,
+            conflictName: conflictTarget.name,
+          };
+          throw error;
+        }
+        // Force override: clear old target first
+        if (conflictType === 'STUDENT') {
+          await tx.student.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
+        } else {
+          await tx.teacher.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
+        }
       }
-      await prisma.student.update({ where: { id: studentId }, data: { zaloUserId } });
-    }
 
-    // If override: clear old target's zaloUserId
-    if (conflictTarget && !isSameTarget && force) {
-      if (conflictType === 'STUDENT') {
-        await prisma.student.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
+      // Update new target
+      if (teacherId) {
+        await tx.teacher.update({ where: { id: teacherId }, data: { zaloUserId } });
       } else {
-        await prisma.teacher.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
+        await tx.student.update({ where: { id: studentId }, data: { zaloUserId } });
       }
-    }
 
-    // Audit log
-    await prisma.zaloMappingAudit.create({
-      data: {
-        action: conflictTarget && !isSameTarget ? 'OVERRIDE' : 'LINK',
-        zaloUserId,
-        targetType,
-        targetId,
-        targetName,
-        previousTargetId,
-        previousTargetName,
-        performedBy: user.userId,
-        performedByName: user.name ?? user.userId,
-      },
+      // Audit log
+      await tx.zaloMappingAudit.create({
+        data: {
+          action: conflictTarget && !isSameTarget ? 'OVERRIDE' : 'LINK',
+          zaloUserId,
+          targetType,
+          targetId,
+          targetName,
+          previousTargetId: conflictTarget && !isSameTarget ? conflictTarget.id : undefined,
+          previousTargetName: conflictTarget && !isSameTarget ? conflictTarget.name : undefined,
+          performedBy: user.userId,
+          performedByName: user.name ?? user.userId,
+        },
+      });
     });
 
     res.json({ message: 'Liên kết thành công!', zaloUserId, targetId, targetType });
   } catch (err: any) {
+    if (err.message === 'CONFLICT') {
+      const { conflictType, conflictId, conflictName } = err.conflictInfo;
+      return res.status(409).json({
+        conflict: true,
+        message: `zalo_user_id này đang được ghép với ${conflictType === 'STUDENT' ? 'học sinh' : 'giáo viên'} "${conflictName}". Xác nhận override?`,
+        conflictType,
+        conflictId,
+        conflictName,
+      });
+    }
     if (err.code === 'P2002') {
       return res.status(409).json({ message: 'zalo_user_id này đã được dùng bởi người khác (unique constraint).' });
     }

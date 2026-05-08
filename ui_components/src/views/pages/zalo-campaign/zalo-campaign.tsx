@@ -107,6 +107,7 @@ export const ZaloCampaignPage = () => {
   const [candidateTotal, setCandidateTotal] = useState(0);
   const [candidatePage, setCandidatePage] = useState(1);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [mappingAudits, setMappingAudits] = useState<MappingAudit[]>([]);
   const [mappingAuditsLoading, setMappingAuditsLoading] = useState(false);
   const [conflictData, setConflictData] = useState<{
@@ -276,11 +277,21 @@ export const ZaloCampaignPage = () => {
   }, [token]);
 
   useEffect(() => {
+    const h = setTimeout(() => setDebouncedSearch(candidateSearch), 500);
+    return () => clearTimeout(h);
+  }, [candidateSearch]);
+
+  useEffect(() => {
     if (activeTab === 'mapping') {
-      fetchCandidates(candidateType, candidateSearch, candidatePage);
+      fetchCandidates(candidateType, debouncedSearch, candidatePage);
+    }
+  }, [activeTab, candidateType, debouncedSearch, candidatePage, fetchCandidates]);
+
+  useEffect(() => {
+    if (activeTab === 'mapping') {
       fetchMappingAudits();
     }
-  }, [activeTab, candidateType, candidateSearch, candidatePage, fetchCandidates, fetchMappingAudits]);
+  }, [activeTab, fetchMappingAudits]);
 
   const handleLinkManual = async (zaloUserId: string, targetId: string, targetType: string, force = false) => {
     if (!zaloUserId) return;
