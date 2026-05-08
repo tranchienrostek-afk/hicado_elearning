@@ -262,15 +262,53 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
   }
 });
 
-// 4b. Unlink: xóa zaloUserId khỏi student hoặc teacher
+// 4b. Unlink: remove zaloUserId with audit log
 router.delete('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { studentId, teacherId } = req.body;
   if (!studentId && !teacherId) return res.status(400).json({ message: 'Cần studentId hoặc teacherId' });
+
+  const user = (req as any).user as { userId: string; name: string };
+
   try {
-    if (studentId) await prisma.student.update({ where: { id: studentId }, data: { zaloUserId: null } });
-    if (teacherId) await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId: null } });
+    let targetName = '';
+    let targetId = '';
+    let targetType = '';
+    let zaloUserId = '';
+
+    if (studentId) {
+      const student = await prisma.student.findUnique({ where: { id: studentId }, select: { name: true, zaloUserId: true } });
+      if (!student) return res.status(404).json({ message: 'Không tìm thấy học sinh' });
+      targetName = student.name;
+      targetId = studentId;
+      targetType = 'STUDENT';
+      zaloUserId = student.zaloUserId ?? '';
+      await prisma.student.update({ where: { id: studentId }, data: { zaloUserId: null } });
+    } else {
+      const teacher = await prisma.teacher.findUnique({ where: { id: teacherId }, select: { name: true, zaloUserId: true } });
+      if (!teacher) return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
+      targetName = teacher.name;
+      targetId = teacherId;
+      targetType = 'TEACHER';
+      zaloUserId = teacher.zaloUserId ?? '';
+      await prisma.teacher.update({ where: { id: teacherId }, data: { zaloUserId: null } });
+    }
+
+    await prisma.zaloMappingAudit.create({
+      data: {
+        action: 'UNLINK',
+        zaloUserId,
+        targetType,
+        targetId,
+        targetName,
+        performedBy: user.userId,
+        performedByName: user.name ?? user.userId,
+      },
+    });
+
     res.json({ message: 'Đã hủy liên kết' });
-  } catch { res.status(500).json({ message: 'Lỗi hủy liên kết' }); }
+  } catch (err: any) {
+    res.status(500).json({ message: 'Lỗi hủy liên kết: ' + err.message });
+  }
 });
 
 // 5. Send OA Customer Service message (works for followers, no ZNS approval needed)
