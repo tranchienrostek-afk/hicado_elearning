@@ -11,28 +11,30 @@ function runPrisma(args) {
   });
 }
 
-function getStatusOutput() {
+function runPrismaCapture(args) {
   try {
-    return runPrisma(['migrate', 'status']);
+    return { ok: true, output: runPrisma(args) };
   } catch (error) {
-    return `${error.stdout || ''}\n${error.stderr || ''}`;
+    return { ok: false, output: `${error.stdout || ''}\n${error.stderr || error.message || ''}` };
   }
 }
 
-const status = getStatusOutput();
-const hasFailedTarget = status.includes(migrationName) && /failed migrations|failed to apply|migrations.*failed/i.test(status);
+const status = runPrismaCapture(['migrate', 'status']);
+const output = status.output || '';
+const mentionsTarget = output.includes(migrationName);
+const mentionsFailure = /failed|P3009|P3018|migrate found failed migrations/i.test(output);
 
-if (!hasFailedTarget) {
-  console.log(`[migration-repair] No failed ${migrationName} marker detected.`);
+if (!mentionsTarget && !mentionsFailure) {
+  console.log('[migration-repair] No failed migration marker detected.');
   process.exit(0);
 }
 
-console.log(`[migration-repair] Marking failed ${migrationName} as rolled back so deploy can re-apply clean SQL.`);
-try {
-  const output = runPrisma(['migrate', 'resolve', '--rolled-back', migrationName]);
-  if (output.trim()) console.log(output.trim());
-} catch (error) {
-  console.error(error.stdout || '');
-  console.error(error.stderr || error.message);
-  process.exit(1);
+console.log(`[migration-repair] Attempting rolled-back resolve for ${migrationName}.`);
+const resolved = runPrismaCapture(['migrate', 'resolve', '--rolled-back', migrationName]);
+const resolvedOutput = resolved.output.trim();
+if (resolvedOutput) console.log(resolvedOutput);
+
+if (!resolved.ok) {
+  const benign = /already.*rolled back|not.*failed|not found|could not be found|is not in a failed state/i.test(resolved.output);
+  if (!benign) process.exit(1);
 }
