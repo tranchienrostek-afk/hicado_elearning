@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCenterStore, useAuthStore } from '@/store';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type MainTab = 'campaigns' | 'create' | 'tracking' | 'followers' | 'config';
+type MainTab = 'campaigns' | 'create' | 'tracking' | 'followers' | 'mapping' | 'config';
 type WizardStep = 1 | 2 | 3 | 4 | 5;
 type CampaignType = 'TUITION_REMINDER' | 'GENERAL';
 
@@ -21,6 +21,28 @@ interface Follower {
   userId: string; displayName: string; avatar: string; tags: string[];
   linkedTeacher: { id: string; name: string; phone: string } | null;
   linkedStudent: { id: string; name: string; parentPhone: string } | null;
+}
+
+interface MappingCandidate {
+  id: string;
+  name: string;
+  phone?: string;
+  parentPhone?: string;
+  schoolClass?: string;
+  zaloUserId?: string | null;
+}
+
+interface MappingAudit {
+  id: string;
+  action: 'LINK' | 'UNLINK' | 'OVERRIDE';
+  zaloUserId: string;
+  targetType: string;
+  targetId: string;
+  targetName: string;
+  previousTargetId?: string;
+  previousTargetName?: string;
+  performedByName: string;
+  performedAt: string;
 }
 
 // ── Follower mapping helpers ───────────────────────────────────────────────────
@@ -77,6 +99,23 @@ export const ZaloCampaignPage = () => {
   const [drawerFollower, setDrawerFollower] = useState<Follower | null>(null);
   const [drawerSearch, setDrawerSearch] = useState('');
   const [isLinking, setIsLinking] = useState(false);
+
+  // ── Manual Mapping ────────────────────────────────────────────────────────
+  const [candidateType, setCandidateType] = useState<'STUDENTS' | 'TEACHERS'>('STUDENTS');
+  const [candidateSearch, setCandidateSearch] = useState('');
+  const [candidates, setCandidates] = useState<MappingCandidate[]>([]);
+  const [candidateTotal, setCandidateTotal] = useState(0);
+  const [candidatePage, setCandidatePage] = useState(1);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [mappingAudits, setMappingAudits] = useState<MappingAudit[]>([]);
+  const [mappingAuditsLoading, setMappingAuditsLoading] = useState(false);
+  const [conflictData, setConflictData] = useState<{
+    zaloUserId: string;
+    targetId: string;
+    targetType: string;
+    message: string;
+    conflictName: string;
+  } | null>(null);
 
   // ── Config (existing) ──────────────────────────────────────────────────────
   const [config, setConfig] = useState({ ZALO_APP_ID: '', ZALO_SECRET_KEY: '', ZALO_REFRESH_TOKEN: '', ZALO_ACCESS_TOKEN: '' });
@@ -212,6 +251,87 @@ export const ZaloCampaignPage = () => {
       setFollowersLoading(false);
     }
   }, [token]);
+
+  const fetchCandidates = useCallback(async (type: string, search: string, page: number) => {
+    if (!token) return;
+    setCandidatesLoading(true);
+    try {
+      const r = await fetch(`/api/zalo/mapping/candidates?type=${type}&search=${encodeURIComponent(search)}&page=${page}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const d = await r.json();
+      if (r.ok) {
+        setCandidates(d.items);
+        setCandidateTotal(d.total);
+      }
+    } catch {} finally { setCandidatesLoading(false); }
+  }, [token]);
+
+  const fetchMappingAudits = useCallback(async () => {
+    if (!token) return;
+    setMappingAuditsLoading(true);
+    try {
+      const r = await fetch('/api/zalo/mapping/audit-log', { headers: { 'Authorization': `Bearer ${token}` } });
+      const d = await r.json();
+      if (r.ok) setMappingAudits(d);
+    } catch {} finally { setMappingAuditsLoading(false); }
+  }, [token]);
+
+  useEffect(() => {
+    if (activeTab === 'mapping') {
+      fetchCandidates(candidateType, candidateSearch, candidatePage);
+      fetchMappingAudits();
+    }
+  }, [activeTab, candidateType, candidateSearch, candidatePage, fetchCandidates, fetchMappingAudits]);
+
+  const handleLinkManual = async (zaloUserId: string, targetId: string, targetType: string, force = false) => {
+    if (!zaloUserId) return;
+    setIsLinking(true);
+    try {
+      const body: any = { zaloUserId, force };
+      if (targetType === 'STUDENTS') body.studentId = targetId;
+      else body.teacherId = targetId;
+
+      const r = await fetch('/api/zalo/link', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+
+      if (r.status === 409 && d.conflict) {
+        setConflictData({ zaloUserId, targetId, targetType, message: d.message, conflictName: d.conflictName });
+        return;
+      }
+
+      if (r.ok) {
+        setConflictData(null);
+        fetchCandidates(candidateType, candidateSearch, candidatePage);
+        fetchMappingAudits();
+        fetchFollowers();
+      } else {
+        alert(d.message || 'Lỗi liên kết');
+      }
+    } catch { alert('Lỗi kết nối'); } finally { setIsLinking(false); }
+  };
+
+  const handleUnlinkManual = async (targetId: string, targetType: string) => {
+    if (!confirm('Xác nhận hủy liên kết Zalo cho người này?')) return;
+    try {
+      const body: any = {};
+      if (targetType === 'STUDENTS') body.studentId = targetId;
+      else body.teacherId = targetId;
+
+      const r = await fetch('/api/zalo/link', {
+        method: 'DELETE',
+        headers: authHeaders,
+        body: JSON.stringify(body),
+      });
+      if (r.ok) {
+        fetchCandidates(candidateType, candidateSearch, candidatePage);
+        fetchMappingAudits();
+        fetchFollowers();
+      } else alert(((await r.json()).message) || 'Lỗi hủy liên kết');
+    } catch { alert('Lỗi kết nối'); }
+  };
 
   useEffect(() => {
     if (activeTab === 'followers' && followers.length === 0 && !followersLoading) {
@@ -354,6 +474,7 @@ export const ZaloCampaignPage = () => {
           {TAB('create', 'Tạo chiến dịch')}
           {TAB('tracking', 'Theo dõi')}
           {TAB('followers', 'Followers')}
+          {TAB('mapping', 'Ghép danh tính')}
           {TAB('config', 'Cài đặt')}
         </div>
       </div>
@@ -965,6 +1086,178 @@ export const ZaloCampaignPage = () => {
           </details>
         </div>
       )}
+
+      {/* ══ TAB: MAPPING (Manual Identity Mapping) ══════════════════════ */}
+      {activeTab === 'mapping' && (
+        <div className="space-y-6 animate-in fade-in duration-500">
+          {/* Header & Search */}
+          <div className="bg-white border border-hicado-slate rounded-[2rem] p-6 shadow-premium">
+            <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+              <div className="flex bg-hicado-slate/30 p-1 rounded-xl">
+                <button
+                  onClick={() => setCandidateType('STUDENTS')}
+                  className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${candidateType === 'STUDENTS' ? 'bg-hicado-navy text-white shadow' : 'text-hicado-navy/40 hover:text-hicado-navy'}`}
+                >Học sinh</button>
+                <button
+                  onClick={() => setCandidateType('TEACHERS')}
+                  className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${candidateType === 'TEACHERS' ? 'bg-hicado-navy text-white shadow' : 'text-hicado-navy/40 hover:text-hicado-navy'}`}
+                >Giáo viên</button>
+              </div>
+
+              <div className="relative flex-1 w-full">
+                <input
+                  type="text"
+                  value={candidateSearch}
+                  onChange={(e) => { setCandidateSearch(e.target.value); setCandidatePage(1); }}
+                  placeholder={`Tìm ${candidateType === 'STUDENTS' ? 'tên học sinh' : 'tên giáo viên'}...`}
+                  className="w-full bg-hicado-slate/10 border border-hicado-slate/30 rounded-2xl px-5 py-3 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30 transition-all"
+                />
+                <div className="absolute right-4 top-1/2 -translate-y-1/2 text-hicado-navy/20">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-4 text-xs font-black uppercase tracking-widest text-hicado-navy/40">
+                <span>{candidateTotal} kết quả</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    disabled={candidatePage <= 1}
+                    onClick={() => setCandidatePage(p => p - 1)}
+                    className="p-2 hover:bg-hicado-slate rounded-lg disabled:opacity-30"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M15 19l-7-7 7-7" /></svg>
+                  </button>
+                  <span>Trang {candidatePage}</span>
+                  <button
+                    disabled={candidatePage * 20 >= candidateTotal}
+                    onClick={() => setCandidatePage(p => p + 1)}
+                    className="p-2 hover:bg-hicado-slate rounded-lg disabled:opacity-30"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M9 5l7 7-7 7" /></svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Candidates Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {candidatesLoading && Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="bg-white border border-hicado-slate rounded-[1.5rem] p-5 h-32 animate-pulse flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="h-4 bg-hicado-slate/20 rounded w-2/3"></div>
+                  <div className="h-3 bg-hicado-slate/10 rounded w-1/2"></div>
+                </div>
+                <div className="h-8 bg-hicado-slate/20 rounded-xl"></div>
+              </div>
+            ))}
+
+            {!candidatesLoading && candidates.map(c => (
+              <div key={c.id} className="bg-white border border-hicado-slate rounded-[1.5rem] p-5 hover:shadow-premium transition-all group flex flex-col justify-between">
+                <div>
+                  <div className="flex justify-between items-start mb-2">
+                    <h4 className="font-black text-hicado-navy leading-tight">{c.name}</h4>
+                    {c.zaloUserId ? (
+                      <span className="bg-emerald-100 text-emerald-700 text-[10px] px-2 py-0.5 rounded-full font-black uppercase">Đã ghép</span>
+                    ) : (
+                      <span className="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded-full font-black uppercase">Chưa ghép</span>
+                    )}
+                  </div>
+                  <p className="text-xs font-bold text-hicado-navy/40 mb-1">
+                    {candidateType === 'STUDENTS' ? `Lớp: ${c.schoolClass || '—'}` : `Môn: ${c.phone || '—'}`}
+                  </p>
+                  <p className="text-[10px] font-mono text-hicado-navy/20 truncate" title={c.zaloUserId || ''}>
+                    UID: {c.zaloUserId || '(Trống)'}
+                  </p>
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-hicado-slate/50 flex gap-2">
+                  {c.zaloUserId ? (
+                    <button
+                      onClick={() => handleUnlinkManual(c.id, candidateType)}
+                      className="flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-rose-500 bg-rose-50 hover:bg-rose-100 transition-all"
+                    >Hủy ghép</button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        const uid = prompt(`Nhập Zalo User ID cho ${c.name}:`);
+                        if (uid) handleLinkManual(uid, c.id, candidateType);
+                      }}
+                      className="flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-hicado-navy bg-hicado-slate/40 hover:bg-hicado-navy hover:text-white transition-all"
+                    >Ghép thủ công</button>
+                  )}
+                  <button
+                    onClick={() => {
+                      // Mở tab Followers và scroll đến người này (nếu có thể)
+                      setActiveTab('followers');
+                      setDrawerSearch(c.name);
+                    }}
+                    className="p-2 rounded-xl bg-hicado-slate/20 text-hicado-navy/40 hover:text-hicado-navy transition-all"
+                    title="Tìm trên danh sách Follower"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 21h7a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v11m1-5l2 2 4-4" /></svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Audit Logs */}
+          <div className="bg-white border border-hicado-slate rounded-[2rem] p-6 overflow-hidden">
+            <h3 className="text-sm font-black text-hicado-navy/40 uppercase tracking-widest mb-4">Nhật ký định danh</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-hicado-slate/50">
+                    {['Thời gian', 'Hành động', 'Đối tượng', 'Zalo UID', 'Người thực hiện'].map(h => (
+                      <th key={h} className="px-4 py-3 font-black text-hicado-navy/30 uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hicado-slate/30">
+                  {mappingAuditsLoading && Array.from({ length: 3 }).map((_, i) => (
+                    <tr key={i} className="animate-pulse">
+                      <td colSpan={5} className="px-4 py-4"><div className="h-4 bg-hicado-slate/10 rounded"></div></td>
+                    </tr>
+                  ))}
+                  {mappingAudits.map(log => (
+                    <tr key={log.id} className="hover:bg-hicado-slate/10 transition-colors">
+                      <td className="px-4 py-4 text-hicado-navy/40 font-bold whitespace-nowrap">
+                        {new Date(log.performedAt).toLocaleString('vi-VN')}
+                      </td>
+                      <td className="px-4 py-4">
+                        <span className={`px-2 py-0.5 rounded font-black uppercase text-[10px] ${
+                          log.action === 'LINK' ? 'bg-green-100 text-green-700' :
+                          log.action === 'OVERRIDE' ? 'bg-amber-100 text-amber-700' :
+                          'bg-rose-100 text-rose-700'
+                        }`}>
+                          {log.action}
+                        </span>
+                      </td>
+                      <td className="px-4 py-4">
+                        <p className="font-black text-hicado-navy">{log.targetName}</p>
+                        <p className="text-[10px] text-hicado-navy/40 uppercase tracking-tighter">
+                          {log.targetType === 'STUDENT' ? 'Học sinh' : 'Giáo viên'}
+                          {log.previousTargetName && ` (Thay cho ${log.previousTargetName})`}
+                        </p>
+                      </td>
+                      <td className="px-4 py-4 font-mono text-hicado-navy/40 truncate max-w-[120px]" title={log.zaloUserId}>
+                        {log.zaloUserId}
+                      </td>
+                      <td className="px-4 py-4 font-bold text-hicado-navy">
+                        {log.performedByName}
+                      </td>
+                    </tr>
+                  ))}
+                  {!mappingAuditsLoading && mappingAudits.length === 0 && (
+                    <tr><td colSpan={5} className="px-4 py-8 text-center text-hicado-navy/20 font-bold">Chưa có lịch sử thay đổi</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
 
     {/* ══ SLIDE-IN DRAWER: chọn học sinh để liên kết ══════════════════════ */}
@@ -1045,6 +1338,33 @@ export const ZaloCampaignPage = () => {
             {drawerStudentList.all.length === 0 && drawerSearch && (
               <p className="text-center text-sm text-hicado-navy/30 font-bold py-10">Không tìm thấy học sinh phù hợp</p>
             )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ══ OVERRIDE CONFLICT MODAL ══════════════════════════════════════ */}
+    {conflictData && (
+      <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-hicado-navy/40 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="bg-white rounded-[2.5rem] border border-hicado-slate shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-200">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-3xl mb-6 mx-auto">⚠️</div>
+          <h3 className="text-xl font-serif font-black text-hicado-navy text-center mb-2">Xung đột định danh</h3>
+          <p className="text-sm text-hicado-navy/60 text-center leading-relaxed mb-8">
+            Zalo ID này đã được ghép với <strong>{conflictData.conflictName}</strong>.
+            <br />Bạn có chắc chắn muốn gỡ liên kết cũ và chuyển sang người này không?
+          </p>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={() => handleLinkManual(conflictData.zaloUserId, conflictData.targetId, conflictData.targetType, true)}
+              disabled={isLinking}
+              className="w-full bg-hicado-navy text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-[1.02] transition-all shadow-lg"
+            >
+              {isLinking ? 'Đang xử lý...' : 'Xác nhận ghi đè'}
+            </button>
+            <button
+              onClick={() => setConflictData(null)}
+              className="w-full py-3 text-hicado-navy/40 font-black text-xs uppercase tracking-widest hover:bg-hicado-slate/30 rounded-2xl transition-all"
+            >Bỏ qua</button>
           </div>
         </div>
       </div>
