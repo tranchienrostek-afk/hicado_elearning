@@ -84,7 +84,7 @@ model Teacher {
   gender           Gender?
   cccd             String?
   phone            String
-  zaloUserId       String?
+  zaloUserId       String?  @unique
   bankAccount      String?
   bankName         String?
   salaryRate       Float    // Percentage (e.g., 0.8)
@@ -110,7 +110,7 @@ model Student {
   studentCode    String?       @unique
   studentPhone   String?
   parentPhone    String?
-  zaloUserId     String?
+  zaloUserId     String?   @unique
   isActive       Boolean  @default(true)
 
   user           User?
@@ -300,4 +300,22 @@ model SystemConfig {
   key       String   @id
   value     String   @db.Text
   updatedAt DateTime @updatedAt
+}
+
+model ZaloMappingAudit {
+  id                 String   @id @default(cuid())
+  action             String   // "LINK" | "UNLINK" | "OVERRIDE"
+  zaloUserId         String
+  targetType         String   // "STUDENT" | "TEACHER"
+  targetId           String
+  targetName         String
+  previousTargetId   String?  // khi OVERRIDE: id của target cũ đang giữ zaloUserId này
+  previousTargetName String?
+  performedBy        String   // userId của admin/manager
+  performedByName    String
+  performedAt        DateTime @default(now())
+
+  @@index([zaloUserId])
+  @@index([targetId])
+  @@index([performedAt])
 }
