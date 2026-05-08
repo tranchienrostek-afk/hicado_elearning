@@ -206,8 +206,12 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       targetType = 'STUDENT';
     }
 
-    // ATOMIC TRANSACTION: Check Conflict -> Clear Old (if override) -> Update New -> Audit
+    // ATOMIC TRANSACTION: Lock -> Check Conflict -> Clear Old (if override) -> Update New -> Audit
     await prisma.$transaction(async (tx) => {
+      // 1. Acquire advisory lock for this zaloUserId to prevent race conditions across tables (Student & Teacher)
+      // This ensures only one process can link/override this specific UID at a time.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'zalo_mapping_' + zaloUserId}))`;
+
       const [existingStudent, existingTeacher] = await Promise.all([
         tx.student.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
         tx.teacher.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
