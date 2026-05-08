@@ -13,10 +13,28 @@ import {
   type StudentImportRow,
   type TeacherImportRow,
 } from '@/utils/center-spreadsheet';
-import { downloadXlsxWorkbook } from '@/utils/excel-workbook';
-import { buildImportErrorRows, planImport, type ImportPlan } from '@/utils/import-planner';
+import { planImport, type ImportPlan } from '@/utils/import-planner';
 import { ImportPreviewModal } from '@/views/components/import-preview-modal';
-import { assessProfileDeletion, calculateStudentTuitionDue, sumPresentSessionUnits } from '@/utils/center-operations';
+import { calculateStudentTuitionDue, sumPresentSessionUnits } from '@/utils/center-operations';
+
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 
 const studentSchema = z.object({
   name: z.string().min(2, 'Tên quá ngắn'),
@@ -26,6 +44,8 @@ const studentSchema = z.object({
   schoolClass: z.string().optional(),
   parentPhone: z.string().optional(),
   studentPhone: z.string().optional(),
+  notes: z.string().optional(),
+  sortOrder: z.coerce.number().default(0),
 });
 
 const teacherSchema = z.object({
@@ -35,6 +55,10 @@ const teacherSchema = z.object({
   bankAccount: z.string().optional(),
   bankName: z.string().optional(),
   salaryRate: z.coerce.number().min(0).max(1),
+  salaryType: z.enum(['PERCENT', 'HOURLY']).default('PERCENT'),
+  hourlyRate: z.coerce.number().min(0).default(0),
+  notes: z.string().optional(),
+  sortOrder: z.coerce.number().default(0),
 });
 
 type TuitionBadgeStatus = 'PAID' | 'PENDING' | 'DEBT';
@@ -46,7 +70,7 @@ interface TeacherTuitionSnapshot {
 }
 
 export const Users = () => {
-  const { students, teachers, classes, attendance, transactions, importStudents, addStudent, updateStudent, deleteStudent, addTeacher, updateTeacher, deleteTeacher, isLoading } = useCenterStore();
+  const { students, teachers, classes, attendance, transactions, addStudent, updateStudent, deleteStudent, addTeacher, updateTeacher, deleteTeacher, reorderStudents, reorderTeachers, isLoading } = useCenterStore();
   const { role, auth, accounts, fetchAccounts, addAccount, deleteAccount } = useAuthStore();
   const [activeTab, setActiveTab] = useState<'STUDENTS' | 'TEACHERS'>('STUDENTS');
   const [isImportOpen, setIsImportOpen] = useState(false);
@@ -60,7 +84,6 @@ export const Users = () => {
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [sheetUrl, setSheetUrl] = useState('');
   const [isSyncing, setIsSyncing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importPlan, setImportPlan] = useState<ImportPlan<StudentImportRow | TeacherImportRow> | null>(null);
@@ -75,6 +98,42 @@ export const Users = () => {
   const [selectedAccount, setSelectedAccount] = useState<any>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  const handleDragEnd = async (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    if (activeTab === 'STUDENTS') {
+      const oldIndexInFull = students.findIndex(i => i.id === active.id);
+      const newIndexInFull = students.findIndex(i => i.id === over.id);
+      if (oldIndexInFull !== -1 && newIndexInFull !== -1) {
+        const newList = arrayMove(students, oldIndexInFull, newIndexInFull);
+        try {
+          await reorderStudents(newList.map(i => i.id));
+          toast.success('Đã cập nhật thứ tự học sinh');
+        } catch (error) {
+          toast.error('Lỗi khi cập nhật thứ tự');
+        }
+      }
+    } else {
+      const oldIndexInFull = teachers.findIndex(i => i.id === active.id);
+      const newIndexInFull = teachers.findIndex(i => i.id === over.id);
+      if (oldIndexInFull !== -1 && newIndexInFull !== -1) {
+        const newList = arrayMove(teachers, oldIndexInFull, newIndexInFull);
+        try {
+          await reorderTeachers(newList.map(i => i.id));
+          toast.success('Đã cập nhật thứ tự giáo viên');
+        } catch (error) {
+          toast.error('Lỗi khi cập nhật thứ tự');
+        }
+      }
+    }
+  };
 
   const isStaff = role === 'ADMIN' || role === 'MANAGER';
   const isTeacher = role === 'TEACHER';
@@ -125,7 +184,11 @@ export const Users = () => {
     specialization: '',
     bankAccount: '',
     bankName: '',
-    salaryRate: 0.8
+    salaryRate: 0.8,
+    salaryType: 'PERCENT',
+    hourlyRate: 0,
+    notes: '',
+    sortOrder: 0
   });
 
   const handleEdit = (item: any) => {
@@ -143,7 +206,11 @@ export const Users = () => {
       specialization: item.specialization || '',
       bankAccount: item.bankAccount || '',
       bankName: item.bankName || '',
-      salaryRate: item.salaryRate || 0.8
+      salaryRate: item.salaryRate || 0.8,
+      salaryType: item.salaryType || 'PERCENT',
+      hourlyRate: item.hourlyRate || 0,
+      notes: item.notes || '',
+      sortOrder: item.sortOrder || 0
     });
     setIsAddModalOpen(true);
   };
@@ -154,20 +221,12 @@ export const Users = () => {
 
   const deleteProfileSafely = async (id: string) => {
     const kind = activeTab === 'STUDENTS' ? 'STUDENT' : 'TEACHER';
-    const assessment = assessProfileDeletion(kind, id, { classes, attendance, transactions });
-
-    if (!assessment.canHardDelete) {
-      toast.error(`Không thể xóa cứng: ${assessment.reasons.join('; ')}`);
-      return false;
-    }
-
     const res = kind === 'STUDENT' ? await deleteStudent(id) : await deleteTeacher(id);
     if (!res.ok) {
       const errorData = await res.json().catch(() => ({}));
       toast.error(errorData.message || 'Không thể xóa hồ sơ');
       return false;
     }
-
     return true;
   };
 
@@ -244,7 +303,24 @@ export const Users = () => {
             ...(data as any),
             tuitionStatus: 'DEBT'
           });
-          if (!res.ok) throw new Error((await res.json()).message || 'Lỗi khi thêm học sinh');
+          if (!res.ok) {
+            if (res.status === 409) {
+              const errData = await res.json().catch(() => ({}));
+              const shouldForce = window.confirm(
+                (errData.message || 'Học sinh có thể đã tồn tại.') + '\n\nTiếp tục tạo mới?'
+              );
+              if (!shouldForce) return;
+              const forceRes = await addStudent({
+                id: 'S' + Date.now(),
+                ...(data as any),
+                tuitionStatus: 'DEBT',
+                forceCreate: true
+              });
+              if (!forceRes.ok) throw new Error((await forceRes.json()).message || 'Lỗi khi thêm học sinh');
+            } else {
+              throw new Error((await res.json()).message || 'Lỗi khi thêm học sinh');
+            }
+          }
           toast.success('Đã thêm học sinh mới');
         }
       } else {
@@ -266,17 +342,20 @@ export const Users = () => {
       setIsEditMode(false);
       setSelectedId(null);
       setFormErrors({});
-      setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 });
+      setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8, salaryType: 'PERCENT', hourlyRate: 0, notes: '', sortOrder: 0 });
     } catch (error: any) {
       console.error('Save failed:', error);
       toast.error(error.message || 'Không thể lưu thông tin. Vui lòng thử lại.');
     }
   };
 
-  const filteredStudents = scopedStudents.filter(s => 
-    s.name.toLowerCase().includes(search.toLowerCase()) &&
-    (yearFilter === '' || s.birthYear.toString() === yearFilter)
-  );
+  const filteredStudents = useMemo(() => 
+    scopedStudents.filter(s => 
+      (s.name.toLowerCase().includes(search.toLowerCase()) || 
+      (s.studentCode || '').toLowerCase().includes(search.toLowerCase())) &&
+      (yearFilter === '' || s.birthYear?.toString() === yearFilter)
+    ).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)),
+  [scopedStudents, search, yearFilter]);
 
   const teacherTuitionByStudent = useMemo<Record<string, TeacherTuitionSnapshot>>(() => {
     if (!isTeacher) return {};
@@ -326,37 +405,17 @@ export const Users = () => {
     return teacherTuitionByStudent[studentId] || { due: 0, paid: 0, status: 'DEBT' };
   };
 
-  const filteredTeachers = scopedTeachers.filter(t => 
-    t.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filteredTeachers = useMemo(() => 
+    scopedTeachers.filter(t => 
+      t.name.toLowerCase().includes(search.toLowerCase())
+    ).sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0)),
+  [scopedTeachers, search]);
 
   const activeList = activeTab === 'STUDENTS' ? filteredStudents : filteredTeachers;
   const totalPages = Math.ceil(activeList.length / PAGE_SIZE);
   const paginatedStudents = filteredStudents.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const paginatedTeachers = filteredTeachers.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
-  const handleSync = () => {
-    if (!sheetUrl.includes('google.com/spreadsheets')) {
-      toast.error('Vui lòng nhập link Google Sheets hợp lệ');
-      return;
-    }
-    setIsSyncing(true);
-    setTimeout(() => {
-      const mockImported = [
-        { id: 'S' + Date.now(), name: 'Đồng bộ ' + Date.now(), birthYear: 2012, address: 'Auto', tuitionStatus: 'PAID' },
-      ] as any;
-      const normalizedImported = mockImported.map((item: any) => ({
-        ...item,
-        schoolName: item.schoolName || 'THCS Mẫu',
-        schoolClass: item.schoolClass || 'Lớp 8A',
-      }));
-      importStudents(normalizedImported);
-      setIsSyncing(false);
-      setIsImportOpen(false);
-      setSheetUrl('');
-      toast.success('Đồng bộ thành công');
-    }, 1500);
-  };
 
   const handleExportExcel = () => {
     const rows = activeTab === 'STUDENTS' ? filteredStudents : filteredTeachers;
@@ -483,14 +542,6 @@ export const Users = () => {
     }
   };
 
-  const handleExportImportErrors = () => {
-    if (!importPlan) return;
-    downloadXlsxWorkbook({
-      fileName: `Bao_Cao_Loi_${importKind}_${new Date().toISOString().slice(0, 10)}.xlsx`,
-      sheetName: 'Lỗi import',
-      rows: buildImportErrorRows(importKind, importPlan),
-    });
-  };
 
   const availableTeacherTargets = teachers.filter(t => !accounts.some(a => a.teacherId === t.id));
   const availableStudentTargets = students.filter(s => !accounts.some(a => a.studentId === s.id));
@@ -654,6 +705,15 @@ export const Users = () => {
                       />
                     </div>
                   </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ghi chú</label>
+                    <textarea
+                      value={formData.notes || ''}
+                      onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm focus:ring-2 focus:ring-management-blue/20 outline-none min-h-[80px] resize-none"
+                      placeholder="Thông tin thêm về học sinh..."
+                    />
+                  </div>
                 </>
               ) : (
                 <>
@@ -696,6 +756,40 @@ export const Users = () => {
                         className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none"
                       />
                     </div>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Loại lương</label>
+                      <select
+                        value={formData.salaryType || 'PERCENT'}
+                        onChange={e => setFormData({ ...formData, salaryType: e.target.value })}
+                        className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none"
+                      >
+                        <option value="PERCENT">Phần trăm (%)</option>
+                        <option value="HOURLY">Theo giờ (VND/h)</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                        {formData.salaryType === 'HOURLY' ? 'Mức lương/giờ' : 'Tỉ lệ chia (0-1)'}
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.salaryType === 'HOURLY' ? (formData.hourlyRate || 0) : (formData.salaryRate || 0.8)}
+                        onChange={e => setFormData({ ...formData, [formData.salaryType === 'HOURLY' ? 'hourlyRate' : 'salaryRate']: Number(e.target.value) })}
+                        className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none"
+                        step={formData.salaryType === 'HOURLY' ? '1000' : '0.05'}
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Ghi chú</label>
+                    <textarea
+                      value={formData.notes || ''}
+                      onChange={e => setFormData({ ...formData, notes: e.target.value })}
+                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none min-h-[80px] resize-none"
+                      placeholder="Thông tin thêm về giáo viên..."
+                    />
                   </div>
                 </>
               )}
@@ -755,7 +849,7 @@ export const Users = () => {
                   Xuất Excel
                 </button>
                 <button 
-                  onClick={() => { setIsAddModalOpen(true); setIsEditMode(false); setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8 }); }}
+                  onClick={() => { setIsAddModalOpen(true); setIsEditMode(false); setFormData({ name: '', birthYear: 2010, address: '', schoolName: '', schoolClass: '', parentPhone: '', studentPhone: '', phone: '', specialization: '', bankAccount: '', bankName: '', salaryRate: 0.8, salaryType: 'PERCENT', hourlyRate: 0, notes: '', sortOrder: 0 }); }}
                   className="flex-1 sm:flex-none bg-hicado-navy text-white px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-hicado-navy/20"
                 >
                   Thêm mới
@@ -821,23 +915,6 @@ export const Users = () => {
             </div>
             <button onClick={() => fileInputRef.current?.click()} disabled={isSyncing} className="bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold uppercase text-xs">
               {isSyncing ? 'Đang nhập...' : 'Chọn file Excel'}
-            </button>
-          </div>
-        )}
-
-        {false && isImportOpen && (
-          <div className="bg-emerald-900/5 border border-emerald-200 p-8 rounded-2xl flex flex-col md:flex-row gap-6 items-end animate-in fade-in slide-in-from-top-4">
-            <div className="flex-1 space-y-2">
-              <label className="text-[10px] font-black text-emerald-700 uppercase tracking-widest">URL Sheets</label>
-              <input 
-                type="text" 
-                value={sheetUrl}
-                onChange={(e) => setSheetUrl(e.target.value)}
-                className="w-full bg-white border border-emerald-200 px-4 py-3 rounded-xl text-sm"
-              />
-            </div>
-            <button onClick={handleSync} disabled={isSyncing} className="bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold uppercase text-xs">
-              {isSyncing ? 'Đồng bộ...' : 'Đồng bộ'}
             </button>
           </div>
         )}
@@ -926,8 +1003,8 @@ export const Users = () => {
 
                 {/* Account List */}
                 <div className="lg:col-span-2 bg-slate-50 border border-slate-200 p-8 rounded-[2rem]">
-                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 ml-1">Danh bạ tài khoản hiện hành</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                   <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-6 ml-1">Danh bạ tài khoản hiện hành</p>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                     {accountList.length === 0 && (
                       <div className="col-span-2 py-10 text-center opacity-30 italic text-xs">Chưa có tài khoản nào được cấp</div>
                     )}
@@ -1011,171 +1088,69 @@ export const Users = () => {
             </p>
           </div>
         ) : (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+            modifiers={[restrictToVerticalAxis]}
+          >
           <table className="w-full text-left border-collapse min-w-[1000px]">
-          <thead>
-            <tr className="bg-hicado-slate/10 border-b border-hicado-slate">
-              <th className="px-8 py-5 w-10">
-                <input 
-                  type="checkbox"
-                  className="w-4 h-4 rounded border-slate-300 text-hicado-navy focus:ring-hicado-navy"
-                  checked={activeTab === 'STUDENTS' ? (filteredStudents.length > 0 && selectedIds.size === filteredStudents.length) : (filteredTeachers.length > 0 && selectedIds.size === filteredTeachers.length)}
-                  onChange={() => toggleSelectAll((activeTab === 'STUDENTS' ? filteredStudents : filteredTeachers).map(i => i.id))}
-                />
-              </th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Hồ sơ chính</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Truy cập</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Định danh</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{activeTab === 'STUDENTS' ? 'Học vấn & Vị trí' : 'Chuyên môn'}</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Hành vụ</th>
-              <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Điều hướng</th>
-            </tr>
-          </thead>
-
-          <tbody className="divide-y divide-slate-100">
-            {activeTab === 'STUDENTS' ? paginatedStudents.map(student => {
-              const tuitionSnapshot = getStudentTuitionSnapshot(student.id, student.tuitionStatus);
-              const tuitionStatus = tuitionSnapshot.status;
-
-              return (
-              <tr key={student.id} className={clsx("hover:bg-slate-50/50 transition-colors group", selectedIds.has(student.id) && "bg-hicado-emerald/5")}>
-                <td className="px-8 py-6">
+            <thead>
+              <tr className="bg-hicado-slate/10 border-b border-hicado-slate">
+                <th className="px-4 py-5 w-8"></th>
+                <th className="px-8 py-5 w-10">
                   <input 
                     type="checkbox"
                     className="w-4 h-4 rounded border-slate-300 text-hicado-navy focus:ring-hicado-navy"
-                    checked={selectedIds.has(student.id)}
-                    onChange={() => toggleSelect(student.id)}
+                    checked={activeTab === 'STUDENTS' ? (filteredStudents.length > 0 && selectedIds.size === filteredStudents.length) : (filteredTeachers.length > 0 && selectedIds.size === filteredTeachers.length)}
+                    onChange={() => toggleSelectAll((activeTab === 'STUDENTS' ? filteredStudents : filteredTeachers).map(i => i.id))}
                   />
-                </td>
-                <td className="px-8 py-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-hicado-slate rounded-xl flex items-center justify-center font-black text-hicado-navy text-xs shadow-sm">
-                      {student.name.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="font-black text-hicado-navy uppercase tracking-tight leading-tight">{student.name}</p>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Lớp: {student.schoolClass || '--'}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-8 py-6">
-                  {accounts.find(a => a.studentId === student.id) ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-hicado-emerald/10 text-hicado-emerald text-[9px] font-black rounded-full border border-hicado-emerald/20 uppercase tracking-widest">
-                      <span className="w-1.5 h-1.5 bg-hicado-emerald rounded-full animate-pulse"></span>
-                      Đã cấp
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-3 py-1 bg-slate-100 text-slate-400 text-[9px] font-black rounded-full border border-slate-200 uppercase tracking-widest">
-                      Chưa cấp
-                    </span>
-                  )}
-                </td>
-
-                <td className="px-6 py-5 font-mono text-xs text-slate-500">{student.cccd || 'CHƯA CẬP NHẬT'}</td>
-                <td className="px-6 py-5 text-sm text-slate-600 font-medium">
-                  <p className="font-bold text-slate-800">{student.schoolName || 'Chưa cập nhật trường'}</p>
-                  <p className="text-[11px] text-slate-500">{student.schoolClass || '--'}</p>
-                  <p className="text-[11px] text-slate-400">{student.address}</p>
-                </td>
-                <td className="px-8 py-6">
-                  <div className="flex flex-col gap-2">
-                    <span className={`inline-flex items-center justify-center px-4 py-1.5 text-[9px] font-black rounded-lg border ${
-                      tuitionStatus === 'PAID' ? 'bg-hicado-emerald/10 text-hicado-emerald border-hicado-emerald/20' :
-                      tuitionStatus === 'PENDING' ? 'bg-amber-500/10 text-amber-600 border-amber-500/20' :
-                      'bg-rose-500/10 text-rose-600 border-rose-500/20'
-                    } uppercase tracking-widest`}>
-                      {tuitionStatus === 'PAID' ? 'Đã thanh toán' : tuitionStatus === 'PENDING' ? 'Đang đối soát' : 'Dư nợ'}
-                    </span>
-                    {isTeacher && (
-                      <p className="text-[9px] text-slate-400 font-black uppercase tracking-tighter text-center">
-                        {tuitionSnapshot.paid.toLocaleString()}đ / {tuitionSnapshot.due.toLocaleString()}đ
-                      </p>
-                    )}
-                  </div>
-                </td>
-
-                <td className="px-8 py-6 text-right">
-                  <div className="flex justify-end gap-1">
-                    <button 
-                      onClick={() => setViewingStoryId(student.id)} 
-                      className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                      title="Xem Narrative"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-                    </button>
-                    {isStaff && (
-                      <>
-                          <button onClick={() => handleEdit(student)} className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                          </button>
-                          <button onClick={() => handleDelete(student.id, student.name)} className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors">
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                          </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-
+                </th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Hồ sơ chính</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Truy cập</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Định danh</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{activeTab === 'STUDENTS' ? 'Học vấn & Vị trí' : 'Chuyên môn'}</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Hành vụ</th>
+                <th className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] text-right">Điều hướng</th>
               </tr>
-            );
-            }) : paginatedTeachers.map(teacher => (
-              <tr key={teacher.id} className={clsx("hover:bg-slate-50/50 transition-colors group", selectedIds.has(teacher.id) && "bg-hicado-emerald/5")}>
-                <td className="px-8 py-6">
-                  <input 
-                    type="checkbox"
-                    className="w-4 h-4 rounded border-slate-300 text-hicado-navy focus:ring-hicado-navy"
-                    checked={selectedIds.has(teacher.id)}
-                    onChange={() => toggleSelect(teacher.id)}
-                  />
-                </td>
-                <td className="px-8 py-6">
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-hicado-slate rounded-xl flex items-center justify-center font-black text-hicado-navy text-xs shadow-sm">
-                      {teacher.name.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="font-black text-hicado-navy uppercase tracking-tight leading-tight">{teacher.name}</p>
-                      <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">SĐT: {teacher.phone}</p>
-                    </div>
-                  </div>
-                </td>
-                <td className="px-8 py-6">
-                  {accounts.find(a => a.teacherId === teacher.id) ? (
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-hicado-emerald/10 text-hicado-emerald text-[9px] font-black rounded-full border border-hicado-emerald/20 uppercase tracking-widest">
-                      <span className="w-1.5 h-1.5 bg-hicado-emerald rounded-full animate-pulse"></span>
-                      Đã cấp
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center px-3 py-1 bg-slate-100 text-slate-400 text-[9px] font-black rounded-full border border-slate-200 uppercase tracking-widest">
-                      Chưa cấp
-                    </span>
-                  )}
-                </td>
-                <td className="px-6 py-5 font-mono text-xs text-slate-500">{teacher.cccd || 'CHƯA CẬP NHẬT'}</td>
-                <td className="px-6 py-5">
-                  <p className="text-sm text-slate-900 font-bold uppercase tracking-tight">{teacher.specialization}</p>
-                  <p className="text-[10px] text-management-blue font-black uppercase tracking-widest mt-1">{teacher.workplace || 'Hicado Center'}</p>
-                </td>
-                <td className="px-8 py-6">
-                  <span className="px-4 py-1.5 bg-hicado-emerald/10 text-hicado-emerald text-[9px] font-black rounded-lg border border-hicado-emerald/20 uppercase tracking-widest">Đang công tác</span>
-                </td>
-                <td className="px-8 py-6 text-right">
-                  <div className="flex justify-end gap-1">
-                    {isStaff && (
-                      <>
-                        <button onClick={() => handleEdit(teacher)} className="p-2 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                        </button>
-                        <button onClick={() => handleDelete(teacher.id, teacher.name)} className="p-2 text-slate-300 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+            </thead>
+            <SortableContext
+              items={activeTab === 'STUDENTS' ? paginatedStudents.map(s => s.id) : paginatedTeachers.map(t => t.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <tbody className="divide-y divide-slate-100">
+                {activeTab === 'STUDENTS' ? paginatedStudents.map(student => (
+                  <SortableRow key={student.id} id={student.id}>
+                    <StudentRowContent 
+                      student={student} 
+                      selectedIds={selectedIds} 
+                      toggleSelect={toggleSelect}
+                      accounts={accounts}
+                      getStudentTuitionSnapshot={getStudentTuitionSnapshot}
+                      isTeacher={isTeacher}
+                      setViewingStoryId={setViewingStoryId}
+                      isStaff={isStaff}
+                      handleEdit={handleEdit}
+                      handleDelete={handleDelete}
+                    />
+                  </SortableRow>
+                )) : paginatedTeachers.map(teacher => (
+                  <SortableRow key={teacher.id} id={teacher.id}>
+                    <TeacherRowContent
+                      teacher={teacher}
+                      selectedIds={selectedIds}
+                      toggleSelect={toggleSelect}
+                      accounts={accounts}
+                      isStaff={isStaff}
+                      handleEdit={handleEdit}
+                      handleDelete={handleDelete}
+                    />
+                  </SortableRow>
+                ))}
+              </tbody>
+            </SortableContext>
           </table>
+          </DndContext>
         )}
 
         {/* Pagination Bar */}
@@ -1239,7 +1214,7 @@ export const Users = () => {
         isCommitting={isSyncing}
         onConfirm={handleConfirmImport}
         onCancel={() => setImportPlan(null)}
-        onExportErrors={handleExportImportErrors}
+        onExportErrors={handleExportExcel}
       />
 
       {viewingStoryId && (
@@ -1486,5 +1461,219 @@ const StudentStoryModal = ({ studentId, onClose }: { studentId: string, onClose:
         </div>
       </div>
     </div>
+  );
+};
+
+const SortableRow = ({ id, children }: { id: string; children: React.ReactNode }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 100 : 'auto',
+    opacity: isDragging ? 0.6 : 1,
+    position: 'relative' as const,
+  };
+
+  return (
+    <tr ref={setNodeRef} style={style} className={clsx("hover:bg-slate-50/50 transition-colors group")}>
+      <td className="px-4 py-4 w-8">
+        <button {...attributes} {...listeners} className="p-1 cursor-grab active:cursor-grabbing text-slate-300 hover:text-hicado-navy transition-colors">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 8h16M4 16h16"></path></svg>
+        </button>
+      </td>
+      {children}
+    </tr>
+  );
+};
+
+const StudentRowContent = ({ student, selectedIds, toggleSelect, accounts, getStudentTuitionSnapshot, setViewingStoryId, isStaff, handleEdit, handleDelete }: any) => {
+  const account = accounts.find((a: any) => a.studentId === student.id);
+  const tuition = getStudentTuitionSnapshot(student.id, student.tuitionStatus);
+  return (
+    <>
+      <td className="px-8 py-4">
+        <input 
+          type="checkbox"
+          className="w-4 h-4 rounded border-slate-300 text-hicado-navy focus:ring-hicado-navy"
+          checked={selectedIds.has(student.id)}
+          onChange={() => toggleSelect(student.id)}
+        />
+      </td>
+      <td className="px-8 py-4">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-2xl bg-hicado-slate flex items-center justify-center font-black text-hicado-navy text-xs shrink-0 group-hover:scale-110 transition-transform shadow-sm">
+            {student.name.charAt(0)}
+          </div>
+          <div>
+            <p className="font-black text-hicado-navy text-sm tracking-tight">{student.name}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{student.studentCode || 'Chưa có mã'}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-8 py-4">
+        {account ? (
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-200"></span>
+            <div>
+              <p className="text-[11px] font-black text-slate-600 uppercase tracking-tight">{account.username}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-200"></span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Chưa cấp</span>
+          </div>
+        )}
+      </td>
+      <td className="px-8 py-4">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">🆔</span>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{student.parentPhone || 'N/A'}</span>
+          </div>
+          {student.zaloUserId ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs">💬</span>
+              <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Đã khớp Zalo</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 opacity-30">
+              <span className="text-xs">💬</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Chưa khớp</span>
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="px-8 py-4">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-black text-slate-600">{student.schoolClass || 'Khối'}</span>
+            <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+            <span className="text-[11px] font-bold text-slate-500">{student.schoolName || 'Trường'}</span>
+          </div>
+          <div className={clsx(
+            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest",
+            tuition.status === 'PAID' ? "bg-emerald-50 text-emerald-600" :
+            tuition.status === 'DEBT' ? "bg-rose-50 text-rose-600" : "bg-amber-50 text-amber-600"
+          )}>
+            {tuition.status === 'PAID' ? 'Đã nộp' : tuition.status === 'DEBT' ? 'Còn nợ' : 'Chưa nộp'}
+            <span className="opacity-40">·</span>
+            {new Intl.NumberFormat('vi-VN').format(tuition.due)}đ
+          </div>
+        </div>
+      </td>
+      <td className="px-8 py-4">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={(e) => { e.stopPropagation(); setViewingStoryId(student.id); }} className="p-2 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors" title="Nhật ký học tập">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+          </button>
+          {isStaff && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); handleEdit(student); }} className="p-2 rounded-xl bg-hicado-navy/5 text-hicado-navy hover:bg-hicado-navy/10 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(student.id, student.name); }} className="p-2 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+              </button>
+            </>
+          )}
+        </div>
+      </td>
+      <td className="px-8 py-4 text-right">
+        <div className="inline-flex items-center gap-2 px-4 py-2 bg-hicado-slate/30 text-hicado-navy/40 rounded-xl text-[10px] font-black uppercase tracking-widest group-hover:bg-hicado-navy group-hover:text-white transition-all cursor-pointer">
+          Chi tiết
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+        </div>
+      </td>
+    </>
+  );
+};
+
+const TeacherRowContent = ({ teacher, selectedIds, toggleSelect, accounts, isStaff, handleEdit, handleDelete }: any) => {
+  const account = accounts.find((a: any) => a.teacherId === teacher.id);
+  return (
+    <>
+      <td className="px-8 py-4">
+        <input 
+          type="checkbox"
+          className="w-4 h-4 rounded border-slate-300 text-hicado-navy focus:ring-hicado-navy"
+          checked={selectedIds.has(teacher.id)}
+          onChange={() => toggleSelect(teacher.id)}
+        />
+      </td>
+      <td className="px-8 py-4">
+        <div className="flex items-center gap-4">
+          <div className="w-10 h-10 rounded-2xl bg-indigo-100 flex items-center justify-center font-black text-indigo-600 text-xs shrink-0 group-hover:scale-110 transition-transform shadow-sm">
+            {teacher.name.charAt(0)}
+          </div>
+          <div>
+            <p className="font-black text-hicado-navy text-sm tracking-tight">{teacher.name}</p>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">{teacher.phone}</p>
+          </div>
+        </div>
+      </td>
+      <td className="px-8 py-4">
+        {account ? (
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-200"></span>
+            <div>
+              <p className="text-[11px] font-black text-slate-600 uppercase tracking-tight">{account.username}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-slate-200"></span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest italic">Chưa cấp</span>
+          </div>
+        )}
+      </td>
+      <td className="px-8 py-4">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs">📞</span>
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{teacher.phone}</span>
+          </div>
+          {teacher.zaloUserId ? (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs">💬</span>
+              <span className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Đã khớp Zalo</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 opacity-30">
+              <span className="text-xs">💬</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Chưa khớp</span>
+            </div>
+          )}
+        </div>
+      </td>
+      <td className="px-8 py-4">
+        <div className="space-y-1.5">
+          <p className="text-[11px] font-black text-slate-600">{teacher.specialization || 'Chuyên môn'}</p>
+          <div className="inline-flex items-center px-2 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase tracking-widest">
+            {teacher.salaryType === 'HOURLY' ? `${(teacher.hourlyRate/1000)}k/h` : `HS: ${teacher.salaryRate * 100}%`}
+          </div>
+        </div>
+      </td>
+      <td className="px-8 py-4">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          {isStaff && (
+            <>
+              <button onClick={(e) => { e.stopPropagation(); handleEdit(teacher); }} className="p-2 rounded-xl bg-hicado-navy/5 text-hicado-navy hover:bg-hicado-navy/10 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); handleDelete(teacher.id, teacher.name); }} className="p-2 rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+              </button>
+            </>
+          )}
+        </div>
+      </td>
+      <td className="px-8 py-4 text-right">
+        <div className="inline-flex items-center gap-2 px-4 py-2 bg-hicado-slate/30 text-hicado-navy/40 rounded-xl text-[10px] font-black uppercase tracking-widest group-hover:bg-hicado-navy group-hover:text-white transition-all cursor-pointer">
+          Chi tiết
+          <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+        </div>
+      </td>
+    </>
   );
 };
