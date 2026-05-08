@@ -75,9 +75,9 @@ router.get('/followers', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
 
     const headers = { access_token: cfg.ZALO_ACCESS_TOKEN };
 
-    // Get follower list
+    // Get follower list (v3.0 API — replaces deprecated v2.0/oa/getfollowers)
     const follRes = await zaloApiClient.get<any>(
-      `${ZALO_OA_API}/v2.0/oa/getfollowers?data=${encodeURIComponent(JSON.stringify({ offset: 0, count: 50 }))}`,
+      `${ZALO_OA_API}/v3.0/oa/user/getlist?data=${encodeURIComponent(JSON.stringify({ offset: 0, count: 50 }))}`,
       { headers }
     );
 
@@ -85,14 +85,15 @@ router.get('/followers', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
       return res.status(400).json({ message: `Zalo lỗi: ${follRes.data.message} (${follRes.data.error})` });
     }
 
-    const followerIds: Array<{ user_id: string }> = follRes.data.data?.followers || [];
+    const followerIds: Array<{ user_id: string }> = follRes.data.data?.users || [];
 
     // Get profile for each follower (parallel, max 10 at a time)
     const profiles = await Promise.all(
       followerIds.map(async ({ user_id }) => {
         try {
           const pr = await zaloApiClient.get<any>(
-            `${ZALO_OA_API}/v2.0/oa/getprofile?data=${encodeURIComponent(JSON.stringify({ user_id }))}`,
+            // v3.0 API — replaces deprecated v2.0/oa/getprofile
+            `${ZALO_OA_API}/v3.0/oa/user/detail?data=${encodeURIComponent(JSON.stringify({ user_id }))}`,
             { headers }
           );
           const d = pr.data.data || {};
