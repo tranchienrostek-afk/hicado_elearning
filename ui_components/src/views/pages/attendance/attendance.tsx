@@ -7,27 +7,6 @@ import { buildBulkAttendancePlan } from '@/utils/center-operations';
 
 type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'LEAVE_REQUEST';
 type AttendanceSlot = 'MORNING' | 'AFTERNOON' | 'EVENING' | 'CUSTOM';
-type PeriodType = 'month' | 'multiMonth' | 'dateRange';
-
-interface OverviewStudent {
-  studentId: string;
-  studentName: string;
-  studentCode: string;
-  sessionCount: number;
-  presentCount: number;
-  absentCount: number;
-  amount: number;
-}
-interface OverviewResponse {
-  classId: string;
-  className: string;
-  tuitionPerSession: number;
-  fromDate: string;
-  toDate: string;
-  totalClassSessions: number;
-  summary: { studentCount: number; totalPresent: number; totalAbsent: number; totalAmount: number };
-  students: OverviewStudent[];
-}
 
 const STATUS_LABEL: Record<AttendanceStatus, string> = {
   PRESENT: 'Đi học',
@@ -63,24 +42,10 @@ export const AttendancePage = () => {
     return [];
   }, [auth?.teacherId, classes, isObserver, isTeacher]);
 
-  const [pageTab, setPageTab] = useState<'attendance' | 'overview'>('attendance');
-
   const [selectedClassId, setSelectedClassId] = useState(accessibleClasses[0]?.id || '');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [slot, setSlot] = useState<AttendanceSlot>('MORNING');
   const [sessionUnits, setSessionUnits] = useState<number>(1);
-
-  // Overview tab state
-  const [overviewClassId,  setOverviewClassId]  = useState('');
-  const [periodType,       setPeriodType]        = useState<PeriodType>('month');
-  const [singleMonth,      setSingleMonth]       = useState(() => new Date().toISOString().slice(0, 7));
-  const [fromMonth,        setFromMonth]         = useState('');
-  const [toMonth,          setToMonth]           = useState('');
-  const [fromDate,         setFromDate]          = useState('');
-  const [toDate,           setToDate]            = useState('');
-  const [overviewData,     setOverviewData]      = useState<OverviewResponse | null>(null);
-  const [overviewLoading,  setOverviewLoading]   = useState(false);
-  const [overviewError,    setOverviewError]     = useState('');
 
   useEffect(() => {
     if (!selectedClassId && accessibleClasses.length > 0) {
@@ -227,48 +192,6 @@ export const AttendancePage = () => {
     await Promise.all(classRecords.map((record) => deleteAttendance(record.id, 'teacher-clear-slot')));
   };
 
-  const resolveDateRange = (): { from: string; to: string } | null => {
-    if (periodType === 'month' && singleMonth) {
-      const [y, m] = singleMonth.split('-').map(Number);
-      const lastDay = new Date(y, m, 0).getDate();
-      return { from: `${singleMonth}-01`, to: `${singleMonth}-${String(lastDay).padStart(2, '0')}` };
-    }
-    if (periodType === 'multiMonth' && fromMonth && toMonth) {
-      const [y2, m2] = toMonth.split('-').map(Number);
-      const lastDay = new Date(y2, m2, 0).getDate();
-      return { from: `${fromMonth}-01`, to: `${toMonth}-${String(lastDay).padStart(2, '0')}` };
-    }
-    if (periodType === 'dateRange' && fromDate && toDate) {
-      return { from: fromDate, to: toDate };
-    }
-    return null;
-  };
-
-  const fetchOverview = async () => {
-    const range = resolveDateRange();
-    if (!overviewClassId || !range) return;
-    setOverviewLoading(true);
-    setOverviewError('');
-    setOverviewData(null);
-    try {
-      const token = auth?.token;
-      const r = await fetch(
-        `/api/attendance/overview?classId=${encodeURIComponent(overviewClassId)}&fromDate=${range.from}&toDate=${range.to}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const json = await r.json();
-      if (!r.ok) throw new Error(json.message || 'Lỗi tải dữ liệu');
-      setOverviewData(json as OverviewResponse);
-    } catch (e: unknown) {
-      setOverviewError(e instanceof Error ? e.message : 'Lỗi tải dữ liệu');
-    } finally {
-      setOverviewLoading(false);
-    }
-  };
-
-  const formatVND = (amount: number) =>
-    amount.toLocaleString('vi-VN') + 'đ';
-
   if (isLoading) {
     return <div className="space-y-10"><SkeletonTable rows={10} /></div>;
   }
@@ -320,229 +243,7 @@ export const AttendancePage = () => {
         </div>
       </div>
 
-      {/* Tab switcher */}
-      <div className="flex gap-2">
-        {(['attendance', 'overview'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setPageTab(tab)}
-            className={clsx(
-              'px-5 py-2.5 rounded-2xl text-[11px] font-black uppercase tracking-widest transition-all border',
-              pageTab === tab
-                ? 'bg-hicado-navy text-white border-hicado-navy shadow-lg'
-                : 'bg-white text-hicado-navy/50 border-slate-200 hover:border-hicado-navy/30'
-            )}
-          >
-            {tab === 'attendance' ? 'Điểm danh' : 'Tổng quan'}
-          </button>
-        ))}
-      </div>
-
-      {pageTab === 'overview' && (
-        <div className="space-y-6">
-          {/* Filter panel */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4 shadow-sm">
-            <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Bộ lọc tổng quan</p>
-
-            <div className="flex flex-wrap gap-4 items-end">
-              {/* Class selector */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Lớp học</label>
-                <select
-                  value={overviewClassId}
-                  onChange={(e) => { setOverviewClassId(e.target.value); setOverviewData(null); }}
-                  className="border border-slate-300 bg-white rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-hicado-navy transition-all"
-                >
-                  <option value="">-- Chọn lớp --</option>
-                  {accessibleClasses.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Period type */}
-              <div className="flex flex-col gap-1.5">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Kiểu thời gian</label>
-                <div className="flex gap-2">
-                  {([
-                    { key: 'month', label: 'Tháng' },
-                    { key: 'multiMonth', label: 'Nhiều tháng' },
-                    { key: 'dateRange', label: 'Khoảng ngày' },
-                  ] as { key: PeriodType; label: string }[]).map(({ key, label }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setPeriodType(key)}
-                      className={clsx(
-                        'px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all',
-                        periodType === key
-                          ? 'bg-hicado-navy text-white border-hicado-navy'
-                          : 'bg-white text-slate-500 border-slate-200 hover:border-slate-400'
-                      )}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Dynamic date inputs */}
-              {periodType === 'month' && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Tháng/Năm</label>
-                  <input
-                    type="month"
-                    value={singleMonth}
-                    onChange={(e) => setSingleMonth(e.target.value)}
-                    className="border border-slate-300 bg-white rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-hicado-navy transition-all"
-                  />
-                </div>
-              )}
-
-              {periodType === 'multiMonth' && (
-                <>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Từ tháng</label>
-                    <input
-                      type="month"
-                      value={fromMonth}
-                      onChange={(e) => setFromMonth(e.target.value)}
-                      className="border border-slate-300 bg-white rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-hicado-navy transition-all"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Đến tháng</label>
-                    <input
-                      type="month"
-                      value={toMonth}
-                      onChange={(e) => setToMonth(e.target.value)}
-                      className="border border-slate-300 bg-white rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-hicado-navy transition-all"
-                    />
-                  </div>
-                </>
-              )}
-
-              {periodType === 'dateRange' && (
-                <>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Từ ngày</label>
-                    <input
-                      type="date"
-                      value={fromDate}
-                      onChange={(e) => setFromDate(e.target.value)}
-                      className="border border-slate-300 bg-white rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-hicado-navy transition-all"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5">
-                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Đến ngày</label>
-                    <input
-                      type="date"
-                      value={toDate}
-                      onChange={(e) => setToDate(e.target.value)}
-                      className="border border-slate-300 bg-white rounded-xl px-4 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-hicado-navy transition-all"
-                    />
-                  </div>
-                </>
-              )}
-
-              <button
-                onClick={() => void fetchOverview()}
-                disabled={!overviewClassId || overviewLoading}
-                className="px-5 py-2.5 bg-hicado-navy text-white rounded-xl text-[11px] font-black uppercase tracking-widest hover:bg-hicado-navy/90 transition-all disabled:opacity-40 self-end"
-              >
-                {overviewLoading ? 'Đang tải...' : 'Xem tổng quan'}
-              </button>
-            </div>
-          </div>
-
-          {/* Error */}
-          {overviewError && (
-            <div className="bg-rose-50 border border-rose-200 text-rose-600 rounded-2xl px-6 py-4 text-sm font-bold">
-              {overviewError}
-            </div>
-          )}
-
-          {/* Loading skeleton */}
-          {overviewLoading && (
-            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm animate-pulse">
-              <div className="h-12 bg-slate-100 border-b border-slate-200" />
-              {[1, 2, 3].map((i) => (
-                <div key={i} className="h-14 border-b border-slate-100 flex items-center px-6 gap-4">
-                  <div className="h-3 w-32 bg-slate-200 rounded-full" />
-                  <div className="h-3 w-12 bg-slate-100 rounded-full ml-auto" />
-                  <div className="h-3 w-12 bg-slate-100 rounded-full" />
-                  <div className="h-3 w-12 bg-slate-100 rounded-full" />
-                  <div className="h-3 w-20 bg-slate-100 rounded-full" />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Results table */}
-          {overviewData && !overviewLoading && (
-            <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
-              <div className="px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                <div>
-                  <p className="text-sm font-black text-slate-800">{overviewData.className}</p>
-                  <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-0.5">
-                    {overviewData.totalClassSessions} buổi đã diễn ra · {overviewData.fromDate} → {overviewData.toDate}
-                  </p>
-                </div>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  {overviewData.summary.studentCount} học sinh
-                </p>
-              </div>
-
-              {overviewData.students.length === 0 ? (
-                <div className="py-16 text-center">
-                  <p className="text-sm font-bold text-slate-400 italic">
-                    Chưa có buổi học đã diễn ra trong khoảng thời gian này.
-                  </p>
-                </div>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-slate-50 border-b border-slate-200">
-                      <th className="text-left px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Học sinh</th>
-                      <th className="text-center px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Buổi</th>
-                      <th className="text-center px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Có mặt</th>
-                      <th className="text-center px-4 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Vắng</th>
-                      <th className="text-right px-6 py-3 text-[10px] font-black text-slate-500 uppercase tracking-widest">Số tiền</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {overviewData.students.map((s) => (
-                      <tr key={s.studentId} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <p className="font-bold text-slate-800">{s.studentName}</p>
-                          {s.studentCode && <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">{s.studentCode}</p>}
-                        </td>
-                        <td className="text-center px-4 py-4 font-bold text-slate-600">{s.sessionCount}</td>
-                        <td className="text-center px-4 py-4 font-bold text-hicado-emerald">{s.presentCount}</td>
-                        <td className="text-center px-4 py-4 font-bold text-rose-500">{s.absentCount}</td>
-                        <td className="text-right px-6 py-4 font-black text-hicado-emerald">{formatVND(s.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr className="bg-slate-50 border-t-2 border-slate-200">
-                      <td className="px-6 py-4 text-[11px] font-black text-slate-700 uppercase tracking-widest">
-                        Tổng ({overviewData.summary.studentCount} học sinh)
-                      </td>
-                      <td className="text-center px-4 py-4 text-slate-400 font-bold">—</td>
-                      <td className="text-center px-4 py-4 font-black text-hicado-emerald">{overviewData.summary.totalPresent}</td>
-                      <td className="text-center px-4 py-4 font-black text-rose-500">{overviewData.summary.totalAbsent}</td>
-                      <td className="text-right px-6 py-4 font-black text-hicado-emerald">{formatVND(overviewData.summary.totalAmount)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {pageTab === 'attendance' && selectedClass && (
+      {selectedClass && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           {slotCards.map((card) => (
             <button
@@ -561,7 +262,7 @@ export const AttendancePage = () => {
         </div>
       )}
 
-      {pageTab === 'attendance' && selectedClass && (
+      {selectedClass && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 md:gap-4">
           {[
             { label: 'Giáo viên', value: selectedTeacherName, color: 'text-hicado-navy' },
@@ -584,7 +285,7 @@ export const AttendancePage = () => {
         </div>
       )}
 
-      {pageTab === 'attendance' && isObserver && classRecords.length > 0 && (
+      {isObserver && classRecords.length > 0 && (
         <div className="glass-card rounded-2xl px-6 py-4 border border-hicado-emerald/20 bg-hicado-emerald/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <p className="text-xs font-bold text-hicado-navy">
             Trạng thái giám sát:{' '}
@@ -596,7 +297,7 @@ export const AttendancePage = () => {
         </div>
       )}
 
-      {pageTab === 'attendance' && <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+      <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
         <div className="px-8 py-6 border-b border-hicado-slate flex flex-col md:flex-row md:justify-between md:items-center gap-4">
           <div>
             <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-widest">
@@ -718,7 +419,7 @@ export const AttendancePage = () => {
             </p>
           </div>
         )}
-      </div>}
+      </div>
     </div>
   );
 };
