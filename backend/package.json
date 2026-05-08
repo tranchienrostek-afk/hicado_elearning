@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "start": "npx prisma migrate deploy && node prisma/seed_basic.js && node dist/index.js",
+    "start": "node prisma/repair_failed_migration.js && npx prisma migrate deploy && node prisma/seed_basic.js && node dist/index.js",
     "dev": "nodemon src/index.ts",
     "build": "prisma generate && tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
