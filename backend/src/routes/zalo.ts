@@ -558,22 +558,36 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       }
 
       if (billingMonth && coveredClassIds.length > 0 && !forceSet.has(student.id)) {
-        const existing = await prisma.zaloMessageLog.findFirst({
-          where: {
-            studentId: student.id,
-            status: 'SENT',
-            billingMonth,
-            coveredClassIds: { hasSome: coveredClassIds }
-          }
+        // Check 1: already sent a Zalo message this billing period
+        const sentLog = await prisma.zaloMessageLog.findFirst({
+          where: { studentId: student.id, status: 'SENT', billingMonth, coveredClassIds: { hasSome: coveredClassIds } }
         });
 
-        if (existing) {
+        // Check 2: student already has a paid/partial TuitionBill for this period (e.g. cash payment)
+        const paidBill = !sentLog ? await prisma.tuitionBill.findFirst({
+          where: {
+            studentId: student.id,
+            billingMonth,
+            status: { in: ['PAID', 'PARTIAL'] },
+            coveredClassIds: { hasSome: coveredClassIds }
+          },
+          select: { referenceCode: true }
+        }) : null;
+
+        const skipReason = sentLog
+          ? `Đã gửi thông báo tháng ${billingMonth}`
+          : paidBill
+            ? `Đã đóng tiền mặt (${paidBill.referenceCode})`
+            : null;
+
+        if (skipReason) {
           skippedCount++;
-          results.push({ studentId: student.id, studentName: student.name, status: 'SKIPPED', total, channel: 'NONE', error: `Đã gửi học phí tháng ${billingMonth}`, coveredClassIds });
+          results.push({ studentId: student.id, studentName: student.name, status: 'SKIPPED', total, channel: 'NONE', error: skipReason, coveredClassIds });
           await prisma.zaloMessageLog.create({
             data: {
               phone: student.parentPhone || student.studentPhone || '', zaloUserId: student.zaloUserId,
-              templateId: 'CUSTOM_TUITION', trackingId, status: 'SKIPPED', errorReason: 'DEDUP_ALREADY_SENT',
+              templateId: 'CUSTOM_TUITION', trackingId, status: 'SKIPPED',
+              errorReason: sentLog ? 'DEDUP_ALREADY_SENT' : 'DEDUP_CASH_PAID',
               studentId: student.id, campaignId: campaign.id, classId: item.classId, coveredClassIds,
               billingMonth,
               messageType: 'CUSTOM_TUITION', customPayload: JSON.stringify(payload),
@@ -582,6 +596,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
           continue;
         }
       }
+
 
       const user = (req as any).user;
       let billId: string | null = null;
