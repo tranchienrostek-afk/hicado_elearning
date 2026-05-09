@@ -155,6 +155,7 @@ export const ZaloCampaignPage = () => {
     targetType: string;
     message: string;
     conflictName: string;
+    conflictNames: string;
   } | null>(null);
 
   // ── Config (existing) ──────────────────────────────────────────────────────
@@ -463,7 +464,7 @@ export const ZaloCampaignPage = () => {
       const d = await r.json();
 
       if (r.status === 409 && d.conflict) {
-        setConflictData({ zaloUserId, targetId, targetType, message: d.message, conflictName: d.conflictName });
+        setConflictData({ zaloUserId, targetId, targetType, message: d.message, conflictName: d.conflictName, conflictNames: d.conflictNames });
         return;
       }
 
@@ -1779,7 +1780,7 @@ export const ZaloCampaignPage = () => {
           <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-3xl mb-6 mx-auto">⚠️</div>
           <h3 className="text-xl font-serif font-black text-hicado-navy text-center mb-2">ID đã được sử dụng</h3>
           <p className="text-sm text-hicado-navy/60 text-center leading-relaxed mb-8">
-            Zalo ID này đang được ghép với <strong>{conflictData.conflictName}</strong>.
+            Zalo ID này đang được ghép với: <br /><strong className="text-hicado-navy">{conflictData.conflictNames}</strong>.
             <br />Bạn có muốn <strong>ghép thêm</strong> cho người này (dùng chung ID) không?
           </p>
           <div className="flex flex-col gap-3">

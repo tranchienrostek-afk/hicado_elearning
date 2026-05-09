@@ -250,30 +250,36 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       // This ensures only one process can link/override this specific UID at a time.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'zalo_mapping_' + zaloUserId}))`;
 
-      const [existingStudent, existingTeacher] = await Promise.all([
-        tx.student.findFirst({ where: { zaloUserId }, select: { id: true, name: true } }),
-        tx.teacher.findFirst({ where: { zaloUserId }, select: { id: true, name: true } }),
+      const [existingStudents, existingTeachers] = await Promise.all([
+        tx.student.findMany({ where: { zaloUserId }, select: { id: true, name: true } }),
+        tx.teacher.findMany({ where: { zaloUserId }, select: { id: true, name: true } }),
       ]);
 
-      const conflictTarget = existingStudent ?? existingTeacher;
-      const conflictType = existingStudent ? 'STUDENT' : existingTeacher ? 'TEACHER' : null;
-      const isSameTarget =
-        (studentId && existingStudent?.id === studentId) ||
-        (teacherId && existingTeacher?.id === teacherId);
+      const allConflicts = [...existingStudents, ...existingTeachers];
+      const conflictTarget = allConflicts[0]; // For legacy compatibility if needed
+      const isSameTarget = allConflicts.some(c =>
+        (studentId && c.id === studentId) || (teacherId && c.id === teacherId)
+      );
 
-      if (conflictTarget && !isSameTarget) {
+      // Only warn if there are OTHER people already using this ID
+      const otherConflicts = allConflicts.filter(c =>
+        (studentId && c.id !== studentId) || (teacherId && c.id !== teacherId)
+      );
+
+      if (otherConflicts.length > 0) {
         if (!force) {
           const error: any = new Error('CONFLICT');
           error.conflictInfo = {
             conflict: true,
-            conflictType,
-            conflictId: conflictTarget.id,
-            conflictName: conflictTarget.name,
+            conflictCount: otherConflicts.length,
+            conflictNames: otherConflicts.map(c => c.name).join(', '),
+            // For backward compatibility:
+            conflictName: otherConflicts[0].name,
+            conflictId: otherConflicts[0].id,
           };
           throw error;
         }
-        // Shared link confirmed: we NO LONGER clear the old target.
-        // Multiple targets can now share the same zaloUserId.
+        // Shared link confirmed: multiple targets can share the same zaloUserId.
       }
 
       // Update new target
@@ -286,13 +292,13 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       // Audit log
       await tx.zaloMappingAudit.create({
         data: {
-          action: conflictTarget && !isSameTarget ? 'LINK_SHARED' : 'LINK',
+          action: otherConflicts.length > 0 ? 'LINK_SHARED' : 'LINK',
           zaloUserId,
           targetType,
           targetId,
           targetName,
-          previousTargetId: conflictTarget && !isSameTarget ? conflictTarget.id : undefined,
-          previousTargetName: conflictTarget && !isSameTarget ? conflictTarget.name : undefined,
+          previousTargetId: otherConflicts.length > 0 ? otherConflicts[0].id : undefined,
+          previousTargetName: otherConflicts.length > 0 ? otherConflicts.map(c => c.name).join(', ') : undefined,
           performedBy: user.userId,
           performedByName: user.name ?? user.userId,
         },
