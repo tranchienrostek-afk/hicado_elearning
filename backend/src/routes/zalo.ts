@@ -126,12 +126,14 @@ router.get('/followers', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), 
 // 3b. Candidates for manual mapping
 router.get('/mapping/candidates', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const { type = 'STUDENTS', search = '', page = '1' } = req.query as Record<string, string>;
+    const { type = 'STUDENTS', search = '', page = '1', classId = '', status = 'ALL' } = req.query as Record<string, string>;
     const PAGE = 20;
     const skip = (Math.max(1, Number(page)) - 1) * PAGE;
-    const where = search
-      ? { name: { contains: search, mode: 'insensitive' as const }, isActive: true }
-      : { isActive: true };
+
+    const where: any = { isActive: true };
+    if (search) where.name = { contains: search, mode: 'insensitive' as const };
+    if (status === 'LINKED') where.zaloUserId = { not: null };
+    if (status === 'UNLINKED') where.zaloUserId = null;
 
     if (type === 'TEACHERS') {
       const [items, total] = await Promise.all([
@@ -147,7 +149,9 @@ router.get('/mapping/candidates', authenticateToken, authorizeRoles('ADMIN', 'MA
       return res.json({ type: 'TEACHERS', items, total, page: Number(page), pageSize: PAGE });
     }
 
-    // STUDENTS
+    // STUDENTS — optional classId filter
+    if (classId) where.classes = { some: { classId } };
+
     const [items, total] = await Promise.all([
       prisma.student.findMany({
         where,
@@ -161,6 +165,38 @@ router.get('/mapping/candidates', authenticateToken, authorizeRoles('ADMIN', 'MA
     res.json({ type: 'STUDENTS', items, total, page: Number(page), pageSize: PAGE });
   } catch (err: any) {
     res.status(500).json({ message: 'Lỗi lấy danh sách candidates: ' + err.message });
+  }
+});
+
+// 3c. Per-class mapping stats
+router.get('/mapping/class-stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const classes = await prisma.class.findMany({
+      include: {
+        students: {
+          where: { student: { isActive: true } },
+          include: { student: { select: { zaloUserId: true } } },
+        },
+      },
+      orderBy: { sortOrder: 'asc' },
+    });
+
+    const stats = classes.map(cls => {
+      const total = cls.students.length;
+      const mapped = cls.students.filter(s => !!s.student.zaloUserId).length;
+      return {
+        classId: cls.id,
+        className: cls.name,
+        classCode: cls.classCode,
+        totalStudents: total,
+        mappedStudents: mapped,
+        mappedPercent: total === 0 ? 100 : Math.round((mapped / total) * 100),
+      };
+    });
+
+    res.json(stats);
+  } catch (err: any) {
+    res.status(500).json({ message: 'Lỗi lấy class stats: ' + err.message });
   }
 });
 

@@ -142,6 +142,13 @@ export const ZaloCampaignPage = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [mappingAudits, setMappingAudits] = useState<MappingAudit[]>([]);
   const [mappingAuditsLoading, setMappingAuditsLoading] = useState(false);
+  const [classStats, setClassStats] = useState<Array<{
+    classId: string; className: string; classCode?: string;
+    totalStudents: number; mappedStudents: number; mappedPercent: number;
+  }>>([]);
+  const [classStatsLoading, setClassStatsLoading] = useState(false);
+  const [selectedMappingClass, setSelectedMappingClass] = useState<string>('ALL');
+  const [mappingStatusFilter, setMappingStatusFilter] = useState<'ALL' | 'LINKED' | 'UNLINKED'>('ALL');
   const [conflictData, setConflictData] = useState<{
     zaloUserId: string;
     targetId: string;
@@ -372,17 +379,26 @@ export const ZaloCampaignPage = () => {
     }
   }, [token]);
 
-  const fetchCandidates = useCallback(async (type: string, search: string, page: number) => {
+  const fetchCandidates = useCallback(async (type: string, search: string, page: number, classId = 'ALL', status = 'ALL') => {
     if (!token) return;
     setCandidatesLoading(true);
     try {
-      const r = await fetch(`/api/zalo/mapping/candidates?type=${type}&search=${encodeURIComponent(search)}&page=${page}`, { headers: { 'Authorization': `Bearer ${token}` } });
+      const params = new URLSearchParams({ type, search, page: String(page) });
+      if (classId && classId !== 'ALL') params.set('classId', classId);
+      if (status && status !== 'ALL') params.set('status', status);
+      const r = await fetch(`/api/zalo/mapping/candidates?${params}`, { headers: { 'Authorization': `Bearer ${token}` } });
       const d = await r.json();
-      if (r.ok) {
-        setCandidates(d.items);
-        setCandidateTotal(d.total);
-      }
+      if (r.ok) { setCandidates(d.items); setCandidateTotal(d.total); }
     } catch {} finally { setCandidatesLoading(false); }
+  }, [token]);
+
+  const fetchClassStats = useCallback(async () => {
+    if (!token) return;
+    setClassStatsLoading(true);
+    try {
+      const r = await fetch('/api/zalo/mapping/class-stats', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (r.ok) setClassStats(await r.json());
+    } catch {} finally { setClassStatsLoading(false); }
   }, [token]);
 
   const fetchMappingAudits = useCallback(async () => {
@@ -402,15 +418,17 @@ export const ZaloCampaignPage = () => {
 
   useEffect(() => {
     if (activeTab === 'mapping') {
-      fetchCandidates(candidateType, debouncedSearch, candidatePage);
+      fetchCandidates(candidateType, debouncedSearch, candidatePage, selectedMappingClass, mappingStatusFilter);
     }
-  }, [activeTab, candidateType, debouncedSearch, candidatePage, fetchCandidates]);
+  }, [activeTab, candidateType, debouncedSearch, candidatePage, selectedMappingClass, mappingStatusFilter, fetchCandidates]);
 
   useEffect(() => {
-    if (activeTab === 'mapping') {
-      fetchMappingAudits();
-    }
+    if (activeTab === 'mapping') fetchMappingAudits();
   }, [activeTab, fetchMappingAudits]);
+
+  useEffect(() => {
+    if (activeTab === 'mapping' || activeTab === 'create') fetchClassStats();
+  }, [activeTab, fetchClassStats]);
 
   // Fetch Multi-class preview when entering Step 3 (Task #10)
   useEffect(() => {
@@ -451,9 +469,10 @@ export const ZaloCampaignPage = () => {
 
       if (r.ok) {
         setConflictData(null);
-        fetchCandidates(candidateType, candidateSearch, candidatePage);
+        fetchCandidates(candidateType, candidateSearch, candidatePage, selectedMappingClass, mappingStatusFilter);
         fetchMappingAudits();
         fetchFollowers();
+        fetchClassStats();
       } else {
         alert(d.message || 'Lỗi liên kết');
       }
@@ -473,9 +492,10 @@ export const ZaloCampaignPage = () => {
         body: JSON.stringify(body),
       });
       if (r.ok) {
-        fetchCandidates(candidateType, candidateSearch, candidatePage);
+        fetchCandidates(candidateType, candidateSearch, candidatePage, selectedMappingClass, mappingStatusFilter);
         fetchMappingAudits();
         fetchFollowers();
+        fetchClassStats();
       } else alert(((await r.json()).message) || 'Lỗi hủy liên kết');
     } catch { alert('Lỗi kết nối'); }
   };
@@ -728,14 +748,39 @@ export const ZaloCampaignPage = () => {
               <div>
                 <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-3">Lớp học (để trống = tất cả lớp)</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {classes.map(cls => (
-                    <label key={cls.id} className={`flex items-center gap-2 p-3 border rounded-xl cursor-pointer transition-all text-sm ${wizardClassIds.includes(cls.id) ? 'border-hicado-navy bg-hicado-navy/5 font-black' : 'border-hicado-slate hover:border-hicado-navy/30'}`}>
-                      <input type="checkbox" className="accent-hicado-navy" checked={wizardClassIds.includes(cls.id)}
-                        onChange={() => setWizardClassIds(prev => prev.includes(cls.id) ? prev.filter(x => x !== cls.id) : [...prev, cls.id])} />
-                      <span className="text-hicado-navy font-bold truncate">{cls.name}</span>
-                    </label>
-                  ))}
+                  {classes.map(cls => {
+                    const stat = classStats.find(s => s.classId === cls.id);
+                    return (
+                      <label key={cls.id} className={`flex items-center gap-2 p-3 border rounded-xl cursor-pointer transition-all text-sm ${wizardClassIds.includes(cls.id) ? 'border-hicado-navy bg-hicado-navy/5 font-black' : 'border-hicado-slate hover:border-hicado-navy/30'}`}>
+                        <input type="checkbox" className="accent-hicado-navy" checked={wizardClassIds.includes(cls.id)}
+                          onChange={() => setWizardClassIds(prev => prev.includes(cls.id) ? prev.filter(x => x !== cls.id) : [...prev, cls.id])} />
+                        <span className="text-hicado-navy font-bold truncate flex-1">{cls.name}</span>
+                        {stat && (
+                          <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 flex-shrink-0 ${stat.mappedPercent === 100 ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                            {stat.mappedPercent < 100 && (
+                              <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                              </svg>
+                            )}
+                            {stat.mappedStudents}/{stat.totalStudents}
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })}
                 </div>
+                {/* Warning banner if any selected class has unmapped students */}
+                {wizardClassIds.length > 0 && classStats.some(s => wizardClassIds.includes(s.classId) && s.mappedPercent < 100) && (
+                  <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-700 mt-3">
+                    <svg className="w-4 h-4 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                    </svg>
+                    <span>
+                      Một số lớp được chọn có học sinh <strong>chưa ghép Zalo</strong>. Tin nhắn sẽ không đến được những học sinh này.{' '}
+                      <button type="button" onClick={() => setActiveTab('mapping')} className="underline font-bold">Ghép ngay →</button>
+                    </span>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-3">Trạng thái học phí</label>
@@ -1419,21 +1464,70 @@ export const ZaloCampaignPage = () => {
       {/* ══ TAB: MAPPING (Manual Identity Mapping) ══════════════════════ */}
       {activeTab === 'mapping' && (
         <div className="space-y-6 animate-in fade-in duration-500">
+          <div className="flex gap-5 items-start">
+
+            {/* ── LEFT SIDEBAR: Class Stats ─────────────────────────────── */}
+            <div className="w-56 flex-shrink-0 space-y-1.5">
+              <p className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest px-1 mb-3">Lọc theo lớp</p>
+              <button
+                onClick={() => { setSelectedMappingClass('ALL'); setCandidatePage(1); }}
+                className={`w-full text-left px-4 py-3 rounded-xl transition-all text-sm font-bold ${selectedMappingClass === 'ALL' ? 'bg-hicado-navy text-white shadow-lg' : 'bg-white border border-hicado-slate hover:border-hicado-navy/30 text-hicado-navy'}`}
+              >Tất cả lớp</button>
+              {classStatsLoading && <div className="h-10 bg-hicado-slate/20 rounded-xl animate-pulse" />}
+              {classStats.map(cs => (
+                <button
+                  key={cs.classId}
+                  onClick={() => { setSelectedMappingClass(cs.classId); setCandidatePage(1); }}
+                  className={`w-full text-left px-4 py-2.5 rounded-xl transition-all flex flex-col gap-1.5 ${selectedMappingClass === cs.classId ? 'bg-hicado-navy text-white shadow-lg' : 'bg-white border border-hicado-slate hover:border-hicado-navy/30 text-hicado-navy'}`}
+                >
+                  <span className="text-xs font-black truncate">{cs.className}</span>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-1 rounded-full flex-1 ${selectedMappingClass === cs.classId ? 'bg-white/20' : 'bg-hicado-slate/30'}`}>
+                      <div
+                        className={`h-1 rounded-full transition-all ${cs.mappedPercent === 100 ? 'bg-emerald-400' : cs.mappedPercent >= 50 ? 'bg-amber-400' : 'bg-rose-400'}`}
+                        style={{ width: `${cs.mappedPercent}%` }}
+                      />
+                    </div>
+                    <span className={`text-[10px] font-black flex-shrink-0 ${selectedMappingClass === cs.classId ? 'text-white/70' : cs.mappedPercent === 100 ? 'text-emerald-600' : 'text-amber-500'}`}>
+                      {cs.mappedStudents}/{cs.totalStudents}
+                    </span>
+                    {cs.mappedPercent < 100 && (
+                      <svg className={`w-3 h-3 flex-shrink-0 ${selectedMappingClass === cs.classId ? 'text-amber-300' : 'text-amber-400'}`} fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                    )}
+                  </div>
+                </button>
+              ))}
+            </div>
+
+            {/* ── RIGHT PANEL: Header & Search ──────────────────────────── */}
+            <div className="flex-1 min-w-0 space-y-4">
           {/* Header & Search */}
           <div className="bg-white border border-hicado-slate rounded-[2rem] p-6 shadow-premium">
-            <div className="flex flex-col md:flex-row gap-4 items-start md:items-center">
+            <div className="flex flex-col md:flex-row gap-4 items-start md:items-center flex-wrap">
               <div className="flex bg-hicado-slate/30 p-1 rounded-xl">
                 <button
-                  onClick={() => setCandidateType('STUDENTS')}
+                  onClick={() => { setCandidateType('STUDENTS'); setCandidatePage(1); }}
                   className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${candidateType === 'STUDENTS' ? 'bg-hicado-navy text-white shadow' : 'text-hicado-navy/40 hover:text-hicado-navy'}`}
                 >Học sinh</button>
                 <button
-                  onClick={() => setCandidateType('TEACHERS')}
+                  onClick={() => { setCandidateType('TEACHERS'); setCandidatePage(1); }}
                   className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${candidateType === 'TEACHERS' ? 'bg-hicado-navy text-white shadow' : 'text-hicado-navy/40 hover:text-hicado-navy'}`}
                 >Giáo viên</button>
               </div>
 
-              <div className="relative flex-1 w-full">
+              {/* Status filter */}
+              <div className="flex bg-hicado-slate/30 p-1 rounded-xl">
+                {(['ALL', 'LINKED', 'UNLINKED'] as const).map(f => (
+                  <button key={f} onClick={() => { setMappingStatusFilter(f); setCandidatePage(1); }}
+                    className={`px-3 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${mappingStatusFilter === f ? 'bg-hicado-navy text-white shadow' : 'text-hicado-navy/40 hover:text-hicado-navy'}`}>
+                    {f === 'ALL' ? 'Tất cả' : f === 'LINKED' ? 'Đã ghép' : 'Chưa ghép'}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative flex-1 w-full min-w-[160px]">
                 <input
                   type="text"
                   value={candidateSearch}
@@ -1509,8 +1603,12 @@ export const ZaloCampaignPage = () => {
                   ) : (
                     <button
                       onClick={() => {
-                        const uid = prompt(`Nhập Zalo User ID cho ${c.name}:`);
-                        if (uid) handleLinkManual(uid, c.id, candidateType);
+                        const raw = prompt(`Nhập Zalo User ID hoặc link OA cho ${c.name}:`);
+                        if (raw) {
+                          let uid = raw.trim();
+                          try { const u = new URL(uid); const p = u.searchParams.get('uid'); if (p) uid = p; } catch {}
+                          handleLinkManual(uid, c.id, candidateType);
+                        }
                       }}
                       className="flex-1 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest text-hicado-navy bg-hicado-slate/40 hover:bg-hicado-navy hover:text-white transition-all"
                     >Ghép thủ công</button>
@@ -1530,6 +1628,8 @@ export const ZaloCampaignPage = () => {
               </div>
             ))}
           </div>
+            </div>{/* end right panel */}
+          </div>{/* end two-panel flex */}
 
           {/* Audit Logs */}
           <div className="bg-white border border-hicado-slate rounded-[2rem] p-6 overflow-hidden">
