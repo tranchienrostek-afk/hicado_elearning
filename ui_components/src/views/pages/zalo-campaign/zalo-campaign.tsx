@@ -1777,10 +1777,10 @@ export const ZaloCampaignPage = () => {
       <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-hicado-navy/40 backdrop-blur-sm animate-in fade-in duration-200">
         <div className="bg-white rounded-[2.5rem] border border-hicado-slate shadow-2xl p-8 max-w-sm w-full animate-in zoom-in-95 duration-200">
           <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-3xl mb-6 mx-auto">⚠️</div>
-          <h3 className="text-xl font-serif font-black text-hicado-navy text-center mb-2">Xung đột định danh</h3>
+          <h3 className="text-xl font-serif font-black text-hicado-navy text-center mb-2">ID đã được sử dụng</h3>
           <p className="text-sm text-hicado-navy/60 text-center leading-relaxed mb-8">
-            Zalo ID này đã được ghép với <strong>{conflictData.conflictName}</strong>.
-            <br />Bạn có chắc chắn muốn gỡ liên kết cũ và chuyển sang người này không?
+            Zalo ID này đang được ghép với <strong>{conflictData.conflictName}</strong>.
+            <br />Bạn có muốn <strong>ghép thêm</strong> cho người này (dùng chung ID) không?
           </p>
           <div className="flex flex-col gap-3">
             <button
@@ -1788,7 +1788,7 @@ export const ZaloCampaignPage = () => {
               disabled={isLinking}
               className="w-full bg-hicado-navy text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-[1.02] transition-all shadow-lg"
             >
-              {isLinking ? 'Đang xử lý...' : 'Xác nhận ghi đè'}
+              {isLinking ? 'Đang xử lý...' : 'Xác nhận dùng chung'}
             </button>
             <button
               onClick={() => setConflictData(null)}

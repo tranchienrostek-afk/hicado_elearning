@@ -251,8 +251,8 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'zalo_mapping_' + zaloUserId}))`;
 
       const [existingStudent, existingTeacher] = await Promise.all([
-        tx.student.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
-        tx.teacher.findUnique({ where: { zaloUserId }, select: { id: true, name: true } }),
+        tx.student.findFirst({ where: { zaloUserId }, select: { id: true, name: true } }),
+        tx.teacher.findFirst({ where: { zaloUserId }, select: { id: true, name: true } }),
       ]);
 
       const conflictTarget = existingStudent ?? existingTeacher;
@@ -272,12 +272,8 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
           };
           throw error;
         }
-        // Force override: clear old target first
-        if (conflictType === 'STUDENT') {
-          await tx.student.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
-        } else {
-          await tx.teacher.update({ where: { id: conflictTarget.id }, data: { zaloUserId: null } });
-        }
+        // Shared link confirmed: we NO LONGER clear the old target.
+        // Multiple targets can now share the same zaloUserId.
       }
 
       // Update new target
@@ -290,7 +286,7 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       // Audit log
       await tx.zaloMappingAudit.create({
         data: {
-          action: conflictTarget && !isSameTarget ? 'OVERRIDE' : 'LINK',
+          action: conflictTarget && !isSameTarget ? 'LINK_SHARED' : 'LINK',
           zaloUserId,
           targetType,
           targetId,

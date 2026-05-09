@@ -90,7 +90,7 @@ model Teacher {
   notes          String?    @db.Text
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
-  zaloUserId     String?    @unique
+  zaloUserId     String?
   isActive       Boolean    @default(true)
   hourlyRate     Float?
   salaryType     SalaryType @default(PERCENT)
@@ -113,7 +113,7 @@ model Student {
   updatedAt          DateTime            @updatedAt
   parentPhone        String?
   studentPhone       String?
-  zaloUserId         String?             @unique
+  zaloUserId         String?
   isActive           Boolean             @default(true)
   notes              String?             @db.Text
   sortOrder          Int                 @default(0)
