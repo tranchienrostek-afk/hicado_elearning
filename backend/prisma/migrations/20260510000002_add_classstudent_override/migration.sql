@@ -1,0 +1,4 @@
+ALTER TABLE "ClassStudent" ADD COLUMN IF NOT EXISTS "customTuitionPerSession" INTEGER;
+ALTER TABLE "ClassStudent" ADD COLUMN IF NOT EXISTS "discountFrom" TIMESTAMP(3);
+ALTER TABLE "ClassStudent" ADD COLUMN IF NOT EXISTS "discountTo" TIMESTAMP(3);
+ALTER TABLE "ClassStudent" ADD COLUMN IF NOT EXISTS "discountReason" TEXT;

@@ -147,7 +147,7 @@ router.get('/stats', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       }),
       prisma.attendance.findMany({
         where: { status: 'PRESENT' },
-        select: { classId: true, studentId: true, status: true, sessionUnits: true },
+        select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true },
       }),
       prisma.transaction.aggregate({ _sum: { amount: true }, where: { status: 'SUCCESS' } }),
       prisma.paymentAdjustment.findMany({
@@ -659,22 +659,22 @@ router.post('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asy
     });
 
     const detailItems = await Promise.all(classes.map(async (cls) => {
-      const attendedAgg = await prisma.attendance.aggregate({
-        _sum: { sessionUnits: true },
-        where: {
-          studentId,
-          classId: cls.id,
-          status: 'PRESENT',
-          date: { gte: from, lte: to }
-        }
-      });
-      const sessions = attendedAgg._sum.sessionUnits || 0;
+      const [attendances, cs] = await Promise.all([
+        prisma.attendance.findMany({
+          where: { studentId, classId: cls.id, status: 'PRESENT', date: { gte: from, lte: to } }
+        }),
+        prisma.classStudent.findUnique({
+          where: { classId_studentId: { classId: cls.id, studentId } }
+        }),
+      ]);
+      const sessions = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
+      const subtotal = expectedForStudentClass(cls as any, studentId, attendances as any, cs || undefined);
       return {
         classId: cls.id,
         className: cls.name,
         sessions,
-        pricePerSession: cls.tuitionPerSession,
-        subtotal: sessions * cls.tuitionPerSession
+        pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession,
+        subtotal
       };
     }));
 
