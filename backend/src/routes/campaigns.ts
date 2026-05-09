@@ -83,7 +83,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           status: 'PRESENT',
           ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
         },
-        select: { classId: true, sessionUnits: true, date: true }
+        select: { studentId: true, classId: true, sessionUnits: true, date: true }
       },
       paymentAdjustments: {
         where: {
@@ -150,10 +150,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     // ── Compute tuition amount (used by both CS message and ZNS template_data) ──
     let totalDue = 0;
     for (const cs of student.classes) {
-      const attended = student.attendances
-        .filter((a: any) => a.classId === cs.class.id)
-        .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
-      totalDue += cs.class.tuitionPerSession * attended;
+      const classAtts = student.attendances.filter((a: any) => a.classId === cs.class.id);
+      totalDue += expectedForStudentClass(cs.class as any, student.id, classAtts as any, cs);
     }
     // Subtract adjustments/payments in this period
     const totalAdjustments = (student as any).paymentAdjustments.reduce((sum: number, adj: any) => sum + adj.amount, 0);

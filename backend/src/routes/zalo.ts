@@ -608,31 +608,45 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       // Phase 3: Pre-create TuitionBill
       try {
         const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
-        billDetail = await Promise.all(classes.map(async (cls) => {
-          const attendances = await prisma.attendance.findMany({
-            where: {
-              studentId: student.id,
-              classId: cls.id,
-              status: 'PRESENT',
-              date: { gte: from || new Date(0), lte: to || new Date() }
-            }
-          });
-          
-          const cs = await prisma.classStudent.findUnique({
-            where: { classId_studentId: { classId: cls.id, studentId: student.id } }
-          });
+        
+        // If we are in manual mode (sessions/price provided), make breakdown consistent with total
+        const isManual = item.sessions !== undefined && item.pricePerSession !== undefined;
 
-          const sess = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
-          const subtotal = expectedForStudentClass(cls as any, student.id, attendances as any, cs || undefined);
-          
-          return {
-            classId: cls.id,
-            className: cls.name,
-            sessions: sess,
-            pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession,
-            subtotal
-          };
-        }));
+        if (isManual) {
+          billDetail = [{
+            classId: coveredClassIds[0] || '',
+            className: classes.map(c => c.name).join(' + '),
+            sessions: item.sessions,
+            pricePerSession: item.pricePerSession,
+            subtotal: total
+          }];
+        } else {
+          billDetail = await Promise.all(classes.map(async (cls) => {
+            const attendances = await prisma.attendance.findMany({
+              where: {
+                studentId: student.id,
+                classId: cls.id,
+                status: 'PRESENT',
+                date: { gte: from || new Date(0), lte: to || new Date() }
+              }
+            });
+            
+            const cs = await prisma.classStudent.findUnique({
+              where: { classId_studentId: { classId: cls.id, studentId: student.id } }
+            });
+
+            const sess = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
+            const subtotal = expectedForStudentClass(cls as any, student.id, attendances as any, cs || undefined);
+            
+            return {
+              classId: cls.id,
+              className: cls.name,
+              sessions: sess,
+              pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession,
+              subtotal
+            };
+          }));
+        }
 
 
         const bill = await prisma.tuitionBill.create({
@@ -838,7 +852,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
           classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true } } } },
           attendances: {
             where: { status: 'PRESENT', ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}) },
-            select: { classId: true, sessionUnits: true, date: true }
+            select: { studentId: true, classId: true, sessionUnits: true, date: true }
           }
         }
       }

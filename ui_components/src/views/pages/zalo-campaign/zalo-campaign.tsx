@@ -1110,11 +1110,13 @@ export const ZaloCampaignPage = () => {
                             `Kính gửi phụ huynh em ${s.name}`,
                             `Trung tâm Hicado xin thông báo học phí từ ${fmtFrom} đến ${fmtTo}`,
                             ``,
-                            ...getCoveredClassIdsForStudent(s.id).map(cid => {
-                              const cls = classes.find(c => c.id === cid);
+                            (() => {
+                              const coveredIds = getCoveredClassIdsForStudent(s.id);
+                              const names = coveredIds.map(cid => classes.find(c => c.id === cid)?.name || cid).join(' + ');
                               const cItem = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
-                              return `${cls?.name ?? cid}   ${cItem.sessions} buổi   ${(cItem.pricePerSession/1000).toFixed(0)}k/buổi   ${(cItem.sessions * cItem.pricePerSession).toLocaleString('vi-VN')}đ`;
-                            }),
+                              const subtotal = cItem.totalOverride ?? (cItem.sessions * cItem.pricePerSession);
+                              return `${names}   ${cItem.sessions} buổi   ${(cItem.pricePerSession/1000).toFixed(0)}k/buổi   ${subtotal.toLocaleString('vi-VN')}đ`;
+                            })(),
                             ``,
                             `Tổng cộng: ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}đ`,
                             `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
