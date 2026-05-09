@@ -178,22 +178,29 @@ async function processSepayTransaction(payload: {
   const combinedContent = `${sepayCode || ''} ${content || ''}`.toUpperCase().trim();
   console.log(`[SePay] Processing: amount=${transferAmount} content="${combinedContent}"`);
 
-  // Load all students/classes once. QR memos use studentCode when present, otherwise student id.
+  // Priority 1: match by TuitionBill referenceCode (HD-XXXXXX) — most precise
+  const bill = await findBillByPaymentContent(combinedContent);
+
+  // Load all students/classes for fallback matching
   const [allStudents, allClasses] = await Promise.all([
     prisma.student.findMany({ select: { id: true, name: true, studentCode: true } }),
     prisma.class.findMany({ where: { classCode: { not: null } }, select: { id: true, name: true, classCode: true } }),
   ]);
 
-  const matchedStudent = findStudentByPaymentContent(allStudents, combinedContent);
+  // Priority 2: fallback to studentCode/name in content
+  const matchedStudent = bill?.student ?? findStudentByPaymentContent(allStudents, combinedContent);
   if (!matchedStudent) {
     console.warn(`[SePay] No student identifier found in: "${combinedContent}"`);
     return { success: false, message: `Khong tim thay ma hoc sinh trong noi dung: "${combinedContent}"` };
   }
 
-  // Match class: find any classCode that appears in the content
-  const matchedClass = allClasses.find(c => c.classCode && combinedContent.includes(c.classCode.toUpperCase())) ?? null;
+  // Match class: prefer bill's primary class, fallback to classCode in content
+  const billPrimaryClassId = bill?.coveredClassIds?.[0];
+  const matchedClass = billPrimaryClassId
+    ? (allClasses.find(c => c.id === billPrimaryClassId) ?? null)
+    : (allClasses.find(c => c.classCode && combinedContent.includes(c.classCode.toUpperCase())) ?? null);
 
-  console.log(`[SePay] Matched student=${matchedStudent.name} class=${matchedClass?.name ?? 'none'}`);
+  console.log(`[SePay] Matched student=${matchedStudent.name} class=${matchedClass?.name ?? 'none'} bill=${bill?.referenceCode ?? 'none'}`);
 
   const transaction = await prisma.transaction.upsert({
     where: { sepayId: id ?? -1 } as any,
@@ -212,8 +219,7 @@ async function processSepayTransaction(payload: {
     } as any,
   });
 
-  // NEW: Check if this is a TuitionBill payment
-  const bill = await findBillByPaymentContent(combinedContent);
+  // Link payment to TuitionBill if matched
   if (bill && bill.status !== 'CANCELLED') {
     const newPaidAmount = bill.paidAmount + transferAmount;
     const newStatus = newPaidAmount >= bill.amount ? 'PAID' : 'PARTIAL';
@@ -230,10 +236,7 @@ async function processSepayTransaction(payload: {
       }),
       prisma.tuitionBill.update({
         where: { id: bill.id },
-        data: {
-          paidAmount: newPaidAmount,
-          status: newStatus
-        }
+        data: { paidAmount: newPaidAmount, status: newStatus }
       })
     ]);
     console.log(`[SePay] Linked to TuitionBill: ${bill.referenceCode} status=${newStatus}`);
