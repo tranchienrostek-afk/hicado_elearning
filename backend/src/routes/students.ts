@@ -202,7 +202,8 @@ router.get('/scan-duplicates', authenticateToken, authorizeRoles('ADMIN', 'MANAG
 
 // Merge students
 router.post('/:sourceId/merge-into/:targetId', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
-  const { sourceId, targetId } = req.params;
+  const sourceId = req.params.sourceId as string;
+  const targetId = req.params.targetId as string;
   const { reason } = req.body;
   const user = (req as any).user;
 
@@ -212,9 +213,16 @@ router.post('/:sourceId/merge-into/:targetId', authenticateToken, authorizeRoles
     const [source, target] = await Promise.all([
       prisma.student.findUnique({ 
         where: { id: sourceId },
-        include: { classes: true, attendances: true, paymentAdjustments: true, transactions: true, zaloMessageLogs: true }
-      }),
-      prisma.student.findUnique({ where: { id: targetId } })
+        include: { 
+          classes: true, 
+          attendances: true, 
+          paymentAdjustments: true, 
+          transactions: true, 
+          zaloMessageLogs: true,
+          tuitionBills: true 
+        }
+      }) as any,
+      prisma.student.findUnique({ where: { id: targetId } }) as any
     ]);
 
     if (!source || !target) return res.status(404).json({ message: 'Không tìm thấy học sinh' });
@@ -281,7 +289,19 @@ router.post('/:sourceId/merge-into/:targetId', authenticateToken, authorizeRoles
         data: { studentId: targetId }
       });
 
-      // 6. Handle User (Account)
+      // 6. Move Attendance Audits
+      await tx.attendanceAudit.updateMany({
+        where: { studentId: sourceId },
+        data: { studentId: targetId }
+      });
+
+      // 7. Move Tuition Bills
+      await tx.tuitionBill.updateMany({
+        where: { studentId: sourceId },
+        data: { studentId: targetId }
+      });
+
+      // 8. Handle User (Account)
       const sourceUser = await tx.user.findUnique({ where: { studentId: sourceId } });
       const targetUser = await tx.user.findUnique({ where: { studentId: targetId } });
       if (sourceUser && !targetUser) {
@@ -297,7 +317,7 @@ router.post('/:sourceId/merge-into/:targetId', authenticateToken, authorizeRoles
         });
       }
 
-      // 7. Update Source Student
+      // 9. Update Source Student
       await tx.student.update({
         where: { id: sourceId },
         data: {
@@ -308,7 +328,7 @@ router.post('/:sourceId/merge-into/:targetId', authenticateToken, authorizeRoles
         }
       });
 
-      // 8. Audit Log
+      // 10. Audit Log
       await tx.studentMergeAudit.create({
         data: {
           sourceStudentId: sourceId,
@@ -318,8 +338,9 @@ router.post('/:sourceId/merge-into/:targetId', authenticateToken, authorizeRoles
           movedRelations: JSON.stringify({
             classes: source.classes.length,
             attendances: source.attendances.length,
-            payments: source.paymentAdjustments.length,
-            transactions: source.transactions.length
+            paymentAdjustments: source.paymentAdjustments.length,
+            transactions: source.transactions.length,
+            tuitionBills: source.tuitionBills.length
           }),
           reason,
           performedById: user.id,
@@ -328,10 +349,10 @@ router.post('/:sourceId/merge-into/:targetId', authenticateToken, authorizeRoles
       });
     });
 
-    res.json({ message: 'Gộp học sinh thành công' });
+    res.json({ message: 'Merge thành công' });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Lỗi khi gộp học sinh' });
+    res.status(500).json({ message: 'Lỗi khi merge học sinh' });
   }
 });
 

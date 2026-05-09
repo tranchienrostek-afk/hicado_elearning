@@ -217,32 +217,6 @@ export function planImport(
   context: PlanContext,
   mode: ImportMode
 ): ImportPlan<ClassImportRow>;
-  });
-};
-
-const planStudents = (records: StudentImportRow[], context: PlanContext, mode: ImportMode) => {
-  const existing = context.students || [];
-  const rows = planById(records, existing as Array<StudentImportRow & { id: string }>, mode, duplicateIds(records));
-  
-  rows.forEach((row) => {
-    if (row.action !== 'CREATE') return;
-    
-    // Check for potential duplicates among existing students
-    for (const ex of existing) {
-      const match = calculateStudentMatchScore(row.record as any, ex as any);
-      if (match.score >= 50) {
-        row.action = 'WARNING';
-        row.messages.push({
-          message: `Học sinh có thể đã tồn tại: ${ex.name} (ID: ${ex.id.slice(-6).toUpperCase()})`,
-          suggestion: `Lý do: ${match.reasons.join(', ')} (Độ trùng khớp: ${match.score}%)`
-        });
-      }
-    }
-  });
-  
-  return rows;
-};
-
 export function planImport(kind: SpreadsheetKind, records: ImportRecord[], context: PlanContext = {}, mode: ImportMode = 'ADD_ONLY') {
   if (kind === 'STUDENTS') {
     return makePlan(planStudents(records as StudentImportRow[], context, mode));
@@ -255,6 +229,36 @@ export function planImport(kind: SpreadsheetKind, records: ImportRecord[], conte
   }
   return makePlan(planClasses(records as ClassImportRow[], context, mode));
 }
+
+const planStudents = (records: StudentImportRow[], context: PlanContext, mode: ImportMode) => {
+  const existing = context.students || [];
+  const rows = planById(records, existing as Array<StudentImportRow & { id: string }>, mode, duplicateIds(records));
+  
+  rows.forEach((row) => {
+    if (row.action !== 'CREATE') return;
+    
+    // Check for potential duplicates among existing students
+    for (const ex of existing) {
+      const match = calculateStudentMatchScore(row.record as any, ex as any);
+      if (match.score >= 50) {
+        // High confidence match (>=90) should be BLOCKED to prevent accidental creation
+        if (match.score >= 90) {
+          row.action = 'BLOCKED';
+          row.canCommit = false;
+        } else {
+          row.action = 'WARNING';
+        }
+        
+        row.messages.push({
+          message: `Học sinh có thể đã tồn tại: ${ex.name} (ID: ${ex.id.slice(-6).toUpperCase()})`,
+          suggestion: `Lý do: ${match.reasons.join(', ')} (Độ trùng khớp: ${match.score}%)`
+        });
+      }
+    }
+  });
+  
+  return rows;
+};
 
 export const getImportPlanSummary = (plan: ImportPlan<unknown>) => ({
   creates: plan.creates.length,
