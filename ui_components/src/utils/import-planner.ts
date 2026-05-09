@@ -1,4 +1,5 @@
 import type { Class, Room, Student, Teacher } from '@/store';
+import { calculateStudentMatchScore } from './student-identity';
 import type { ClassImportRow, RoomImportRow, SpreadsheetKind, StudentImportRow, TeacherImportRow } from './center-spreadsheet';
 
 export type ImportMode = 'ADD_ONLY' | 'UPDATE_BY_ID';
@@ -216,9 +217,35 @@ export function planImport(
   context: PlanContext,
   mode: ImportMode
 ): ImportPlan<ClassImportRow>;
+  });
+};
+
+const planStudents = (records: StudentImportRow[], context: PlanContext, mode: ImportMode) => {
+  const existing = context.students || [];
+  const rows = planById(records, existing as Array<StudentImportRow & { id: string }>, mode, duplicateIds(records));
+  
+  rows.forEach((row) => {
+    if (row.action !== 'CREATE') return;
+    
+    // Check for potential duplicates among existing students
+    for (const ex of existing) {
+      const match = calculateStudentMatchScore(row.record as any, ex as any);
+      if (match.score >= 50) {
+        row.action = 'WARNING';
+        row.messages.push({
+          message: `Học sinh có thể đã tồn tại: ${ex.name} (ID: ${ex.id.slice(-6).toUpperCase()})`,
+          suggestion: `Lý do: ${match.reasons.join(', ')} (Độ trùng khớp: ${match.score}%)`
+        });
+      }
+    }
+  });
+  
+  return rows;
+};
+
 export function planImport(kind: SpreadsheetKind, records: ImportRecord[], context: PlanContext = {}, mode: ImportMode = 'ADD_ONLY') {
   if (kind === 'STUDENTS') {
-    return makePlan(planById(records as StudentImportRow[], (context.students || []) as Array<StudentImportRow & { id: string }>, mode, duplicateIds(records)));
+    return makePlan(planStudents(records as StudentImportRow[], context, mode));
   }
   if (kind === 'TEACHERS') {
     return makePlan(planById(records as TeacherImportRow[], (context.teachers || []) as Array<TeacherImportRow & { id: string }>, mode, duplicateIds(records)));
