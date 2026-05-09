@@ -444,19 +444,21 @@ const isFiniteNumber = (value: unknown): value is number => typeof value === 'nu
 const normalizeDateRange = (fromDate?: string, toDate?: string) => {
   const from = fromDate ? new Date(fromDate) : null;
   const to = toDate ? new Date(toDate) : null;
-  if (from && Number.isNaN(from.getTime())) throw new Error('fromDate kh?ng h?p l?');
-  if (to && Number.isNaN(to.getTime())) throw new Error('toDate kh?ng h?p l?');
+  if (from && Number.isNaN(from.getTime())) throw new Error('fromDate không hợp lệ');
+  if (to && Number.isNaN(to.getTime())) throw new Error('toDate không hợp lệ');
   if (from) from.setHours(0, 0, 0, 0);
   if (to) to.setHours(23, 59, 59, 999);
   return { from, to };
 };
 
 const buildSentAtSql = (from: Date | null, to: Date | null) => {
-  if (from && to) return Prisma.sql`AND "sentAt" BETWEEN ${from} AND ${to}`;
+  if (from && to) return Prisma.sql`AND "sentAt" >= ${from} AND "sentAt" <= ${to}`;
   if (from) return Prisma.sql`AND "sentAt" >= ${from}`;
   if (to) return Prisma.sql`AND "sentAt" <= ${to}`;
   return Prisma.empty;
 };
+
+
 
 router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const {
@@ -469,6 +471,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     toDate,
     studentCoveredClasses = {},
     forceResendStudentIds = [],
+    billingMonth
   } = req.body as {
     items: CustomTuitionItemInput[];
     campaignId?: string;
@@ -479,13 +482,14 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     toDate?: string;
     studentCoveredClasses?: Record<string, string[]>;
     forceResendStudentIds?: string[];
+    billingMonth?: string;
   };
 
   if (!Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ message: 'Danh s?ch h?c sinh kh?ng h?p l?' });
+    return res.status(400).json({ message: 'Danh sách học sinh không hợp lệ' });
   }
   if (!['AUTO', 'CS', 'ZNS'].includes(sendVia)) {
-    return res.status(400).json({ message: 'K?nh g?i kh?ng h?p l?' });
+    return res.status(400).json({ message: 'Kênh gửi không hợp lệ' });
   }
 
   let from: Date | null = null;
@@ -498,29 +502,29 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
 
   const normalizedItems: CustomTuitionItemInput[] = [];
   for (const item of items) {
-    if (!isNonEmptyString(item.studentId)) return res.status(400).json({ message: 'studentId kh?ng h?p l?' });
-    if (!isFiniteNumber(item.sessions) || item.sessions < 1) return res.status(400).json({ message: 'S? bu?i ph?i >= 1' });
-    if (!isFiniteNumber(item.pricePerSession) || item.pricePerSession < 0) return res.status(400).json({ message: '??n gi? ph?i >= 0' });
+    if (!isNonEmptyString(item.studentId)) return res.status(400).json({ message: 'studentId không hợp lệ' });
+    if (!isFiniteNumber(item.sessions) || item.sessions < 1) return res.status(400).json({ message: 'Số buổi phải >= 1' });
+    if (!isFiniteNumber(item.pricePerSession) || item.pricePerSession < 0) return res.status(400).json({ message: 'Đơn giá phải >= 0' });
     if (item.totalOverride !== undefined && (!isFiniteNumber(item.totalOverride) || item.totalOverride < 0)) {
-      return res.status(400).json({ message: 'T?ng ti?n th? c?ng ph?i >= 0' });
+      return res.status(400).json({ message: 'Tổng tiền thủ công phải >= 0' });
     }
     normalizedItems.push({ ...item, sessions: Math.round(item.sessions), pricePerSession: Math.round(item.pricePerSession), totalOverride: item.totalOverride === undefined ? undefined : Math.round(item.totalOverride) });
   }
 
   const cfg = await getZaloConfig();
-  if (!cfg.ZALO_ACCESS_TOKEN) return res.status(400).json({ message: 'Ch?a c?u h?nh Access Token' });
-  if (sendVia === 'ZNS' && !templateId) return res.status(400).json({ message: 'Thi?u ZNS templateId' });
+  if (!cfg.ZALO_ACCESS_TOKEN) return res.status(400).json({ message: 'Chưa cấu hình Access Token' });
+  if (sendVia === 'ZNS' && !templateId) return res.status(400).json({ message: 'Thiếu ZNS templateId' });
 
   const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
   const forceSet = new Set(forceResendStudentIds);
   let campaign: any = null;
   if (campaignId) {
     campaign = await (prisma as any).campaign.findUnique({ where: { id: campaignId } });
-    if (!campaign) return res.status(404).json({ message: 'Chi?n d?ch kh?ng t?n t?i' });
+    if (!campaign) return res.status(404).json({ message: 'Chiến dịch không tồn tại' });
   } else {
     campaign = await (prisma as any).campaign.create({
       data: {
-        name: name?.trim() || `Thu h?c ph? th? c?ng ${new Date().toLocaleDateString('vi-VN')}`,
+        name: name?.trim() || `Thu học phí thủ công ${new Date().toLocaleDateString('vi-VN')}`,
         type: 'CUSTOM_TUITION',
         status: 'SENDING',
         filtersJson: JSON.stringify({ fromDate, toDate, sendVia, templateId, studentCoveredClasses }),
@@ -544,30 +548,29 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       const student = await prisma.student.findUnique({ where: { id: item.studentId } });
       if (!student) {
         failedCount++;
-        results.push({ studentId: item.studentId, status: 'FAILED', total, channel: 'NONE', error: 'Kh?ng t?m th?y h?c sinh' });
+        results.push({ studentId: item.studentId, status: 'FAILED', total, channel: 'NONE', error: 'Không tìm thấy học sinh' });
         continue;
       }
 
-      if (coveredClassIds.length > 0 && !forceSet.has(student.id)) {
-        const sentAtFilter = buildSentAtSql(from, to);
-        const existing = await prisma.$queryRaw<Array<{ id: string; sentAt: Date; coveredClassIds: string[] }>>`
-          SELECT id, "sentAt", "coveredClassIds"
-          FROM "ZaloMessageLog"
-          WHERE "studentId" = ${student.id}
-            AND status = 'SENT'
-            AND "coveredClassIds" && ARRAY[${Prisma.join(coveredClassIds)}]::text[]
-            ${sentAtFilter}
-          ORDER BY "sentAt" DESC
-          LIMIT 1
-        `;
-        if (existing.length > 0) {
+      if (billingMonth && coveredClassIds.length > 0 && !forceSet.has(student.id)) {
+        const existing = await prisma.zaloMessageLog.findFirst({
+          where: {
+            studentId: student.id,
+            status: 'SENT',
+            billingMonth,
+            coveredClassIds: { hasSome: coveredClassIds }
+          }
+        });
+
+        if (existing) {
           skippedCount++;
-          results.push({ studentId: student.id, studentName: student.name, status: 'SKIPPED', total, channel: 'NONE', error: '?? g?i h?c ph? cho m?t l?p trong k? n?y', coveredClassIds });
+          results.push({ studentId: student.id, studentName: student.name, status: 'SKIPPED', total, channel: 'NONE', error: `Đã gửi học phí tháng ${billingMonth}`, coveredClassIds });
           await prisma.zaloMessageLog.create({
             data: {
               phone: student.parentPhone || student.studentPhone || '', zaloUserId: student.zaloUserId,
               templateId: 'CUSTOM_TUITION', trackingId, status: 'SKIPPED', errorReason: 'DEDUP_ALREADY_SENT',
               studentId: student.id, campaignId: campaign.id, classId: item.classId, coveredClassIds,
+              billingMonth,
               messageType: 'CUSTOM_TUITION', customPayload: JSON.stringify(payload),
             }
           });
@@ -601,8 +604,8 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
             template_data: {
               student_name: student.name,
               sessions: String(item.sessions),
-              unit_price: item.pricePerSession.toLocaleString('vi-VN') + '?',
-              amount: total.toLocaleString('vi-VN') + '?',
+              unit_price: item.pricePerSession.toLocaleString('vi-VN') + 'đ',
+              amount: total.toLocaleString('vi-VN') + 'đ',
               note: item.note || '',
             },
             tracking_id: trackingId,
@@ -617,10 +620,10 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
 
       if (!success && !errorReason) {
         errorReason = sendVia === 'CS'
-          ? 'H?c sinh ch?a c? Zalo UID'
+          ? 'Học sinh chưa có Zalo UID'
           : sendVia === 'ZNS'
-            ? 'H?c sinh ch?a c? S?T ho?c thi?u template ZNS'
-            : 'Kh?ng c? Zalo UID, S?T ho?c template ZNS ph? h?p';
+            ? 'Học sinh chưa có SĐT hoặc thiếu template ZNS'
+            : 'Không có Zalo UID, SĐT hoặc template ZNS phù hợp';
       }
 
       await prisma.zaloMessageLog.create({
@@ -629,6 +632,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
           templateId: channel === 'ZNS' && templateId ? `ZNS_${templateId}` : 'CUSTOM_TUITION', trackingId,
           status: success ? 'SENT' : 'FAILED', errorReason: success ? null : errorReason,
           studentId: student.id, campaignId: campaign.id, classId: item.classId, coveredClassIds,
+          billingMonth: billingMonth || null,
           messageType: 'CUSTOM_TUITION', customPayload: JSON.stringify(payload), zaloMsgId,
         }
       });
@@ -679,6 +683,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
               referenceCode: generateBillCode(),
               createdByName: user.name || user.username || 'System',
               sentAt: new Date(),
+              billingMonth: billingMonth || null,
               notes: item.note
             }
           });
@@ -705,7 +710,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
   });
 
   res.json({
-    message: `?? g?i ${sentCount} tin nh?n, b? qua ${skippedCount}, th?t b?i ${failedCount}`,
+    message: `Đã gửi ${sentCount} tin nhắn, bỏ qua ${skippedCount}, thất bại ${failedCount}`,
     campaign: { ...finalCampaign, readRate: 0 },
     sentCount,
     znsSentCount,
@@ -718,7 +723,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
 // 5c. Check Sent Status (Task #10)
 router.get('/tuition/check-sent', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { studentId, classId, fromDate, toDate } = req.query as Record<string, string>;
-  if (!isNonEmptyString(studentId) || !isNonEmptyString(classId)) return res.status(400).json({ message: 'Thi?u studentId ho?c classId' });
+  if (!isNonEmptyString(studentId) || !isNonEmptyString(classId)) return res.status(400).json({ message: 'Thiếu studentId hoặc classId' });
   let from: Date | null = null;
   let to: Date | null = null;
   try { ({ from, to } = normalizeDateRange(fromDate, toDate)); } catch (err: any) { return res.status(400).json({ message: err.message }); }
@@ -756,7 +761,7 @@ router.get('/tuition/check-sent', authenticateToken, authorizeRoles('ADMIN', 'MA
 // 5d. Preview Multi-class (Task #10)
 router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { classId, fromDate, toDate } = req.query as Record<string, string>;
-  if (!isNonEmptyString(classId)) return res.status(400).json({ message: 'Thi?u classId' });
+  if (!isNonEmptyString(classId)) return res.status(400).json({ message: 'Thiếu classId' });
   let from: Date | null = null;
   let to: Date | null = null;
   try { ({ from, to } = normalizeDateRange(fromDate, toDate)); } catch (err: any) { return res.status(400).json({ message: err.message }); }
@@ -818,7 +823,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
 router.post('/tuition/batch-check-sent', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const { studentIds, classId, fromDate, toDate } = req.body as { studentIds?: string[]; classId?: string; fromDate?: string; toDate?: string };
   if (!Array.isArray(studentIds) || studentIds.some(id => !isNonEmptyString(id)) || !isNonEmptyString(classId)) {
-    return res.status(400).json({ message: 'studentIds ho?c classId kh?ng h?p l?' });
+    return res.status(400).json({ message: 'studentIds hoặc classId không hợp lệ' });
   }
   if (studentIds.length === 0) return res.json({});
   let from: Date | null = null;

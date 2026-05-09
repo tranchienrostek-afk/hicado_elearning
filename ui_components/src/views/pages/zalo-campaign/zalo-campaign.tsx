@@ -104,11 +104,12 @@ export const ZaloCampaignPage = () => {
   const [wizardFallbackZNS, setWizardFallbackZNS] = useState(false);
   const [wizardZnsTemplateId, setWizardZnsTemplateId] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [sendResult, setSendResult] = useState<{ sentCount: number; znsSentCount: number; failedCount: number } | null>(null);
+  const [sendResult, setSendResult] = useState<{ sentCount: number; znsSentCount: number; failedCount: number; skippedCount: number; skippedStudents?: any[] } | null>(null);
 
   // Date range for tuition reminder
   const [wizardFromDate, setWizardFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
   const [wizardToDate, setWizardToDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10));
+  const [wizardBillingMonth, setWizardBillingMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`);
 
   // Custom Tuition State (Task #9)
   const [customTuitionItems, setCustomTuitionItems] = useState<Record<string, { sessions: number; pricePerSession: number; totalOverride?: number; note?: string }>>({});
@@ -315,11 +316,18 @@ export const ZaloCampaignPage = () => {
             toDate: wizardToDate,
             studentCoveredClasses: buildStudentCoveredClasses(),
             forceResendStudentIds: buildForceResendStudentIds(),
+            billingMonth: wizardBillingMonth,
           }),
         });
         const data = await r.json();
         if (r.ok) {
-          setSendResult({ sentCount: data.sentCount, znsSentCount: data.znsSentCount ?? 0, failedCount: data.failedCount + (data.skippedCount ?? 0) });
+          setSendResult({
+            sentCount: data.sentCount,
+            znsSentCount: data.znsSentCount ?? 0,
+            failedCount: data.failedCount,
+            skippedCount: data.skippedCount ?? 0,
+            skippedStudents: (data.results || []).filter((r: any) => r.status === 'SKIPPED')
+          });
           fetchCampaigns();
         } else { alert(data.message || 'Gửi thất bại'); }
         return;
@@ -341,12 +349,19 @@ export const ZaloCampaignPage = () => {
             toDate: wizardToDate,
             studentCoveredClasses: buildStudentCoveredClasses(),
             forceResendStudentIds: buildForceResendStudentIds(),
+            billingMonth: wizardBillingMonth,
           },
         }),
       });
       const data = await r.json();
       if (r.ok) {
-        setSendResult({ sentCount: data.campaign.sentCount, znsSentCount: data.campaign.znsSentCount ?? 0, failedCount: data.campaign.failedCount });
+        setSendResult({
+          sentCount: data.campaign.sentCount,
+          znsSentCount: data.campaign.znsSentCount ?? 0,
+          failedCount: data.campaign.failedCount,
+          skippedCount: data.campaign.skippedCount ?? 0,
+          skippedStudents: (data.campaign.results || []).filter((r: any) => r.status === 'SKIPPED')
+        });
         fetchCampaigns();
       } else { alert(data.message || 'Gửi thất bại'); }
     } catch { alert('Lỗi kết nối'); } finally { setIsSending(false); }
@@ -797,24 +812,37 @@ export const ZaloCampaignPage = () => {
               </div>
 
               {wizardType === 'TUITION_REMINDER' && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Từ ngày (điểm danh)</label>
-                    <input
-                      type="date"
-                      value={wizardFromDate}
-                      onChange={e => setWizardFromDate(e.target.value)}
-                      className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
-                    />
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Từ ngày (điểm danh)</label>
+                      <input
+                        type="date"
+                        value={wizardFromDate}
+                        onChange={e => setWizardFromDate(e.target.value)}
+                        className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Đến ngày (điểm danh)</label>
+                      <input
+                        type="date"
+                        value={wizardToDate}
+                        onChange={e => setWizardToDate(e.target.value)}
+                        className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
+                      />
+                    </div>
                   </div>
+
                   <div className="space-y-1">
-                    <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Đến ngày (điểm danh)</label>
+                    <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Kỳ thu học phí (Tháng)</label>
                     <input
-                      type="date"
-                      value={wizardToDate}
-                      onChange={e => setWizardToDate(e.target.value)}
+                      type="month"
+                      value={wizardBillingMonth}
+                      onChange={e => setWizardBillingMonth(e.target.value)}
                       className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
                     />
+                    <p className="text-[10px] text-hicado-navy/40 font-bold mt-1">Dùng để phân biệt "thu tháng 5" với "thu tháng 6" khi lưu lịch sử</p>
                   </div>
                 </div>
               )}
@@ -1133,25 +1161,50 @@ export const ZaloCampaignPage = () => {
                 ))}
               </div>
               {sendResult ? (
-                <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center space-y-2">
-                  <p className="text-3xl mb-1">✅</p>
-                  <p className="font-black text-green-700 text-lg">Chiến dịch đã gửi!</p>
-                  <div className="flex justify-center gap-3 flex-wrap text-xs font-black mt-2">
-                    <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl">
-                      Zalo UID: {sendResult.sentCount - (sendResult.znsSentCount ?? 0)}
-                    </span>
-                    {(sendResult.znsSentCount ?? 0) > 0 && (
-                      <span className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-xl">
-                        📱 ZNS Phone: {sendResult.znsSentCount}
+                <div className="space-y-4">
+                  <div className="bg-green-50 border border-green-200 rounded-2xl p-5 text-center space-y-2">
+                    <p className="text-3xl mb-1">✅</p>
+                    <p className="font-black text-green-700 text-lg">Chiến dịch đã gửi!</p>
+                    <div className="flex justify-center gap-3 flex-wrap text-xs font-black mt-2">
+                      <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                        Zalo UID: {sendResult.sentCount - (sendResult.znsSentCount ?? 0)}
                       </span>
-                    )}
-                    {sendResult.failedCount > 0 && (
-                      <span className="px-3 py-1.5 bg-rose-100 text-rose-600 rounded-xl">
-                        Thất bại: {sendResult.failedCount}
-                      </span>
-                    )}
+                      {(sendResult.znsSentCount ?? 0) > 0 && (
+                        <span className="px-3 py-1.5 bg-amber-100 text-amber-700 rounded-xl">
+                          📱 ZNS Phone: {sendResult.znsSentCount}
+                        </span>
+                      )}
+                      {sendResult.failedCount > 0 && (
+                        <span className="px-3 py-1.5 bg-rose-100 text-rose-600 rounded-xl">
+                          Thất bại: {sendResult.failedCount}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex gap-3 mt-4">
+
+                  {sendResult.skippedCount > 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">⚠️</span>
+                        <div>
+                          <p className="font-black text-amber-700 text-sm">Đã bỏ qua {sendResult.skippedCount} học sinh</p>
+                          <p className="text-[10px] text-amber-600 font-bold uppercase tracking-widest">Lý do: Đã gửi thông báo kỳ {wizardBillingMonth} trước đó</p>
+                        </div>
+                      </div>
+                      <div className="max-h-32 overflow-y-auto custom-scrollbar pr-2">
+                        <div className="flex flex-wrap gap-2">
+                          {sendResult.skippedStudents?.map((s: any) => (
+                            <span key={s.studentId} className="px-2 py-1 bg-white border border-amber-200 rounded-lg text-[10px] font-bold text-amber-700 shadow-sm">
+                              {s.studentName}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-amber-500 italic font-bold">Tick "Gửi lại" ở bước trước nếu bạn thực sự muốn gửi thêm.</p>
+                    </div>
+                  )}
+
+                  <div className="flex gap-3 mt-2">
                     <button onClick={resetWizard} className="flex-1 py-3 rounded-2xl border border-hicado-slate font-black text-sm text-hicado-navy/60 hover:bg-hicado-slate transition-all">Tạo chiến dịch mới</button>
                     <button onClick={() => setActiveTab('campaigns')} className="flex-1 py-3 bg-hicado-navy text-white rounded-2xl font-black text-sm uppercase tracking-widest">Xem danh sách</button>
                   </div>
