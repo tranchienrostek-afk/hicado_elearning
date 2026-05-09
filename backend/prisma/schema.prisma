@@ -132,6 +132,11 @@ model Student {
   tuitionBills       TuitionBill[]
   mergeAuditsSource  StudentMergeAudit[] @relation("MergeSource")
   mergeAuditsTarget  StudentMergeAudit[] @relation("MergeTarget")
+
+  @@index([phoneNorm])
+  @@index([parentPhoneNorm])
+  @@index([nameNorm])
+  @@index([mergedIntoId])
 }
 
 model StudentMergeAudit {
@@ -147,6 +152,9 @@ model StudentMergeAudit {
   performedAt     DateTime @default(now())
   sourceStudent   Student  @relation("MergeSource", fields: [sourceStudentId], references: [id])
   targetStudent   Student  @relation("MergeTarget", fields: [targetStudentId], references: [id])
+
+  @@index([sourceStudentId])
+  @@index([targetStudentId])
 }
 
 model Room {
