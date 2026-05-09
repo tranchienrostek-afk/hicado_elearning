@@ -222,7 +222,7 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
   }
 
   const zaloUserId = String(rawId).trim().toLowerCase();
-  const user = (req as any).user as { userId: string; name: string; role: string };
+  const user = (req as any).user as { id: string; name: string; role: string };
 
   try {
     // Resolve target details
@@ -295,8 +295,8 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
           targetName,
           previousTargetId: otherConflicts.length > 0 ? otherConflicts[0].id : undefined,
           previousTargetName: otherConflicts.length > 0 ? otherConflicts.map(c => c.name).join(', ') : undefined,
-          performedBy: user.userId,
-          performedByName: user.name ?? user.userId,
+          performedBy: user.id,
+          performedByName: user.name ?? user.id,
         },
       });
     });
@@ -326,7 +326,7 @@ router.delete('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), as
   const { studentId, teacherId } = req.body;
   if (!studentId && !teacherId) return res.status(400).json({ message: 'Cần studentId hoặc teacherId' });
 
-  const user = (req as any).user as { userId: string; name: string };
+  const user = (req as any).user as { id: string; name: string };
 
   try {
     // ATOMIC TRANSACTION: Find -> Lock -> Update -> Audit
@@ -370,8 +370,8 @@ router.delete('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), as
           targetType,
           targetId,
           targetName,
-          performedBy: user.userId,
-          performedByName: user.name ?? user.userId,
+          performedBy: user.id,
+          performedByName: user.name ?? user.id,
         },
       });
     });
