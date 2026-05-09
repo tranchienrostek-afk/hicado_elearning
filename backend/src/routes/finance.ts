@@ -332,7 +332,7 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
         where: studentWhere,
         include: {
           classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } } },
-          attendances: { where: { status: 'PRESENT' }, select: { classId: true, sessionUnits: true } },
+          attendances: { where: { status: 'PRESENT' }, select: { classId: true, sessionUnits: true, date: true } },
         },
         orderBy: { name: 'asc' },
       }),
@@ -365,10 +365,8 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
       const adjustmentList = allAdjustments.filter((a: any) => a.studentId === s.id);
       const totalPaid = txList.reduce((sum: number, t: any) => sum + t.amount, 0) + adjustmentList.reduce((sum: number, a: any) => sum + a.amount, 0);
       const totalExpected = s.classes.reduce((sum: number, cs: any) => {
-        const attended = s.attendances
-          .filter((a: any) => a.classId === cs.class.id)
-          .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
-        return sum + cs.class.tuitionPerSession * attended;
+        const atts = s.attendances.filter((a: any) => a.classId === cs.class.id);
+        return sum + expectedForStudentClass(cs.class as any, s.id, atts as any, cs);
       }, 0);
       const totalBalance = Math.max(0, totalExpected - totalPaid);
 
@@ -388,9 +386,11 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
           attended: s.attendances
             .filter((a: any) => a.classId === cs.class.id)
             .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0),
-          expected: cs.class.tuitionPerSession * s.attendances
-            .filter((a: any) => a.classId === cs.class.id)
-            .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0),
+          expected: expectedForStudentClass(
+            cs.class as any, s.id,
+            s.attendances.filter((a: any) => a.classId === cs.class.id),
+            cs
+          ),
         })),
         totalExpected, totalPaid, totalBalance,
         paymentStatus,

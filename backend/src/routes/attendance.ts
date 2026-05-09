@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken } from '../middleware/auth';
+import { expectedForStudentClass } from '../lib/financeMath';
 
 const router = Router();
 const allowedSlots = ['MORNING', 'AFTERNOON', 'EVENING', 'CUSTOM'] as const;
@@ -44,7 +45,8 @@ router.get('/monthly-report', authenticateToken, async (req, res) => {
     });
 
     // Per-student summary
-    const students = cls.students.map(({ student: s }) => {
+    const students = cls.students.map((cs) => {
+      const s = cs.student;
       const studentRecords = records.filter(r => r.studentId === s.id);
       const presentRecords = studentRecords.filter(r => r.status === 'PRESENT');
       const totalSessionUnits = presentRecords.reduce((sum, r) => sum + r.sessionUnits, 0);
@@ -60,7 +62,7 @@ router.get('/monthly-report', authenticateToken, async (req, res) => {
         })),
         totalPresent: presentRecords.length,
         totalSessionUnits,
-        tuitionDue: Math.round(totalSessionUnits * cls.tuitionPerSession),
+        tuitionDue: expectedForStudentClass(cls as any, s.id, presentRecords as any, cs),
       };
     });
 
@@ -148,7 +150,8 @@ router.get('/overview', authenticateToken, async (req, res) => {
         return (SLOT_ORDER[a.slot] || 99) - (SLOT_ORDER[b.slot] || 99);
       });
 
-    const students = cls.students.map(({ student: s }) => {
+    const students = cls.students.map((cs) => {
+      const s = cs.student;
       const stuRecs = records.filter(r => r.studentId === s.id);
       
       const sessionRecords = sessions.map(sess => {
@@ -171,7 +174,7 @@ router.get('/overview', authenticateToken, async (req, res) => {
         sessionCount: totalClassSessions,
         presentCount: presentRecs.length,
         absentCount:  absentRecs.length,
-        amount:       Math.round(totalSessionUnits * cls.tuitionPerSession),
+        amount:       expectedForStudentClass(cls as any, s.id, presentRecs as any, cs),
         sessionRecords,
       };
     });
