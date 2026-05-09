@@ -3,8 +3,10 @@ import { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
-import { buildCustomTuitionMessage, CustomTuitionPayload } from '../lib/zaloMessage';
+import { buildCustomTuitionMessage, CustomTuitionPayload, buildZaloImageMessage, uploadZaloImage, buildMultiClassTuitionMessage } from '../lib/zaloMessage';
 import { generateBillCode } from '../lib/billCode';
+import { buildMultiClassPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
+import { generateVietQRString } from '../lib/vietqr';
 
 export const formatPhone = (p: string) => {
   const digits = p.replace(/\D/g, '');
@@ -531,6 +533,9 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       },
     });
   }
+  
+  const bankCfg = await prisma.systemConfig.findMany({ where: { key: { in: ['BANK_BIN', 'BANK_ACC'] } } });
+  const bm = bankCfg.reduce((a: any, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
 
   let sentCount = 0;
   let znsSentCount = 0;
@@ -578,7 +583,59 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
         }
       }
 
-      const messageText = buildCustomTuitionMessage(student.name, payload);
+      const user = (req as any).user;
+      let billId: string | null = null;
+      let billRef: string | null = null;
+      let billDetail: Array<{ classId: string; className: string; sessions: number; pricePerSession: number; subtotal: number }> = [];
+
+      // Phase 3: Pre-create TuitionBill
+      try {
+        const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
+        billDetail = await Promise.all(classes.map(async (cls) => {
+          const attendedAgg = await prisma.attendance.aggregate({
+            _sum: { sessionUnits: true },
+            where: {
+              studentId: student.id,
+              classId: cls.id,
+              status: 'PRESENT',
+              date: { gte: from || new Date(0), lte: to || new Date() }
+            }
+          });
+          const sess = attendedAgg._sum.sessionUnits || 0;
+          return {
+            classId: cls.id,
+            className: cls.name,
+            sessions: sess,
+            pricePerSession: cls.tuitionPerSession,
+            subtotal: sess * cls.tuitionPerSession
+          };
+        }));
+
+        const bill = await prisma.tuitionBill.create({
+          data: {
+            studentId: student.id,
+            coveredClassIds,
+            fromDate: from || new Date(),
+            toDate: to || new Date(),
+            amount: total,
+            sessionsDetail: JSON.stringify(billDetail),
+            referenceCode: generateBillCode(),
+            createdByName: user.name || user.username || 'System',
+            billingMonth: billingMonth || null,
+            notes: item.note
+          }
+        });
+        billId = bill.id;
+        billRef = bill.referenceCode;
+      } catch (billErr) {
+        console.error('[Pre-Bill Error]', billErr);
+      }
+
+      const billItems = billId ? billDetail : [];
+      const messageText = billItems.length > 1
+        ? buildMultiClassTuitionMessage(student.name, billItems, total, billingMonth)
+        : buildCustomTuitionMessage(student.name, payload);
+
       let success = false;
       let channel: 'CS' | 'ZNS' | 'NONE' = 'NONE';
       let errorReason = '';
@@ -586,7 +643,32 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
 
       if ((sendVia === 'AUTO' || sendVia === 'CS') && student.zaloUserId) {
         try {
-          const r = await zaloApiClient.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`, { recipient: { user_id: student.zaloUserId }, message: { text: messageText } }, { headers });
+          let message: any = { text: messageText };
+
+          // Try to attach image slip
+          if (billRef) {
+            try {
+              const memo = deaccent(`${student.studentCode || student.id} ${billRef} ${student.name}`).toUpperCase().trim().slice(0, 50);
+              const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', total, memo);
+              
+              const pngBuffer = await buildMultiClassPaymentSlipPNG({
+                studentName: student.name,
+                studentCode: student.studentCode || student.id,
+                billingMonth: billingMonth,
+                items: billItems,
+                totalAmount: total,
+                memo: memo,
+                qrData: qrData
+              });
+              const attachmentId = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
+              message = buildZaloImageMessage(attachmentId, messageText);
+            } catch (imgErr: any) {
+              console.error('[Custom Tuition Image Error]', imgErr.message);
+              // Fallback to text only is default 'message'
+            }
+          }
+
+          const r = await zaloApiClient.post<any>(`${ZALO_OA_API}/v3.0/oa/message/cs`, { recipient: { user_id: student.zaloUserId }, message }, { headers });
           success = r.data?.error === 0;
           channel = 'CS';
           errorReason = success ? '' : `${r.data?.message ?? 'CS failed'} (${r.data?.error ?? 'unknown'})`;
@@ -632,7 +714,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
           templateId: channel === 'ZNS' && templateId ? `ZNS_${templateId}` : 'CUSTOM_TUITION', trackingId,
           status: success ? 'SENT' : 'FAILED', errorReason: success ? null : errorReason,
           studentId: student.id, campaignId: campaign.id, classId: item.classId, coveredClassIds,
-          billingMonth: billingMonth || null,
+          billingMonth: billingMonth || null, billId,
           messageType: 'CUSTOM_TUITION', customPayload: JSON.stringify(payload), zaloMsgId,
         }
       });
@@ -641,62 +723,16 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
         sentCount++;
         if (channel === 'ZNS') znsSentCount++;
         results.push({ studentId: student.id, studentName: student.name, status: 'SENT', total, channel, coveredClassIds });
+        
+        if (billId) {
+          await prisma.tuitionBill.update({
+            where: { id: billId },
+            data: { sentAt: new Date() }
+          });
+        }
       } else {
         failedCount++;
         results.push({ studentId: student.id, studentName: student.name, status: 'FAILED', total, channel, error: errorReason, coveredClassIds });
-      }
-
-      const user = (req as any).user;
-
-      // Phase 3: Auto-create TuitionBill on success
-      if (success) {
-        try {
-          const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
-          const billDetail = await Promise.all(classes.map(async (cls) => {
-            const attendedAgg = await prisma.attendance.aggregate({
-              _sum: { sessionUnits: true },
-              where: {
-                studentId: student.id,
-                classId: cls.id,
-                status: 'PRESENT',
-                date: { gte: from || new Date(0), lte: to || new Date() }
-              }
-            });
-            const sess = attendedAgg._sum.sessionUnits || 0;
-            return {
-              classId: cls.id,
-              className: cls.name,
-              sessions: sess,
-              pricePerSession: cls.tuitionPerSession,
-              subtotal: sess * cls.tuitionPerSession
-            };
-          }));
-
-          const bill = await prisma.tuitionBill.create({
-            data: {
-              studentId: student.id,
-              coveredClassIds,
-              fromDate: from || new Date(),
-              toDate: to || new Date(),
-              amount: total,
-              sessionsDetail: JSON.stringify(billDetail),
-              referenceCode: generateBillCode(),
-              createdByName: user.name || user.username || 'System',
-              sentAt: new Date(),
-              billingMonth: billingMonth || null,
-              notes: item.note
-            }
-          });
-
-          // Link log to bill
-          await prisma.zaloMessageLog.update({
-            where: { trackingId },
-            data: { billId: bill.id }
-          });
-        } catch (billErr) {
-          console.error('[Auto-Bill Error]', billErr);
-          // Don't fail the whole request if bill creation fails
-        }
       }
     } catch (err: any) {
       failedCount++;

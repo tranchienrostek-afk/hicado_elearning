@@ -1,3 +1,17 @@
+import FormData from 'form-data';
+import { zaloApiClient, ZALO_OA_API } from './zaloAuth';
+
+// Upload PNG buffer to Zalo and return attachment_id
+export async function uploadZaloImage(buffer: Buffer, accessToken: string): Promise<string> {
+  const form = new FormData();
+  form.append('file', buffer, { filename: 'payment.png', contentType: 'image/png' });
+  const res = await zaloApiClient.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
+    headers: { ...form.getHeaders(), access_token: accessToken },
+  });
+  if (res.data?.error !== 0) throw new Error(res.data?.message ?? 'Upload failed');
+  return res.data.data.attachment_id as string;
+}
+
 export type ZaloCsMessage = {
   text?: string;
   attachment?: {
@@ -52,6 +66,22 @@ export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionP
     `  💰 Tổng cộng   : ${p.total.toLocaleString('vi-VN')}đ`,
     ``,
     `Quý phụ huynh vui lòng thanh toán đúng hạn.`,
+    `Trân trọng - Hicado Center 🌱`,
+  ].join('\n');
+}
+
+export function buildMultiClassTuitionMessage(studentName: string, items: any[], total: number, note?: string): string {
+  const itemLines = items.map(it => `  • ${it.className}: ${it.sessions} buổi x ${(it.pricePerSession/1000)}k = ${it.subtotal.toLocaleString('vi-VN')}đ`);
+  return [
+    `Kính gửi phụ huynh em ${studentName}!`,
+    ``,
+    `Trung tâm Hicado xin thông báo học phí${note ? ` (${note})` : ''}:`,
+    ``,
+    ...itemLines,
+    `  ─────────────────────────────`,
+    `  💰 Tổng cộng   : ${total.toLocaleString('vi-VN')}đ`,
+    ``,
+    `Quý phụ huynh vui lòng thanh toán đúng hạn (Chi tiết trong ảnh).`,
     `Trân trọng - Hicado Center 🌱`,
   ].join('\n');
 }

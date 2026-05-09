@@ -4,21 +4,10 @@ import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 import { formatPhone } from './zalo';
-import FormData from 'form-data';
-import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
+import { buildPaymentSlipPNG, buildMultiClassPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
-import { buildZaloImageMessage } from '../lib/zaloMessage';
-
-// Upload PNG buffer to Zalo and return attachment_id
-async function uploadZaloImage(buffer: Buffer, accessToken: string): Promise<string> {
-  const form = new FormData();
-  form.append('file', buffer, { filename: 'payment.png', contentType: 'image/png' });
-  const res = await zaloApiClient.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
-    headers: { ...form.getHeaders(), access_token: accessToken },
-  });
-  if (res.data?.error !== 0) throw new Error(res.data?.message ?? 'Upload failed');
-  return res.data.data.attachment_id as string;
-}
+import { buildZaloImageMessage, uploadZaloImage, buildCustomTuitionMessage, buildMultiClassTuitionMessage } from '../lib/zaloMessage';
+import { generateBillCode } from '../lib/billCode';
 
 const router = Router();
 
@@ -63,6 +52,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       toDate?: string;
       studentCoveredClasses?: Record<string, string[]>;
       forceResendStudentIds?: string[];
+      billingMonth?: string;
     };
   };
   if (!name || !type) return res.status(400).json({ message: 'Thiếu tên hoặc loại chiến dịch' });
@@ -232,32 +222,75 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
     const trace: string[] = [];
     let message: any;
+    let billId: string | null = null;
+    let billDetail: Array<{ classId: string; className: string; sessions: number; pricePerSession: number; subtotal: number }> = [];
 
-    if (type === 'TUITION_REMINDER' && primaryClassId) {
-      const primaryClass = student.classes.find((cs: any) => cs.class.id === primaryClassId)?.class;
-      const memo = deaccent(`${student.studentCode ?? student.id} ${primaryClass?.classCode ?? ''} ${student.name}`).toUpperCase().trim().slice(0, 50);
-      const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', primaryAttended * (primaryClass?.tuitionPerSession ?? 0), memo);
-
-      // Step 1: Build PNG
-      trace.push('①PNG...');
+    if (type === 'TUITION_REMINDER') {
+      trace.push('①BILL...');
+      let billRef = '';
       try {
-        const pngBuffer = await buildPaymentSlipPNG({
-          studentName: student.name, studentCode: student.studentCode ?? student.id,
-          className: primaryClass?.name ?? '', classCode: primaryClass?.classCode ?? '',
-          attended: primaryAttended, tuitionPerSession: primaryClass?.tuitionPerSession ?? 0,
-          amount: totalDue, memo, qrData,
+        const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
+        billDetail = classes.map((cls) => {
+          const attended = student.attendances
+            .filter((a: any) => a.classId === cls.id)
+            .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
+          return {
+            classId: cls.id,
+            className: cls.name,
+            sessions: attended,
+            pricePerSession: cls.tuitionPerSession,
+            subtotal: attended * cls.tuitionPerSession
+          };
         });
-        trace[trace.length - 1] = `①PNG_OK(${Math.round(pngBuffer.length / 1024)}KB)`;
 
-        // Step 2: Upload to Zalo
-        trace.push('②UPLOAD...');
+        const bill = await prisma.tuitionBill.create({
+          data: {
+            studentId: student.id,
+            coveredClassIds,
+            fromDate: from || new Date(),
+            toDate: to || new Date(),
+            amount: totalDue,
+            sessionsDetail: JSON.stringify(billDetail),
+            referenceCode: generateBillCode(),
+            createdByName: 'Campaign System',
+            billingMonth: filters.billingMonth || null,
+          }
+        });
+        billId = bill.id;
+        billRef = bill.referenceCode;
+        trace[trace.length - 1] = `①BILL_OK(${billRef})`;
+      } catch (billErr: any) {
+        trace[trace.length - 1] = `①BILL_FAIL:${billErr.message}`;
+      }
+
+      const memo = deaccent(`${student.studentCode ?? student.id} ${billRef} ${student.name}`).toUpperCase().trim().slice(0, 50);
+      const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', totalDue, memo);
+      
+      const billItems = billDetail;
+      const textMessage = billItems.length > 1 
+        ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, periodStr)
+        : buildCustomTuitionMessage(student.name, { sessions: billItems[0]?.sessions || 0, pricePerSession: billItems[0]?.pricePerSession || 0, total: totalDue, note: periodStr });
+
+      // Step 2: Build PNG
+      trace.push('②PNG...');
+      try {
+        const pngBuffer = await buildMultiClassPaymentSlipPNG({
+          studentName: student.name, studentCode: student.studentCode ?? student.id,
+          billingMonth: filters.billingMonth,
+          items: billItems,
+          totalAmount: totalDue, memo, qrData,
+        });
+        trace[trace.length - 1] = `②PNG_OK(${Math.round(pngBuffer.length / 1024)}KB)`;
+
+        // Step 3: Upload to Zalo
+        trace.push('③UPLOAD...');
         const attachmentId = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
-        trace[trace.length - 1] = `②UPLOAD_OK`;
-        message = buildZaloImageMessage(attachmentId, `Phieu hoc phi ${student.name}`);
-        trace.push('③MSG=MEDIA_IMAGE');
+        trace[trace.length - 1] = `③UPLOAD_OK`;
+        message = buildZaloImageMessage(attachmentId, textMessage);
+        trace.push('④MSG=MEDIA_IMAGE');
       } catch (imgErr: any) {
         trace[trace.length - 1] += `_FAIL:${imgErr.message}`;
-        trace.push('③FALLBACK=TEXT');
+        trace.push('④FALLBACK=TEXT');
         const payUrl = `${appBaseUrl}/pay/${student.id}${from && to ? `?from=${filters.fromDate}&to=${filters.toDate}` : ''}`;
         message = { text: `Trung tâm Hicado thông báo học phí em ${student.name} ${periodStr}: ${(totalDue).toLocaleString('vi-VN')}đ. QR nộp tiền: ${payUrl}` };
       }
@@ -275,7 +308,12 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       );
       const success = r.data?.error === 0;
       const zaloMsgId: string | null = success ? (r.data?.data?.msg_id ?? r.data?.data?.message_id ?? null) : null;
-      trace.push(success ? `④CS_OK` : `④CS_FAIL[${r.data?.error}]:${r.data?.message}`);
+      trace.push(success ? `⑤CS_OK` : `⑤CS_FAIL[${r.data?.error}]:${r.data?.message}`);
+      
+      if (success && billId) {
+        await prisma.tuitionBill.update({ where: { id: billId }, data: { sentAt: new Date() } });
+      }
+
       const traceStr = trace.join(' → ');
       console.log(`[Campaign] ${student.name}: ${traceStr}`);
 
@@ -290,9 +328,11 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           studentId: student.id,
           campaignId: campaign.id,
           zaloMsgId,
+          billId,
           classId: primaryClassId,
           coveredClassIds,
           messageType: 'TUITION_REMINDER',
+          billingMonth: filters.billingMonth || null,
         },
       });
       if (success) sentCount++; else failedCount++;
@@ -346,13 +386,8 @@ router.get('/debug/image-send', authenticateToken, authorizeRoles('ADMIN', 'MANA
     result.png_bytes = pngBuffer.length;
 
     // Upload
-    const form = new FormData();
-    form.append('file', pngBuffer, { filename: 'payment.png', contentType: 'image/png' });
-    const uploadRes = await zaloApiClient.post<any>(`${ZALO_OA_API}/v2.0/oa/upload/image`, form, {
-      headers: { ...form.getHeaders(), access_token: cfg.ZALO_ACCESS_TOKEN },
-    });
-    result.upload = uploadRes.data;
-    const uploadedToken = uploadRes.data?.data?.attachment_id;
+    const uploadedToken = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
+    result.upload = { error: 0, message: 'Success', data: { attachment_id: uploadedToken } };
     if (!uploadedToken) return res.json({ ok: false, result, verdict: 'Upload failed or no attachment_id in response' });
 
     if (!testUserId) return res.json({ ok: true, result, verdict: 'Upload OK. Re-call with ?zaloUserId=XXX to test CS send formats.' });
