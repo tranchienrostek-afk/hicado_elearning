@@ -16,7 +16,16 @@ router.get('/', authenticateToken, async (req, res) => {
       include: {
         teacher: { select: { name: true } },
         room: { select: { name: true } },
-        students: { select: { studentId: true } }
+        students: { 
+          select: { 
+            studentId: true,
+            customTuitionPerSession: true,
+            discountFrom: true,
+            discountTo: true,
+            discountReason: true
+          } 
+        }
+
       }
     });
     res.json(classes.map(toClient));
@@ -30,7 +39,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
       include: {
         teacher: true,
         room: true,
-        students: { include: { student: true } },
+        students: { 
+          include: { 
+            student: true 
+          } 
+        },
+
         attendances: { take: 10, orderBy: { date: 'desc' } }
       }
     });
@@ -121,4 +135,28 @@ router.post('/reorder', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), a
   }
 });
 
+// Tuition override for a student in a class
+router.put('/:classId/students/:studentId/tuition-override', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const { classId, studentId } = req.params as { classId: string, studentId: string };
+
+    const { customTuitionPerSession, discountFrom, discountTo, discountReason } = req.body;
+
+    const updated = await prisma.classStudent.update({
+      where: { classId_studentId: { classId, studentId } },
+      data: {
+        customTuitionPerSession: customTuitionPerSession === null ? null : Number(customTuitionPerSession),
+        discountFrom: discountFrom ? new Date(discountFrom) : null,
+        discountTo: discountTo ? new Date(discountTo) : null,
+        discountReason: discountReason || null,
+      }
+    });
+
+    res.json(updated);
+  } catch (err: any) {
+    res.status(500).json({ message: err.message || 'Lỗi cập nhật học phí đặc biệt' });
+  }
+});
+
 export default router;
+

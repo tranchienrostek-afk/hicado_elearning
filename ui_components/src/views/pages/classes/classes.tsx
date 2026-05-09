@@ -64,7 +64,9 @@ export const Classes = () => {
   const [importPlan, setImportPlan] = useState<ImportPlan<ClassImportRow> | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [studentSearch, setStudentSearch] = useState('');
+  const [tuitionOverride, setTuitionOverride] = useState<{ classId: string, studentId: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
 
   const [formData, setFormData] = useState({
     name: '',
@@ -576,8 +578,10 @@ export const Classes = () => {
           classId={viewingClassStudentsId}
           onClose={() => setViewingClassStudentsId(null)}
           onViewStory={(sid) => setViewingStoryId(sid)}
+          onOverride={(sid) => setTuitionOverride({ classId: viewingClassStudentsId, studentId: sid })}
         />
       )}
+
 
       {viewingStoryId && (
         <SharedStoryModal
@@ -585,11 +589,30 @@ export const Classes = () => {
           onClose={() => setViewingStoryId(null)}
         />
       )}
+
+      {tuitionOverride && (
+        <TuitionOverrideModal
+          classId={tuitionOverride.classId}
+          studentId={tuitionOverride.studentId}
+          onClose={() => setTuitionOverride(null)}
+        />
+      )}
+
     </div>
   );
 };
 
-const ClassStudentsModal = ({ classId, onClose, onViewStory }: { classId: string; onClose: () => void; onViewStory: (id: string) => void }) => {
+const ClassStudentsModal = ({ 
+  classId, 
+  onClose, 
+  onViewStory, 
+  onOverride 
+}: { 
+  classId: string; 
+  onClose: () => void; 
+  onViewStory: (id: string) => void;
+  onOverride: (id: string) => void;
+}) => {
   const { classes, students } = useCenterStore();
   const { auth } = useAuthStore();
   const scopedClasses = auth?.role === 'TEACHER' && auth.teacherId
@@ -598,6 +621,24 @@ const ClassStudentsModal = ({ classId, onClose, onViewStory }: { classId: string
   const cls = scopedClasses.find(c => c.id === classId);
   if (!cls) return null;
   const classStudents = students.filter(s => cls.studentIds.includes(s.id));
+
+  const getOverrideInfo = (sid: string) => {
+    const cs = cls.students?.find(item => item.studentId === sid);
+    if (!cs || cs.customTuitionPerSession == null) return null;
+
+    const now = new Date();
+    now.setHours(0,0,0,0);
+    const to = cs.discountTo ? new Date(cs.discountTo) : null;
+    if (to) to.setHours(23, 59, 59, 999);
+    const isExpired = to && now > to;
+
+    return {
+      price: cs.customTuitionPerSession,
+      range: `${cs.discountFrom ? new Date(cs.discountFrom).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '...'} - ${cs.discountTo ? new Date(cs.discountTo).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '∞'}`,
+      reason: cs.discountReason,
+      isExpired
+    };
+  };
 
   return (
     <div className="fixed inset-0 bg-hicado-navy/60 backdrop-blur-sm z-[120] flex items-center justify-center p-4 animate-in fade-in duration-300">
@@ -617,31 +658,56 @@ const ClassStudentsModal = ({ classId, onClose, onViewStory }: { classId: string
         </div>
 
         <div className="p-8 space-y-3 max-h-[55vh] overflow-y-auto custom-scrollbar">
-          {classStudents.map(student => (
-            <div key={student.id} className="group flex items-center justify-between p-5 bg-hicado-slate/10 border border-hicado-slate rounded-2xl hover:bg-white hover:shadow-lg transition-all duration-300">
-              <div className="flex gap-4 items-center">
-                <div className="w-10 h-10 bg-hicado-navy rounded-2xl flex items-center justify-center font-serif font-black text-white group-hover:bg-hicado-emerald group-hover:text-hicado-navy transition-colors shadow-lg shadow-hicado-navy/20">
-                  {student.name.charAt(0)}
+          {classStudents.map(student => {
+            const override = getOverrideInfo(student.id);
+            return (
+              <div key={student.id} className="group flex items-center justify-between p-5 bg-hicado-slate/10 border border-hicado-slate rounded-2xl hover:bg-white hover:shadow-lg transition-all duration-300">
+                <div className="flex gap-4 items-center">
+                  <div className="w-10 h-10 bg-hicado-navy rounded-2xl flex items-center justify-center font-serif font-black text-white group-hover:bg-hicado-emerald group-hover:text-hicado-navy transition-colors shadow-lg shadow-hicado-navy/20">
+                    {student.name.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-black text-hicado-navy uppercase tracking-tight">{student.name}</p>
+                      {override && (
+                        <div className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-widest flex items-center gap-1 ${override.isExpired ? 'bg-hicado-slate text-hicado-navy/40' : 'bg-amber-400/10 text-amber-600 border border-amber-400/20'}`}>
+                          <span>{(override.price / 1000)}k</span>
+                          <span className="opacity-50">↓</span>
+                          <span>{override.range}</span>
+                          {override.isExpired && <span className="ml-1 text-[7px] opacity-60">(Hết hạn)</span>}
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mt-0.5">ID: #{student.id}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-black text-hicado-navy uppercase tracking-tight">{student.name}</p>
-                  <p className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest mt-0.5">ID: #{student.id}</p>
+                <div className="flex gap-2">
+                  {auth?.role !== 'TEACHER' && (
+                    <button
+                      onClick={() => onOverride(student.id)}
+                      className={`p-2.5 rounded-xl transition-all border ${override ? 'bg-amber-400/10 border-amber-400/20 text-amber-600 hover:bg-amber-400 hover:text-white' : 'bg-white border-hicado-slate text-hicado-navy/40 hover:bg-hicado-navy hover:text-white hover:border-hicado-navy'}`}
+                      title="Cấu hình học phí đặc biệt"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" /></svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => onViewStory(student.id)}
+                    className="px-5 py-2.5 bg-white border border-hicado-slate text-hicado-navy rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-navy hover:text-white hover:border-hicado-navy transition-all"
+                  >
+                    Hồ sơ
+                  </button>
                 </div>
               </div>
-              <button
-                onClick={() => onViewStory(student.id)}
-                className="px-5 py-2.5 bg-white border border-hicado-slate text-hicado-navy rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-navy hover:text-white hover:border-hicado-navy transition-all"
-              >
-                Hồ sơ học tập
-              </button>
-            </div>
-          ))}
+            );
+          })}
           {classStudents.length === 0 && (
             <div className="py-16 text-center">
               <p className="text-hicado-navy/30 font-black text-xs uppercase tracking-[0.2em] italic">Chưa có học sinh trong danh sách</p>
             </div>
           )}
         </div>
+
 
         <div className="p-8 bg-hicado-slate/10 border-t border-hicado-slate">
           <button onClick={onClose} className="w-full bg-hicado-navy text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-hicado-emerald hover:text-hicado-navy transition-all">
@@ -869,3 +935,164 @@ const SortableClassCard = ({ cls, teachers, rooms, isTeacher, setViewingHistoryI
     </div>
   );
 };
+
+const TuitionOverrideModal = ({ classId, studentId, onClose }: { classId: string; studentId: string; onClose: () => void }) => {
+  const { classes, students, fetchClasses } = useCenterStore();
+  const cls = classes.find(c => c.id === classId);
+  const student = students.find(s => s.id === studentId);
+  const currentOverride = cls?.students?.find(cs => cs.studentId === studentId);
+
+  const [formData, setFormData] = useState({
+    enabled: currentOverride?.customTuitionPerSession != null,
+    customTuitionPerSession: currentOverride?.customTuitionPerSession || cls?.tuitionPerSession || 0,
+    discountFrom: currentOverride?.discountFrom ? new Date(currentOverride.discountFrom).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+    discountTo: currentOverride?.discountTo ? new Date(currentOverride.discountTo).toISOString().slice(0, 10) : '',
+    discountReason: currentOverride?.discountReason || 'Học online'
+  });
+
+  const [isSaving, setIsSaving] = useState(false);
+
+  if (!cls || !student) return null;
+
+  const handleSave = async () => {
+    setIsSaving(true);
+    try {
+      const payload = formData.enabled ? {
+        customTuitionPerSession: Number(formData.customTuitionPerSession),
+        discountFrom: formData.discountFrom,
+        discountTo: formData.discountTo || null,
+        discountReason: formData.discountReason
+      } : {
+        customTuitionPerSession: null,
+        discountFrom: null,
+        discountTo: null,
+        discountReason: null
+      };
+
+      const res = await fetch(`/api/classes/${classId}/students/${studentId}/tuition-override`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${useAuthStore.getState().auth?.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        toast.success('Đã cập nhật học phí đặc biệt');
+        fetchClasses();
+        onClose();
+      } else {
+        toast.error('Lỗi khi cập nhật');
+      }
+    } catch (err) {
+      toast.error('Lỗi kết nối');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const inputCls = 'w-full bg-hicado-slate/10 border border-hicado-slate px-5 py-3 rounded-xl text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30 transition-all';
+
+  return (
+    <div className="fixed inset-0 bg-hicado-navy/60 backdrop-blur-sm z-[250] flex items-center justify-center p-4 animate-in fade-in duration-300">
+      <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300 border border-hicado-slate">
+        <div className="p-8 border-b border-hicado-slate flex justify-between items-center bg-amber-50">
+          <div>
+            <p className="text-[9px] font-black text-amber-600 uppercase tracking-widest mb-1">Financial Override</p>
+            <h3 className="text-xl font-serif font-black text-hicado-navy uppercase tracking-tight">Cấu hình học phí riêng</h3>
+          </div>
+          <button onClick={onClose} className="p-2 text-hicado-navy/40 hover:text-hicado-navy transition-colors">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+
+        <div className="p-8 space-y-6">
+          <div className="flex items-center gap-4 p-4 bg-hicado-slate/5 rounded-2xl border border-hicado-slate">
+             <div className="w-12 h-12 bg-hicado-navy text-white rounded-xl flex items-center justify-center font-serif font-black text-xl">{student.name.charAt(0)}</div>
+             <div>
+                <p className="text-xs font-black text-hicado-navy uppercase">{student.name}</p>
+                <p className="text-[10px] font-bold text-hicado-navy/40 uppercase tracking-widest">Giá mặc định: {cls.tuitionPerSession.toLocaleString()}đ/buổi</p>
+             </div>
+          </div>
+
+          <label className="flex items-center gap-3 cursor-pointer group">
+            <input 
+              type="checkbox" 
+              checked={formData.enabled} 
+              onChange={e => setFormData({ ...formData, enabled: e.target.checked })}
+              className="w-5 h-5 rounded-md border-hicado-slate text-hicado-navy focus:ring-hicado-navy"
+            />
+            <span className="text-sm font-black text-hicado-navy uppercase tracking-tight group-hover:text-hicado-emerald transition-colors">Áp dụng học phí đặc biệt</span>
+          </label>
+
+          {formData.enabled && (
+            <div className="space-y-4 pt-2 animate-in slide-in-from-top-2 duration-300">
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Mức phí riêng (VNĐ/buổi)</label>
+                <input 
+                  type="number" 
+                  value={formData.customTuitionPerSession} 
+                  onChange={e => setFormData({ ...formData, customTuitionPerSession: Number(e.target.value) })}
+                  className={inputCls}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Từ ngày</label>
+                  <input 
+                    type="date" 
+                    value={formData.discountFrom} 
+                    onChange={e => setFormData({ ...formData, discountFrom: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Đến ngày (Để trống = ∞)</label>
+                  <input 
+                    type="date" 
+                    value={formData.discountTo} 
+                    onChange={e => setFormData({ ...formData, discountTo: e.target.value })}
+                    className={inputCls}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Lý do giảm giá</label>
+                <select 
+                  value={formData.discountReason} 
+                  onChange={e => setFormData({ ...formData, discountReason: e.target.value })}
+                  className={inputCls}
+                >
+                  <option value="Học online">Học online</option>
+                  <option value="Gia đình khó khăn">Gia đình khó khăn</option>
+                  <option value="Học sinh ưu tú">Học sinh ưu tú</option>
+                  <option value="Khác">Khác...</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="p-8 bg-hicado-slate/10 border-t border-hicado-slate flex gap-3">
+          <button 
+            onClick={onClose} 
+            className="flex-1 px-6 py-4 bg-white border border-hicado-slate text-[10px] font-black uppercase tracking-widest text-hicado-navy/40 hover:text-hicado-navy rounded-2xl transition-all"
+          >
+            Hủy
+          </button>
+          <button 
+            onClick={handleSave} 
+            disabled={isSaving}
+            className="flex-1 px-6 py-4 bg-hicado-navy text-white text-[10px] font-black uppercase tracking-widest rounded-2xl hover:bg-hicado-emerald hover:text-hicado-navy transition-all shadow-xl shadow-hicado-navy/20 disabled:opacity-50"
+          >
+            {isSaving ? 'Đang lưu...' : 'Lưu cấu hình'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+

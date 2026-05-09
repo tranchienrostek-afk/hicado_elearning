@@ -447,7 +447,43 @@ export const ZaloCampaignPage = () => {
   }, [activeTab, fetchClassStats]);
 
   // Fetch Multi-class preview when entering Step 3 (Task #10)
+  // ── Auto-populate custom tuition items with overrides ─────────────────────
   useEffect(() => {
+    if (activeTab === 'create' && step === 3 && wizardType === 'CUSTOM_TUITION' && recipientPreview.length > 0) {
+      const next = { ...customTuitionItems };
+      let changed = false;
+      
+      recipientPreview.forEach(s => {
+        if (!next[s.id]) {
+          const cls = classes.find(c => c.id === primaryWizardClassId);
+          let price = cls?.tuitionPerSession || customGlobalPrice;
+          
+          const override = cls?.students?.find((cs: any) => cs.studentId === s.id);
+          if (override?.customTuitionPerSession != null) {
+            const now = new Date();
+            now.setHours(0, 0, 0, 0);
+            const from = override.discountFrom ? new Date(override.discountFrom) : null;
+            const to = override.discountTo ? new Date(override.discountTo) : null;
+            if (to) to.setHours(23, 59, 59, 999);
+            
+            const isAfterFrom = !from || now >= from;
+            const isBeforeTo = !to || now <= to;
+            
+            if (isAfterFrom && isBeforeTo) {
+              price = override.customTuitionPerSession;
+            }
+          }
+
+          next[s.id] = { sessions: customGlobalSessions, pricePerSession: price };
+          changed = true;
+        }
+      });
+      if (changed) setCustomTuitionItems(next);
+    }
+  }, [activeTab, step, wizardType, recipientPreview, classes, primaryWizardClassId, customGlobalSessions, customGlobalPrice]);
+
+  useEffect(() => {
+
     if (activeTab === 'create' && step === 3 && wizardType === 'TUITION_REMINDER' && wizardClassIds.length === 1) {
       const fetchPreview = async () => {
         setIsPreviewLoading(true);

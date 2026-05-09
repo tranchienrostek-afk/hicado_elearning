@@ -59,7 +59,9 @@ export interface Class {
   tuitionPerSession: number;
   totalSessions: number;
   studentIds: string[];
+  students?: ClassStudent[];
   teacherShare?: number;
+
   schedule?: {
     days: string[];
     time: string;
@@ -82,6 +84,16 @@ export interface Attendance {
   markedByName?: string;
   markedByRole?: string;
   markedAt?: string;
+}
+
+export interface ClassStudent {
+  classId: string;
+  studentId: string;
+  customTuitionPerSession?: number | null;
+  discountFrom?: string | null;
+  discountTo?: string | null;
+  discountReason?: string | null;
+  student: Student;
 }
 
 export interface Transaction {

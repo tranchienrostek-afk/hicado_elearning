@@ -4,7 +4,8 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import QRCode from 'qrcode';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
-import { buildClassCollectionStats, buildStudentPaymentRows } from '../lib/financeMath';
+import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass } from '../lib/financeMath';
+
 import { generateBillCode } from '../lib/billCode';
 
 const router = Router();
@@ -504,8 +505,7 @@ router.post('/bills/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGE
     });
 
     const sessionsDetail = await Promise.all(classes.map(async (cls) => {
-      const attendedAgg = await prisma.attendance.aggregate({
-        _sum: { sessionUnits: true },
+      const attendances = await prisma.attendance.findMany({
         where: {
           studentId,
           classId: cls.id,
@@ -513,15 +513,23 @@ router.post('/bills/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGE
           date: { gte: from, lte: to }
         }
       });
-      const sessions = attendedAgg._sum.sessionUnits || 0;
+      
+      const cs = await prisma.classStudent.findUnique({
+        where: { classId_studentId: { classId: cls.id, studentId } }
+      });
+
+      const sessions = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
+      const subtotal = expectedForStudentClass(cls as any, studentId, attendances as any, cs || undefined);
+      
       return {
         classId: cls.id,
         className: cls.name,
         sessions,
-        pricePerSession: cls.tuitionPerSession,
-        subtotal: sessions * cls.tuitionPerSession
+        pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession,
+        subtotal
       };
     }));
+
 
     const amount = sessionsDetail.reduce((sum, item) => sum + item.subtotal, 0);
     res.json({ sessionsDetail, amount });
@@ -556,13 +564,26 @@ router.post('/cash-payment', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
     const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
 
     const sessionsDetail = await Promise.all(classes.map(async (cls) => {
-      const agg = await prisma.attendance.aggregate({
-        _sum: { sessionUnits: true },
+      const attendances = await prisma.attendance.findMany({
         where: { studentId, classId: cls.id, status: 'PRESENT', date: { gte: from, lte: to } }
       });
-      const sessions = agg._sum.sessionUnits || 0;
-      return { classId: cls.id, className: cls.name, sessions, pricePerSession: cls.tuitionPerSession, subtotal: sessions * cls.tuitionPerSession };
+
+      const cs = await prisma.classStudent.findUnique({
+        where: { classId_studentId: { classId: cls.id, studentId } }
+      });
+
+      const sessions = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
+      const subtotal = expectedForStudentClass(cls as any, studentId, attendances as any, cs || undefined);
+
+      return { 
+        classId: cls.id, 
+        className: cls.name, 
+        sessions, 
+        pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession, 
+        subtotal 
+      };
     }));
+
 
     const calculatedAmount = sessionsDetail.reduce((sum, it) => sum + it.subtotal, 0);
     const amount = totalAmountOverride ?? calculatedAmount;

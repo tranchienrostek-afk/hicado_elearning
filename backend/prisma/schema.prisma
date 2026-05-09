@@ -160,13 +160,18 @@ model Class {
 }
 
 model ClassStudent {
-  classId   String
-  studentId String
-  class     Class   @relation(fields: [classId], references: [id], onDelete: Cascade)
-  student   Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  classId                String
+  studentId              String
+  customTuitionPerSession Int?
+  discountFrom           DateTime?
+  discountTo             DateTime?
+  discountReason         String?
+  class                  Class     @relation(fields: [classId], references: [id], onDelete: Cascade)
+  student                Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@id([classId, studentId])
 }
+
 
 model Attendance {
   id             String            @id @default(uuid())

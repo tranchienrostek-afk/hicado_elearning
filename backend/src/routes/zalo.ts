@@ -7,6 +7,8 @@ import { buildCustomTuitionMessage, CustomTuitionPayload, buildZaloImageMessage,
 import { generateBillCode } from '../lib/billCode';
 import { buildMultiClassPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
+import { expectedForStudentClass } from '../lib/financeMath';
+
 
 export const formatPhone = (p: string) => {
   const digits = p.replace(/\D/g, '');
@@ -607,8 +609,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       try {
         const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
         billDetail = await Promise.all(classes.map(async (cls) => {
-          const attendedAgg = await prisma.attendance.aggregate({
-            _sum: { sessionUnits: true },
+          const attendances = await prisma.attendance.findMany({
             where: {
               studentId: student.id,
               classId: cls.id,
@@ -616,15 +617,23 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
               date: { gte: from || new Date(0), lte: to || new Date() }
             }
           });
-          const sess = attendedAgg._sum.sessionUnits || 0;
+          
+          const cs = await prisma.classStudent.findUnique({
+            where: { classId_studentId: { classId: cls.id, studentId: student.id } }
+          });
+
+          const sess = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
+          const subtotal = expectedForStudentClass(cls as any, student.id, attendances as any, cs || undefined);
+          
           return {
             classId: cls.id,
             className: cls.name,
             sessions: sess,
-            pricePerSession: cls.tuitionPerSession,
-            subtotal: sess * cls.tuitionPerSession
+            pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession,
+            subtotal
           };
         }));
+
 
         const bill = await prisma.tuitionBill.create({
           data: {

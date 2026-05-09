@@ -25,6 +25,9 @@ export const calculateStudentTuitionDue = (
 ) =>
   classes.reduce((total, cls) => {
     if (!cls.studentIds.includes(studentId)) return total;
+    
+    const override = cls.students?.find(cs => cs.studentId === studentId);
+    
     const records = attendance.filter(
       (item) =>
         item.classId === cls.id &&
@@ -32,8 +35,30 @@ export const calculateStudentTuitionDue = (
         item.status === 'PRESENT' &&
         (!month || item.date.startsWith(month))
     );
-    return total + sumPresentSessionUnits(records) * cls.tuitionPerSession;
+
+    return total + records.reduce((sub, rec) => {
+      let price = cls.tuitionPerSession;
+      if (override?.customTuitionPerSession != null) {
+        const attDate = new Date(rec.date);
+        attDate.setHours(0, 0, 0, 0);
+        
+        const from = override.discountFrom ? new Date(override.discountFrom) : null;
+        if (from) from.setHours(0, 0, 0, 0);
+        
+        const to = override.discountTo ? new Date(override.discountTo) : null;
+        if (to) to.setHours(23, 59, 59, 999);
+        
+        const isAfterFrom = !from || attDate >= from;
+        const isBeforeTo = !to || attDate <= to;
+        
+        if (isAfterFrom && isBeforeTo) {
+          price = override.customTuitionPerSession;
+        }
+      }
+      return sub + (rec.sessionUnits || 1) * price;
+    }, 0);
   }, 0);
+
 
 export const calculateTeacherSalaryByUnits = (
   teacherId: string,

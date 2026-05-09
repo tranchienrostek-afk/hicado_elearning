@@ -7,7 +7,11 @@ type StudentLike = {
 
 type ClassStudentLike = {
   student: StudentLike;
+  customTuitionPerSession?: number | null;
+  discountFrom?: string | Date | null;
+  discountTo?: string | Date | null;
 };
+
 
 type ClassLike = {
   id: string;
@@ -28,10 +32,12 @@ type AttendanceLike = {
   classId: string;
   studentId: string;
   status: string;
+  date?: string | Date;
   sessionUnits?: number;
 };
 
 function attendedSessions(classItem: ClassLike, studentId: string, attendances?: AttendanceLike[]): number {
+
   if (!attendances) return classItem.totalSessions;
   return attendances
     .filter(
@@ -43,9 +49,52 @@ function attendedSessions(classItem: ClassLike, studentId: string, attendances?:
     .reduce((sum, item) => sum + (item.sessionUnits ?? 1), 0);
 }
 
-function expectedForStudentClass(classItem: ClassLike, studentId: string, attendances?: AttendanceLike[]): number {
-  return classItem.tuitionPerSession * attendedSessions(classItem, studentId, attendances);
+export function expectedForStudentClass(
+  classItem: ClassLike, 
+  studentId: string, 
+  attendances?: AttendanceLike[],
+  override?: {
+    customTuitionPerSession?: number | null;
+    discountFrom?: string | Date | null;
+    discountTo?: string | Date | null;
+  }
+): number {
+  if (!attendances) return (override?.customTuitionPerSession ?? classItem.tuitionPerSession) * classItem.totalSessions;
+  
+  const studentAttendances = attendances.filter(a => 
+    a.classId === classItem.id && 
+    a.studentId === studentId && 
+    a.status === 'PRESENT'
+  );
+  
+  let total = 0;
+  for (const att of studentAttendances) {
+    let price = classItem.tuitionPerSession;
+    
+    if (override?.customTuitionPerSession != null && att.date) {
+      const attDate = new Date(att.date);
+      attDate.setHours(0, 0, 0, 0);
+
+      const from = override.discountFrom ? new Date(override.discountFrom) : null;
+      if (from) from.setHours(0, 0, 0, 0);
+
+      const to = override.discountTo ? new Date(override.discountTo) : null;
+      if (to) to.setHours(23, 59, 59, 999);
+      
+      const isAfterFrom = !from || attDate >= from;
+      const isBeforeTo = !to || attDate <= to;
+      
+      if (isAfterFrom && isBeforeTo) {
+        price = override.customTuitionPerSession;
+      }
+    }
+    
+    total += (att.sessionUnits ?? 1) * price;
+  }
+  
+  return total;
 }
+
 
 function transactionBelongsToClass(tx: TransactionLike, classItem: ClassLike): boolean {
   if (tx.classId) return tx.classId === classItem.id;
@@ -59,9 +108,10 @@ export function buildClassCollectionStats(
 ) {
   return classes.map(classItem => {
     const expected = classItem.students.reduce(
-      (sum, cs) => sum + expectedForStudentClass(classItem, cs.student.id, attendances),
+      (sum, cs) => sum + expectedForStudentClass(classItem, cs.student.id, attendances, cs),
       0
     );
+
     const collected = transactions
       .filter(tx => transactionBelongsToClass(tx, classItem))
       .reduce((sum, tx) => sum + tx.amount, 0);
@@ -69,7 +119,8 @@ export function buildClassCollectionStats(
     let paidCount = 0;
     let partialCount = 0;
     for (const cs of classItem.students) {
-      const studentExpected = expectedForStudentClass(classItem, cs.student.id, attendances);
+      const studentExpected = expectedForStudentClass(classItem, cs.student.id, attendances, cs);
+
       const studentPaid = transactions
         .filter(tx => tx.studentId === cs.student.id && transactionBelongsToClass(tx, classItem))
         .reduce((sum, tx) => sum + tx.amount, 0);
@@ -111,7 +162,8 @@ export function buildStudentPaymentRows(
   for (const classItem of classes) {
     for (const cs of classItem.students) {
       const student = cs.student;
-      const studentClassExpected = expectedForStudentClass(classItem, student.id, attendances);
+      const studentClassExpected = expectedForStudentClass(classItem, student.id, attendances, cs);
+
       const existing = rows.get(student.id) ?? {
         id: student.id,
         name: student.name,
