@@ -98,6 +98,15 @@ export const Users = () => {
   const [selectedAccount, setSelectedAccount] = useState<any>(null);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [duplicateCandidates, setDuplicateCandidates] = useState<any[]>([]);
+  const [duplicateDecision, setDuplicateDecision] = useState<'MATCH_EXISTING' | 'REVIEW' | 'CREATE_NEW' | null>(null);
+  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
+  const [isDuplicateDashboardOpen, setIsDuplicateDashboardOpen] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState<any[]>([]);
+  const [isLoadingDuplicates, setIsLoadingDuplicates] = useState(false);
+  const [mergeConfirm, setMergeConfirm] = useState<{ source: any, target: any } | null>(null);
+  const [mergeReason, setMergeReason] = useState('');
+  const [isMerging, setIsMerging] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -188,8 +197,75 @@ export const Users = () => {
     salaryType: 'PERCENT',
     hourlyRate: 0,
     notes: '',
-    sortOrder: 0
+    sortOrder: 0,
+    cccd: '',
+    studentCode: ''
   });
+
+  const { duplicatePreview, scanDuplicates, mergeStudents } = useCenterStore();
+
+  useEffect(() => {
+    if (activeTab !== 'STUDENTS' || isEditMode || !isAddModalOpen) {
+      setDuplicateCandidates([]);
+      setDuplicateDecision(null);
+      return;
+    }
+
+    const { name, parentPhone, studentPhone, birthYear, cccd, studentCode } = formData;
+    if (!name || name.length < 3) {
+      setDuplicateCandidates([]);
+      setDuplicateDecision(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsCheckingDuplicates(true);
+      try {
+        const res = await duplicatePreview({ name, parentPhone, studentPhone, birthYear, cccd, studentCode });
+        setDuplicateCandidates(res.candidates);
+        setDuplicateDecision(res.decision);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsCheckingDuplicates(false);
+      }
+    }, 800);
+
+    return () => clearTimeout(timer);
+  }, [formData.name, formData.parentPhone, formData.studentPhone, formData.birthYear, formData.cccd, formData.studentCode, activeTab, isEditMode, isAddModalOpen, duplicatePreview]);
+
+  const loadDuplicateGroups = async () => {
+    setIsLoadingDuplicates(true);
+    try {
+      const groups = await scanDuplicates();
+      setDuplicateGroups(groups);
+    } catch (err) {
+      toast.error('Lỗi khi quét học sinh trùng');
+    } finally {
+      setIsLoadingDuplicates(false);
+    }
+  };
+
+  const handleMerge = async () => {
+    if (!mergeConfirm || !mergeReason) return;
+    setIsMerging(true);
+    try {
+      const res = await mergeStudents(mergeConfirm.source.id, mergeConfirm.target.id, mergeReason);
+      if (res.ok) {
+        toast.success('Gộp học sinh thành công');
+        setMergeConfirm(null);
+        setMergeReason('');
+        loadDuplicateGroups();
+      } else {
+        const err = await res.json();
+        toast.error(err.message || 'Lỗi khi gộp học sinh');
+      }
+    } catch (err) {
+      toast.error('Lỗi kết nối server');
+    } finally {
+      setIsMerging(false);
+    }
+  };
 
   const handleEdit = (item: any) => {
     setIsEditMode(true);
@@ -638,6 +714,47 @@ export const Users = () => {
                   placeholder="Nhập tên..."
                 />
                 {formErrors.name && <p className="text-[10px] text-rose-500 font-bold mt-1 uppercase">{formErrors.name}</p>}
+                
+                {/* Duplicate Warning */}
+                {!isEditMode && duplicateCandidates.length > 0 && (
+                  <div className={clsx(
+                    "mt-3 p-4 rounded-2xl border animate-in slide-in-from-top-2 duration-300",
+                    duplicateDecision === 'MATCH_EXISTING' ? "bg-rose-50 border-rose-100" : "bg-amber-50 border-amber-100"
+                  )}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-lg">{duplicateDecision === 'MATCH_EXISTING' ? '🚨' : '⚠️'}</span>
+                      <p className={clsx(
+                        "text-[10px] font-black uppercase tracking-widest",
+                        duplicateDecision === 'MATCH_EXISTING' ? "text-rose-700" : "text-amber-700"
+                      )}>
+                        {duplicateDecision === 'MATCH_EXISTING' ? 'Phát hiện học sinh trùng lặp' : 'Học sinh có thể đã tồn tại'}
+                      </p>
+                      {isCheckingDuplicates && <div className="w-3 h-3 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin ml-auto" />}
+                    </div>
+                    <div className="space-y-2">
+                      {duplicateCandidates.map((c: any) => (
+                        <div key={c.studentId} className="flex justify-between items-center bg-white/60 p-2 rounded-xl border border-white/80">
+                          <div>
+                            <p className="text-xs font-black text-hicado-navy">{c.name} {c.birthYear ? `(${c.birthYear})` : ''}</p>
+                            <p className="text-[9px] text-slate-500 font-bold">ID: {c.studentCode || c.studentId.slice(-6).toUpperCase()}</p>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {c.reasons.map((r: string, i: number) => (
+                                <span key={i} className="px-1.5 py-0.5 bg-slate-100 text-slate-500 rounded text-[8px] font-black uppercase tracking-tight">{r}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className={clsx(
+                              "text-[10px] font-black",
+                              c.score >= 90 ? "text-rose-600" : "text-amber-600"
+                            )}>{c.score}% Match</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[9px] text-slate-500 mt-2 italic font-medium">Vui lòng kiểm tra kỹ trước khi tạo mới để tránh trùng dữ liệu.</p>
+                  </div>
+                )}
               </div>
 
               {activeTab === 'STUDENTS' ? (
@@ -854,6 +971,14 @@ export const Users = () => {
                 >
                   Thêm mới
                 </button>
+                {activeTab === 'STUDENTS' && (
+                  <button 
+                    onClick={() => { setIsDuplicateDashboardOpen(true); loadDuplicateGroups(); }}
+                    className="flex-1 sm:flex-none bg-amber-500 text-white px-5 py-2.5 rounded-xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-amber-500/20"
+                  >
+                    Xử lý trùng
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -1229,6 +1354,146 @@ export const Users = () => {
             setSelectedAccount(null);
           }} 
         />
+      )}
+
+      {/* Duplicate Dashboard Modal */}
+      {isDuplicateDashboardOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[160] flex items-center justify-center p-4">
+          <div className="bg-hicado-slate/10 rounded-[3rem] shadow-2xl w-full max-w-5xl overflow-hidden animate-in zoom-in-95 duration-300 flex flex-col max-h-[90vh] border border-white/20">
+            <div className="p-8 border-b border-hicado-slate flex justify-between items-center shrink-0 bg-white/40">
+              <div>
+                <p className="text-[10px] font-black text-amber-600 uppercase tracking-[0.4em] mb-1">Dữ liệu thông minh</p>
+                <h3 className="text-2xl font-black text-hicado-navy uppercase tracking-tight">Xử lý học sinh trùng lặp</h3>
+              </div>
+              <button onClick={() => setIsDuplicateDashboardOpen(false)} className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-slate-500 hover:text-rose-500 transition-all shadow-sm border border-hicado-slate hover:rotate-90">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-8 space-y-6 custom-scrollbar">
+              {isLoadingDuplicates ? (
+                <div className="py-20 text-center space-y-4">
+                  <div className="w-12 h-12 border-4 border-hicado-navy/10 border-t-hicado-navy rounded-full animate-spin mx-auto" />
+                  <p className="text-xs font-black text-hicado-navy/40 uppercase tracking-widest">Đang quét toàn bộ hệ thống...</p>
+                </div>
+              ) : duplicateGroups.length === 0 ? (
+                <div className="py-20 text-center space-y-4 bg-white/40 rounded-[2.5rem] border border-dashed border-hicado-slate">
+                  <div className="text-6xl opacity-20">🎉</div>
+                  <h4 className="text-lg font-black text-hicado-navy uppercase tracking-tight">Tuyệt vời!</h4>
+                  <p className="text-sm text-slate-500 font-medium">Không phát hiện học sinh trùng lặp nào cần xử lý.</p>
+                  <button onClick={loadDuplicateGroups} className="px-6 py-2 bg-hicado-navy text-white rounded-xl text-[10px] font-black uppercase tracking-widest mt-4">Quét lại</button>
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  <div className="bg-amber-50 border border-amber-200 p-6 rounded-[2rem] flex items-start gap-4">
+                    <span className="text-2xl">💡</span>
+                    <div className="space-y-1">
+                      <p className="text-xs font-black text-amber-800 uppercase tracking-wider">Hướng dẫn gộp hồ sơ</p>
+                      <p className="text-[11px] text-amber-700 leading-relaxed font-medium">
+                        Chọn học sinh "Nguồn" (bản thừa) và gộp vào học sinh "Đích" (bản chính). 
+                        Toàn bộ lịch sử điểm danh, thanh toán, lớp học của bản Nguồn sẽ được chuyển sang bản Đích. 
+                        Bản Nguồn sau đó sẽ bị vô hiệu hóa. <b>Hành động này không thể hoàn tác.</b>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-6">
+                    {duplicateGroups.map((group, idx) => (
+                      <div key={idx} className="bg-white rounded-[2.5rem] border border-hicado-slate overflow-hidden shadow-sm hover:shadow-premium transition-all duration-500">
+                        <div className="p-6 bg-hicado-slate/20 border-b border-hicado-slate flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 bg-hicado-navy text-white rounded-xl flex items-center justify-center font-black">{group.primary.name.charAt(0)}</div>
+                            <div>
+                              <p className="text-sm font-black text-hicado-navy uppercase">{group.primary.name}</p>
+                              <p className="text-[10px] text-slate-500 font-bold">ID: {group.primary.studentCode || group.primary.id.slice(-8)} · Sinh năm: {group.primary.birthYear}</p>
+                            </div>
+                          </div>
+                          <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-lg text-[10px] font-black uppercase tracking-widest">Phát hiện {group.others.length} bản trùng</span>
+                        </div>
+                        <div className="p-6 space-y-4">
+                          {group.others.map((other: any) => (
+                            <div key={other.id} className="flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-200 hover:border-hicado-emerald transition-colors">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-3">
+                                  <p className="text-xs font-black text-slate-700 uppercase">{other.name}</p>
+                                  <span className={clsx(
+                                    "px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-tighter",
+                                    other.score >= 90 ? "bg-rose-100 text-rose-600" : "bg-amber-100 text-amber-600"
+                                  )}>{other.score}% MATCH</span>
+                                </div>
+                                <p className="text-[10px] text-slate-400 font-medium mt-1">
+                                  Lý do: {other.reasons.join(', ')}
+                                </p>
+                              </div>
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => setMergeConfirm({ source: other, target: group.primary })}
+                                  className="px-4 py-2 bg-hicado-navy text-white rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-hicado-emerald hover:text-hicado-navy transition-all"
+                                >Gộp vào chính</button>
+                                <button 
+                                  onClick={() => setMergeConfirm({ source: group.primary, target: other })}
+                                  className="px-4 py-2 border border-hicado-navy text-hicado-navy rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-slate-100 transition-all"
+                                >Đảo chiều gộp</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Merge Confirmation Modal */}
+      {mergeConfirm && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-lg z-[170] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[3rem] shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="p-10 text-center space-y-6">
+              <div className="w-20 h-20 bg-amber-100 text-amber-600 rounded-[2rem] flex items-center justify-center text-3xl mx-auto animate-bounce">🤝</div>
+              <div className="space-y-2">
+                <h4 className="text-xl font-black text-hicado-navy uppercase tracking-tight">Xác nhận gộp học sinh</h4>
+                <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                  Bạn đang gộp <span className="text-rose-500 font-black">[{mergeConfirm.source.name}]</span> vào <span className="text-hicado-emerald font-black">[{mergeConfirm.target.name}]</span>.
+                </p>
+              </div>
+
+              <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 space-y-4 text-left">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Lý do gộp (Lưu nhật ký)</label>
+                  <textarea 
+                    value={mergeReason}
+                    onChange={(e) => setMergeReason(e.target.value)}
+                    placeholder="VD: Trùng tên & SĐT, đăng ký 2 lần..."
+                    className="w-full bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-hicado-navy min-h-[80px] resize-none font-medium"
+                  />
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-rose-50 text-rose-600 rounded-xl border border-rose-100">
+                  <span className="text-lg">⚠️</span>
+                  <p className="text-[10px] font-bold uppercase tracking-tighter">Hồ sơ [{mergeConfirm.source.name}] sẽ bị vô hiệu hóa vĩnh viễn.</p>
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => { setMergeConfirm(null); setMergeReason(''); }}
+                  disabled={isMerging}
+                  className="flex-1 py-4 rounded-2xl font-black text-slate-400 hover:bg-slate-50 transition-all uppercase text-xs tracking-widest"
+                >Hủy bỏ</button>
+                <button 
+                  onClick={handleMerge}
+                  disabled={isMerging || !mergeReason}
+                  className="flex-1 bg-hicado-navy text-white py-4 rounded-2xl font-black shadow-xl shadow-hicado-navy/20 hover:translate-y-[-2px] transition-all uppercase text-xs tracking-widest disabled:opacity-40"
+                >
+                  {isMerging ? 'Đang xử lý...' : 'Xác nhận gộp'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

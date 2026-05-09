@@ -113,6 +113,12 @@ model Student {
   updatedAt          DateTime            @updatedAt
   parentPhone        String?
   studentPhone       String?
+  phoneNorm          String?
+  parentPhoneNorm    String?
+  nameNorm           String?
+  mergedIntoId       String?
+  mergedAt           DateTime?
+  mergeReason        String?
   zaloUserId         String?
   isActive           Boolean             @default(true)
   notes              String?             @db.Text
@@ -124,6 +130,23 @@ model Student {
   user               User?
   zaloMessageLogs    ZaloMessageLog[]
   tuitionBills       TuitionBill[]
+  mergeAuditsSource  StudentMergeAudit[] @relation("MergeSource")
+  mergeAuditsTarget  StudentMergeAudit[] @relation("MergeTarget")
+}
+
+model StudentMergeAudit {
+  id              String   @id @default(cuid())
+  sourceStudentId String
+  targetStudentId String
+  sourceSnapshot  String   @db.Text
+  targetSnapshot  String   @db.Text
+  movedRelations  String   @db.Text
+  reason          String?
+  performedById   String?
+  performedByName String?
+  performedAt     DateTime @default(now())
+  sourceStudent   Student  @relation("MergeSource", fields: [sourceStudentId], references: [id])
+  targetStudent   Student  @relation("MergeTarget", fields: [targetStudentId], references: [id])
 }
 
 model Room {

@@ -148,4 +148,24 @@ export interface CenterStore {
   reorderStudents: (studentIds: string[]) => Promise<void>;
   reorderTeachers: (teacherIds: string[]) => Promise<void>;
   reorderClasses: (classIds: string[]) => Promise<void>;
+
+  duplicatePreview: (student: Partial<Student>) => Promise<{ decision: 'MATCH_EXISTING' | 'REVIEW' | 'CREATE_NEW', candidates: DuplicateCandidate[] }>;
+  scanDuplicates: () => Promise<DuplicateGroup[]>;
+  mergeStudents: (sourceId: string, targetId: string, reason: string) => Promise<Response>;
+}
+
+export interface DuplicateCandidate {
+  studentId: string;
+  name: string;
+  studentCode?: string;
+  parentPhone?: string;
+  birthYear?: number;
+  classes: string[];
+  score: number;
+  reasons: string[];
+}
+
+export interface DuplicateGroup {
+  primary: Student;
+  others: (Student & { score: number, reasons: string[] })[];
 }

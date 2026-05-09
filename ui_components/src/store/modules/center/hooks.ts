@@ -288,4 +288,33 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
       return { classes: sorted };
     });
   },
+
+  duplicatePreview: async (student) => {
+    const res = await fetchWithAuth('/api/students/duplicate-preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(student)
+    });
+    if (!res.ok) throw new Error('Failed to check duplicates');
+    return res.json();
+  },
+
+  scanDuplicates: async () => {
+    const res = await fetchWithAuth('/api/students/scan-duplicates');
+    if (!res.ok) throw new Error('Failed to scan duplicates');
+    return res.json();
+  },
+
+  mergeStudents: async (sourceId, targetId, reason) => {
+    const res = await fetchWithAuth(`/api/students/${sourceId}/merge-into/${targetId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    });
+    if (res.ok) {
+      await get().fetchStudents();
+      await get().fetchClasses();
+    }
+    return res;
+  },
 }));
