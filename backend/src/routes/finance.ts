@@ -530,6 +530,98 @@ router.post('/bills/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGE
   }
 });
 
+// Record cash payment — creates TuitionBill(PAID) + BillPayment(CASH) + PaymentAdjustment in one TX
+router.post('/cash-payment', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const user = (req as any).user;
+  const { studentId, coveredClassIds, fromDate, toDate, billingMonth, totalAmountOverride, note, date } = req.body as {
+    studentId: string;
+    coveredClassIds: string[];
+    fromDate: string;
+    toDate: string;
+    billingMonth?: string;
+    totalAmountOverride?: number;
+    note?: string;
+    date?: string;
+  };
+
+  if (!studentId || !coveredClassIds?.length || !fromDate || !toDate) {
+    return res.status(400).json({ message: 'Thiếu studentId, coveredClassIds, fromDate hoặc toDate' });
+  }
+
+  try {
+    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
+    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+    const paidAt = date ? new Date(date) : new Date();
+
+    const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
+
+    const sessionsDetail = await Promise.all(classes.map(async (cls) => {
+      const agg = await prisma.attendance.aggregate({
+        _sum: { sessionUnits: true },
+        where: { studentId, classId: cls.id, status: 'PRESENT', date: { gte: from, lte: to } }
+      });
+      const sessions = agg._sum.sessionUnits || 0;
+      return { classId: cls.id, className: cls.name, sessions, pricePerSession: cls.tuitionPerSession, subtotal: sessions * cls.tuitionPerSession };
+    }));
+
+    const calculatedAmount = sessionsDetail.reduce((sum, it) => sum + it.subtotal, 0);
+    const amount = totalAmountOverride ?? calculatedAmount;
+
+    if (amount <= 0) {
+      return res.status(400).json({ message: 'Số tiền phải lớn hơn 0' });
+    }
+
+    const referenceCode = generateBillCode();
+
+    const result = await prisma.$transaction(async (tx) => {
+      const bill = await tx.tuitionBill.create({
+        data: {
+          studentId,
+          coveredClassIds,
+          fromDate: from,
+          toDate: to,
+          amount,
+          paidAmount: amount,
+          status: 'PAID',
+          sessionsDetail: JSON.stringify(sessionsDetail),
+          referenceCode,
+          billingMonth: billingMonth || null,
+          notes: note || null,
+          createdByName: user.name || user.username || 'System',
+          sentAt: null,
+        }
+      });
+
+      const payment = await tx.billPayment.create({
+        data: { billId: bill.id, amount, source: 'CASH', paidAt, note: note || null }
+      });
+
+      await tx.paymentAdjustment.create({
+        data: {
+          studentId,
+          amount,
+          source: 'CASH',
+          note: `Tiền mặt HĐ ${referenceCode}${note ? '. ' + note : ''}`,
+          effectiveDate: paidAt,
+          createdByUserId: user.id,
+          createdByName: user.name || user.username || 'System',
+          createdByRole: user.role,
+        }
+      });
+
+      await tx.student.update({ where: { id: studentId }, data: { tuitionStatus: 'PAID' } });
+
+      return { bill, payment };
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error('[Cash Payment]', error);
+    res.status(500).json({ message: 'Lỗi ghi nhận tiền mặt' });
+  }
+});
+
+
 // Create bill
 router.post('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   const user = (req as any).user;
