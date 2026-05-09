@@ -123,6 +123,7 @@ model Student {
   transactions       Transaction[]
   user               User?
   zaloMessageLogs    ZaloMessageLog[]
+  tuitionBills       TuitionBill[]
 }
 
 model Room {
@@ -281,6 +282,7 @@ model ZaloMessageLog {
   studentId       String?
   campaignId      String?
   classId         String?
+  billId          String?
   deliveredAt     DateTime?
   zaloMsgId       String?
   messageType     String?
@@ -288,6 +290,7 @@ model ZaloMessageLog {
   coveredClassIds String[]  @default([])
   campaign        Campaign? @relation(fields: [campaignId], references: [id])
   student         Student?  @relation(fields: [studentId], references: [id])
+  bill            TuitionBill? @relation(fields: [billId], references: [id])
 }
 
 model SystemConfig {
@@ -312,4 +315,45 @@ model ZaloMappingAudit {
   @@index([zaloUserId])
   @@index([targetId])
   @@index([performedAt])
+}
+
+enum BillStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
+model TuitionBill {
+  id              String       @id @default(cuid())
+  studentId       String
+  coveredClassIds String[]
+  fromDate        DateTime
+  toDate          DateTime
+  sessionsDetail  String       @db.Text  // JSON: [{classId, className, sessions, pricePerSession, subtotal}]
+  amount          Int                    // Tổng tiền phải trả (VND)
+  paidAmount      Int          @default(0)
+  referenceCode   String       @unique   // "HD-XXXXXX" nhúng vào QR memo
+  status          BillStatus   @default(UNPAID)
+  dueDate         DateTime?
+  notes           String?      @db.Text
+  createdByName   String
+  sentAt          DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  student         Student      @relation(fields: [studentId], references: [id])
+  payments        BillPayment[]
+  messageLog      ZaloMessageLog[]
+}
+
+model BillPayment {
+  id            String       @id @default(cuid())
+  billId        String
+  amount        Int
+  paidAt        DateTime     @default(now())
+  source        String       // "SEPAY" | "CASH" | "ADJUSTMENT"
+  transactionId String?      // → Transaction.id nếu là SePay
+  adjustmentId  String?      // → PaymentAdjustment.id nếu là cash
+  note          String?
+  bill          TuitionBill  @relation(fields: [billId], references: [id])
 }

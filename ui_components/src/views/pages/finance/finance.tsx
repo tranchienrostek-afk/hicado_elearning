@@ -40,6 +40,36 @@ interface TrackingSummary {
   totalExpected: number; totalCollected: number;
 }
 
+interface BillPayment {
+  id: string;
+  billId: string;
+  amount: number;
+  paidAt: string;
+  source: string;
+  transactionId?: string;
+  adjustmentId?: string;
+  note?: string;
+}
+
+interface TuitionBill {
+  id: string;
+  studentId: string;
+  referenceCode: string;
+  amount: number;
+  paidAmount: number;
+  status: 'UNPAID' | 'PARTIAL' | 'PAID' | 'CANCELLED';
+  fromDate: string;
+  toDate: string;
+  dueDate?: string;
+  sessionsDetail: string; // JSON string
+  notes?: string;
+  createdByName: string;
+  sentAt?: string;
+  createdAt: string;
+  student: { name: string; studentCode: string | null };
+  payments?: BillPayment[];
+}
+
 interface FinanceRow {
   classId: string;
   className: string;
@@ -109,7 +139,32 @@ export const FinancialPage = () => {
   const [adjNote, setAdjNote] = useState('');
   const [adjDate, setAdjDate] = useState(new Date().toISOString().slice(0, 10));
 
-  const [activeFinanceTab, setActiveFinanceTab] = useState<'dashboard' | 'tracking' | 'operations'>('dashboard');
+  const [activeFinanceTab, setActiveFinanceTab] = useState<'dashboard' | 'tracking' | 'bills' | 'operations'>('dashboard');
+
+  // ── Tuition Bill state ──────────────────────────────────────────────────
+  const [bills, setBills] = useState<TuitionBill[]>([]);
+  const [billsLoading, setBillsLoading] = useState(false);
+  const [billFilterStatus, setBillFilterStatus] = useState('ALL');
+  const [billFilterFrom, setBillFilterFrom] = useState('');
+  const [billFilterTo, setBillFilterTo] = useState('');
+  const [selectedBill, setSelectedBill] = useState<TuitionBill | null>(null);
+  const [isBillDetailOpen, setIsBillDetailOpen] = useState(false);
+  
+  // Create Bill Modal state
+  const [isCreateBillOpen, setIsCreateBillOpen] = useState(false);
+  const [newBillStudentId, setNewBillStudentId] = useState('');
+  const [newBillClassIds, setNewBillClassIds] = useState<string[]>([]);
+  const [newBillFrom, setNewBillFrom] = useState('');
+  const [newBillTo, setNewBillTo] = useState('');
+  const [newBillDue, setNewBillDue] = useState('');
+  const [newBillNotes, setNewBillNotes] = useState('');
+  const [billPreview, setBillPreview] = useState<{ sessionsDetail: any[], amount: number } | null>(null);
+  
+  // Manual Payment Modal
+  const [isBillPayOpen, setIsBillPayOpen] = useState(false);
+  const [billPayAmount, setBillPayAmount] = useState('');
+  const [billPayNote, setBillPayNote] = useState('');
+  const [billPayDate, setBillPayDate] = useState(new Date().toISOString().slice(0, 10));
 
   const fetchTracking = () => {
     const token = auth?.token;
@@ -135,8 +190,110 @@ export const FinancialPage = () => {
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setFinanceStats(data); });
     fetchTracking();
+    fetchBills();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.token, isTeacher]);
+
+  const fetchBills = () => {
+    const token = auth?.token;
+    if (!token) return;
+    setBillsLoading(true);
+    const params = new URLSearchParams();
+    if (billFilterStatus !== 'ALL') params.set('status', billFilterStatus);
+    if (billFilterFrom) params.set('from', billFilterFrom);
+    if (billFilterTo) params.set('to', billFilterTo);
+    
+    fetch(`/api/finance/bills?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => setBills(data))
+      .catch(() => toast.error('Lỗi tải danh sách hóa đơn'))
+      .finally(() => setBillsLoading(false));
+  };
+
+  const fetchBillPreview = async () => {
+    if (!newBillStudentId || !newBillClassIds.length || !newBillFrom || !newBillTo) return;
+    try {
+      const r = await fetch('/api/finance/bills/preview', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${auth?.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: newBillStudentId, coveredClassIds: newBillClassIds, fromDate: newBillFrom, toDate: newBillTo })
+      });
+      if (r.ok) setBillPreview(await r.json());
+    } catch {}
+  };
+
+  const handleCreateBill = async () => {
+    if (!newBillStudentId || !newBillClassIds.length || !newBillFrom || !newBillTo) return;
+    setIsProcessing(true);
+    try {
+      const r = await fetch('/api/finance/bills', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${auth?.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          studentId: newBillStudentId, coveredClassIds: newBillClassIds, 
+          fromDate: newBillFrom, toDate: newBillTo, dueDate: newBillDue, notes: newBillNotes 
+        })
+      });
+      if (r.ok) {
+        toast.success('Đã tạo hóa đơn');
+        setIsCreateBillOpen(false);
+        fetchBills();
+        // Reset form
+        setNewBillClassIds([]); setNewBillNotes(''); setBillPreview(null);
+      } else {
+        const d = await r.json();
+        toast.error(d.message || 'Lỗi tạo hóa đơn');
+      }
+    } catch {
+      toast.error('Lỗi kết nối');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleManualBillPayment = async () => {
+    if (!selectedBill || !billPayAmount) return;
+    setIsProcessing(true);
+    try {
+      const r = await fetch(`/api/finance/bills/${selectedBill.id}/manual-payment`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${auth?.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          amount: parseInt(billPayAmount.replace(/\D/g, '')), 
+          source: 'CASH', note: billPayNote, date: billPayDate 
+        })
+      });
+      if (r.ok) {
+        toast.success('Đã ghi nhận thanh toán');
+        setIsBillPayOpen(false);
+        setBillPayAmount(''); setBillPayNote('');
+        // Refresh bill detail and list
+        fetchBills();
+        const updated = await fetch(`/api/finance/bills/${selectedBill.id}`, { headers: { 'Authorization': `Bearer ${auth?.token}` } }).then(r => r.json());
+        setSelectedBill(updated);
+      }
+    } catch {
+      toast.error('Lỗi kết nối');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleCancelBill = async (id: string) => {
+    if (!window.confirm('Bạn có chắc muốn hủy hóa đơn này?')) return;
+    try {
+      const r = await fetch(`/api/finance/bills/${id}`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${auth?.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'CANCELLED' })
+      });
+      if (r.ok) {
+        toast.success('Đã hủy hóa đơn');
+        fetchBills();
+        setIsBillDetailOpen(false);
+      }
+    } catch {}
+  };
 
   const scopedClasses = useMemo(
     () =>
@@ -426,6 +583,7 @@ export const FinancialPage = () => {
           {([
             ['dashboard',  'Tổng quan Lợi nhuận'],
             ['tracking',   'Tracking & Công nợ'],
+            ['bills',      'Hóa đơn'],
             ['operations', 'Logs & Vận hành'],
           ] as const).map(([key, label]) => (
             <button key={key} onClick={() => setActiveFinanceTab(key)}
@@ -861,7 +1019,134 @@ export const FinancialPage = () => {
         </div>
       )}
 
-      {/* ── TAB 3: OPERATIONS ──────────────────────────────────────────── */}
+      {/* ── TAB 3: BILLS ────────────────────────────────────────────────── */}
+      {activeFinanceTab === 'bills' && (
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          {/* Filters & Actions */}
+          <div className="glass-card rounded-[2.5rem] p-8 border border-hicado-slate space-y-5">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div>
+                <p className="text-[9px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-1">Invoice Management</p>
+                <h3 className="text-xl font-black text-hicado-navy">Danh sách Hóa đơn học phí</h3>
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={fetchBills}
+                  disabled={billsLoading}
+                  className="px-5 py-2.5 bg-hicado-slate/50 text-hicado-navy rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-hicado-slate transition-all disabled:opacity-40"
+                >
+                  {billsLoading ? 'Đang tải...' : '↻ Làm mới'}
+                </button>
+                <button
+                  onClick={() => setIsCreateBillOpen(true)}
+                  className="px-6 py-2.5 bg-hicado-navy text-hicado-emerald rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg"
+                >
+                  + Tạo hóa đơn mới
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Trạng thái</label>
+                <select value={billFilterStatus} onChange={e => setBillFilterStatus(e.target.value)}
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none focus:border-hicado-emerald/50">
+                  <option value="ALL">Tất cả</option>
+                  <option value="UNPAID">🔴 Chưa nộp</option>
+                  <option value="PARTIAL">🟡 Nộp một phần</option>
+                  <option value="PAID">🟢 Đã nộp đủ</option>
+                  <option value="CANCELLED">⚪ Đã hủy</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Từ ngày</label>
+                <input type="date" value={billFilterFrom} onChange={e => setBillFilterFrom(e.target.value)}
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-hicado-navy/30 uppercase tracking-widest">Đến ngày</label>
+                <input type="date" value={billFilterTo} onChange={e => setBillFilterTo(e.target.value)}
+                  className="w-full bg-hicado-slate/30 border border-hicado-slate px-3 py-2 rounded-xl text-sm font-bold text-hicado-navy outline-none" />
+              </div>
+              <div className="flex items-end">
+                <button onClick={fetchBills}
+                  className="w-full py-2.5 bg-hicado-navy text-white rounded-xl text-[10px] font-black uppercase tracking-widest">
+                  Lọc
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Bills List */}
+          <div className="glass-card rounded-[2.5rem] overflow-hidden border border-hicado-slate">
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[900px]">
+                <thead>
+                  <tr className="border-b border-hicado-slate bg-hicado-slate/20">
+                    {['Mã HĐ', 'Học sinh', 'Số tiền', 'Đã nộp', 'Thời kỳ', 'Ngày tạo', 'Trạng thái'].map(h => (
+                      <th key={h} className="px-6 py-4 text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-hicado-slate/50">
+                  {bills.map(bill => (
+                    <tr key={bill.id} 
+                      onClick={() => { setSelectedBill(bill); setIsBillDetailOpen(true); }}
+                      className="hover:bg-hicado-slate/20 transition-colors cursor-pointer group">
+                      <td className="px-6 py-4">
+                        <span className="font-mono text-xs font-black text-hicado-navy group-hover:text-hicado-emerald transition-colors">
+                          {bill.referenceCode}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="font-black text-hicado-navy text-sm">{bill.student.name}</p>
+                        <p className="text-[10px] text-hicado-navy/40 font-mono">{bill.student.studentCode || '—'}</p>
+                      </td>
+                      <td className="px-6 py-4 font-mono font-black text-hicado-navy text-sm">{formatMoney(bill.amount)}đ</td>
+                      <td className="px-6 py-4">
+                        <p className="font-mono text-hicado-emerald text-sm font-black">{formatMoney(bill.paidAmount)}đ</p>
+                        {bill.amount > bill.paidAmount && bill.status !== 'PAID' && (
+                          <p className="text-[10px] text-rose-500 font-bold mt-0.5">Thiếu: {formatMoney(bill.amount - bill.paidAmount)}đ</p>
+                        )}
+                      </td>
+                      <td className="px-6 py-4 text-[10px] text-hicado-navy/60 font-bold uppercase">
+                        {new Date(bill.fromDate).toLocaleDateString('vi-VN')} - {new Date(bill.toDate).toLocaleDateString('vi-VN')}
+                      </td>
+                      <td className="px-6 py-4">
+                        <p className="text-[11px] text-hicado-navy/40">{new Date(bill.createdAt).toLocaleDateString('vi-VN')}</p>
+                        <p className="text-[9px] text-hicado-navy/30 font-bold">{bill.createdByName}</p>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={clsx(
+                          'px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest',
+                          {
+                            UNPAID: 'bg-rose-100 text-rose-600',
+                            PARTIAL: 'bg-amber-100 text-amber-700',
+                            PAID: 'bg-emerald-100 text-emerald-700',
+                            CANCELLED: 'bg-hicado-slate text-hicado-navy/40'
+                          }[bill.status]
+                        )}>
+                          {bill.status === 'UNPAID' ? 'Chưa nộp' : bill.status === 'PARTIAL' ? 'Nộp một phần' : bill.status === 'PAID' ? 'Đã nộp đủ' : 'Đã hủy'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {bills.length === 0 && !billsLoading && (
+              <div className="py-20 text-center space-y-4">
+                <div className="text-5xl opacity-20">🧾</div>
+                <p className="text-sm font-black text-hicado-navy/30 uppercase tracking-widest italic">
+                  Chưa có hóa đơn nào được tạo.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── TAB 4: OPERATIONS ──────────────────────────────────────────── */}
       {activeFinanceTab === 'operations' && (
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
           {/* Simulator */}
@@ -1004,6 +1289,272 @@ export const FinancialPage = () => {
                   className="flex-1 py-4 bg-hicado-navy text-white rounded-2xl text-sm font-black uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-40"
                 >
                   {isProcessing ? 'ĐANG LƯU...' : 'XÁC NHẬN'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create Bill Modal */}
+      {isCreateBillOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-hicado-navy/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-2xl shadow-2xl overflow-hidden border border-hicado-slate animate-in zoom-in-95 duration-300">
+            <div className="premium-gradient p-6 text-white flex justify-between items-center">
+              <div>
+                <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-widest mb-1">New Invoice</p>
+                <h3 className="text-xl font-black">Tạo hóa đơn học phí mới</h3>
+              </div>
+              <button onClick={() => setIsCreateBillOpen(false)} className="text-white/60 hover:text-white">✕</button>
+            </div>
+            
+            <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Học sinh</label>
+                  <select value={newBillStudentId} onChange={e => { setNewBillStudentId(e.target.value); setBillPreview(null); }}
+                    className="w-full bg-hicado-slate/20 border-2 border-transparent focus:border-hicado-navy/10 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold text-hicado-navy outline-none">
+                    <option value="">Chọn học sinh...</option>
+                    {students.map(s => <option key={s.id} value={s.id}>{s.name} ({s.studentCode || 'N/A'})</option>)}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Lớp áp dụng (chọn nhiều)</label>
+                  <div className="grid grid-cols-1 gap-2 max-h-32 overflow-y-auto p-2 bg-hicado-slate/10 rounded-xl">
+                    {classes.filter(c => !newBillStudentId || c.studentIds?.includes(newBillStudentId)).map(c => (
+                      <label key={c.id} className="flex items-center gap-2 cursor-pointer hover:bg-white p-1 rounded-lg">
+                        <input type="checkbox" checked={newBillClassIds.includes(c.id)}
+                          onChange={e => {
+                            const ids = e.target.checked ? [...newBillClassIds, c.id] : newBillClassIds.filter(id => id !== c.id);
+                            setNewBillClassIds(ids); setBillPreview(null);
+                          }}
+                          className="rounded text-hicado-emerald focus:ring-hicado-emerald" />
+                        <span className="text-xs font-bold text-hicado-navy">{c.name}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Từ ngày</label>
+                    <input type="date" value={newBillFrom} onChange={e => { setNewBillFrom(e.target.value); setBillPreview(null); }}
+                      className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-3 py-2 text-xs font-bold text-hicado-navy" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Đến ngày</label>
+                    <input type="date" value={newBillTo} onChange={e => { setNewBillTo(e.target.value); setBillPreview(null); }}
+                      className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-3 py-2 text-xs font-bold text-hicado-navy" />
+                  </div>
+                </div>
+                
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Hạn nộp (tùy chọn)</label>
+                  <input type="date" value={newBillDue} onChange={e => setNewBillDue(e.target.value)}
+                    className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-3 py-2 text-xs font-bold text-hicado-navy" />
+                </div>
+              </div>
+
+              <div className="bg-hicado-slate/20 rounded-2xl p-6 space-y-4">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-black text-hicado-navy/40 uppercase">Xem trước số tiền</p>
+                  <button onClick={fetchBillPreview} disabled={!newBillStudentId || !newBillClassIds.length}
+                    className="text-[10px] font-black text-hicado-emerald hover:underline disabled:opacity-30">Tính toán</button>
+                </div>
+                
+                {billPreview ? (
+                  <div className="space-y-3">
+                    <div className="space-y-2 max-h-40 overflow-y-auto">
+                      {billPreview.sessionsDetail.map((d, i) => (
+                        <div key={i} className="flex justify-between text-xs border-b border-hicado-navy/5 pb-1">
+                          <span className="font-bold text-hicado-navy/60">{d.className} ({d.sessions}b)</span>
+                          <span className="font-mono text-hicado-navy">{formatMoney(d.subtotal)}đ</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="pt-3 border-t border-hicado-navy/10 flex justify-between items-baseline">
+                      <span className="text-[10px] font-black text-hicado-navy/40 uppercase">Tổng cộng</span>
+                      <span className="text-xl font-black text-hicado-navy">{formatMoney(billPreview.amount)}đ</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="h-40 flex items-center justify-center text-xs text-hicado-navy/30 italic text-center">
+                    Chọn học sinh, lớp và thời kỳ<br/>để tính toán học phí dự kiến.
+                  </div>
+                )}
+                
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest">Ghi chú</label>
+                  <textarea value={newBillNotes} onChange={e => setNewBillNotes(e.target.value)}
+                    rows={2} placeholder="Vd: Học phí tháng 5..."
+                    className="w-full bg-white/50 border-2 border-transparent rounded-xl px-3 py-2 text-xs font-bold text-hicado-navy outline-none resize-none" />
+                </div>
+              </div>
+            </div>
+
+            <div className="p-8 pt-0 flex gap-3">
+              <button onClick={() => setIsCreateBillOpen(false)}
+                className="flex-1 py-4 rounded-2xl border border-hicado-slate text-sm font-black text-hicado-navy/40 hover:bg-hicado-slate transition-all">HỦY</button>
+              <button onClick={handleCreateBill} disabled={isProcessing || !billPreview}
+                className="flex-[2] py-4 bg-hicado-navy text-hicado-emerald rounded-2xl text-sm font-black uppercase tracking-widest shadow-lg hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-40">
+                {isProcessing ? 'ĐANG TẠO...' : 'TẠO & LƯU HÓA ĐƠN'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bill Detail Slide-over */}
+      {isBillDetailOpen && selectedBill && (
+        <div className="fixed inset-0 z-[100] flex justify-end bg-hicado-navy/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div className="w-full max-w-lg bg-white h-full shadow-2xl animate-in slide-in-from-right duration-500 overflow-y-auto">
+            <div className="premium-gradient p-8 text-white relative">
+              <button onClick={() => setIsBillDetailOpen(false)} className="absolute top-6 right-6 text-white/60 hover:text-white text-xl">✕</button>
+              <p className="text-[10px] font-black text-hicado-emerald uppercase tracking-[0.4em] mb-2">Invoice Detail</p>
+              <h3 className="text-3xl font-serif font-black tracking-tight">{selectedBill.referenceCode}</h3>
+              <div className="mt-6 flex items-center gap-4">
+                <div className={clsx('px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest', {
+                  UNPAID: 'bg-rose-500 text-white',
+                  PARTIAL: 'bg-amber-500 text-white',
+                  PAID: 'bg-emerald-500 text-white',
+                  CANCELLED: 'bg-hicado-slate text-hicado-navy/60'
+                }[selectedBill.status])}>
+                  {selectedBill.status}
+                </div>
+                <p className="text-white/60 text-xs font-bold italic">Ngày tạo: {new Date(selectedBill.createdAt).toLocaleDateString('vi-VN')}</p>
+              </div>
+            </div>
+
+            <div className="p-8 space-y-10">
+              {/* Student Info */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-[0.4em]">Học sinh</p>
+                <div className="flex items-center gap-4 bg-hicado-slate/20 p-4 rounded-2xl">
+                  <div className="w-12 h-12 rounded-full bg-hicado-navy text-hicado-emerald flex items-center justify-center font-black text-xl">
+                    {selectedBill.student.name.charAt(0)}
+                  </div>
+                  <div>
+                    <p className="font-black text-hicado-navy uppercase tracking-tight">{selectedBill.student.name}</p>
+                    <p className="text-xs text-hicado-navy/40 font-mono">{selectedBill.student.studentCode || 'N/A'}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Amount Breakdown */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-[0.4em]">Chi tiết buổi học</p>
+                <div className="space-y-2">
+                  {JSON.parse(selectedBill.sessionsDetail).map((d: any, i: number) => (
+                    <div key={i} className="flex justify-between items-center p-4 bg-white border border-hicado-slate rounded-2xl shadow-sm">
+                      <div>
+                        <p className="font-black text-hicado-navy text-xs uppercase">{d.className}</p>
+                        <p className="text-[10px] text-hicado-navy/40 font-bold">{d.sessions} buổi x {formatMoney(d.pricePerSession)}đ</p>
+                      </div>
+                      <p className="font-mono font-black text-hicado-navy text-sm">{formatMoney(d.subtotal)}đ</p>
+                    </div>
+                  ))}
+                </div>
+                <div className="pt-4 border-t-2 border-dashed border-hicado-slate flex justify-between items-baseline">
+                  <p className="text-sm font-black text-hicado-navy uppercase">Tổng số tiền</p>
+                  <p className="text-3xl font-black text-hicado-navy">{formatMoney(selectedBill.amount)}đ</p>
+                </div>
+              </div>
+
+              {/* Payment Progress */}
+              <div className="space-y-4">
+                <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-[0.4em]">Tiến độ nộp học phí</p>
+                <div className="relative h-4 bg-hicado-slate rounded-full overflow-hidden">
+                  <div className="h-full bg-hicado-emerald transition-all duration-1000" 
+                    style={{ width: `${Math.min(100, (selectedBill.paidAmount / selectedBill.amount) * 100)}%` }} />
+                </div>
+                <div className="flex justify-between text-sm font-black">
+                  <span className="text-hicado-emerald">Đã nộp: {formatMoney(selectedBill.paidAmount)}đ</span>
+                  <span className="text-rose-500">Còn lại: {formatMoney(Math.max(0, selectedBill.amount - selectedBill.paidAmount))}đ</span>
+                </div>
+              </div>
+
+              {/* Payment History */}
+              <div className="space-y-4">
+                <div className="flex justify-between items-center">
+                  <p className="text-[10px] font-black text-hicado-navy/30 uppercase tracking-[0.4em]">Lịch sử nộp tiền</p>
+                  {selectedBill.status !== 'PAID' && selectedBill.status !== 'CANCELLED' && (
+                    <button onClick={() => setIsBillPayOpen(true)} className="text-[10px] font-black text-hicado-emerald hover:underline">+ Nộp thủ công</button>
+                  )}
+                </div>
+                <div className="space-y-3">
+                  {selectedBill.payments?.map(p => (
+                    <div key={p.id} className="flex items-center gap-4 text-xs bg-hicado-slate/20 p-4 rounded-2xl border border-hicado-slate">
+                      <div className={clsx("w-8 h-8 rounded-full flex items-center justify-center font-black", 
+                        p.source === 'SEPAY' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700')}>
+                        {p.source === 'SEPAY' ? 'QR' : '💵'}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex justify-between">
+                          <span className="font-black text-hicado-navy">{p.source === 'SEPAY' ? 'Chuyển khoản VietQR' : 'Tiền mặt/Khác'}</span>
+                          <span className="font-black text-hicado-emerald">+{formatMoney(p.amount)}đ</span>
+                        </div>
+                        <p className="text-[10px] text-hicado-navy/40 mt-0.5">{new Date(p.paidAt).toLocaleString('vi-VN')} • {p.note || 'Không ghi chú'}</p>
+                      </div>
+                    </div>
+                  ))}
+                  {(!selectedBill.payments || selectedBill.payments.length === 0) && (
+                    <p className="text-center py-6 text-xs font-bold text-hicado-navy/20 italic">Chưa có giao dịch nào</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer Actions */}
+              <div className="pt-10 flex flex-col gap-3">
+                {selectedBill.status !== 'CANCELLED' && selectedBill.paidAmount === 0 && (
+                  <button onClick={() => handleCancelBill(selectedBill.id)}
+                    className="w-full py-4 rounded-2xl border border-rose-200 text-rose-500 text-sm font-black uppercase tracking-widest hover:bg-rose-50 transition-all">
+                    HỦY HÓA ĐƠN
+                  </button>
+                )}
+                <button onClick={() => setIsBillDetailOpen(false)}
+                  className="w-full py-4 rounded-2xl bg-hicado-navy text-white text-sm font-black uppercase tracking-widest">ĐÓNG</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Payment Modal */}
+      {isBillPayOpen && selectedBill && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-hicado-navy/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-md shadow-2xl overflow-hidden border border-hicado-slate animate-in zoom-in-95 duration-300">
+            <div className="bg-hicado-emerald p-6 text-hicado-navy">
+              <p className="text-[10px] font-black uppercase tracking-widest mb-1">Manual Payment</p>
+              <h3 className="text-xl font-black">Xác nhận nộp học phí</h3>
+              <p className="text-hicado-navy/60 text-xs font-bold mt-1">Hóa đơn: {selectedBill.referenceCode}</p>
+            </div>
+            <div className="p-8 space-y-5">
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Số tiền thu (VNĐ)</label>
+                <input type="text" value={billPayAmount} 
+                  onChange={e => {
+                    const val = e.target.value.replace(/\D/g, '');
+                    setBillPayAmount(val ? parseInt(val).toLocaleString('vi-VN') : '');
+                  }}
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent focus:border-hicado-navy/10 focus:bg-white rounded-2xl px-5 py-4 text-xl font-black text-hicado-navy outline-none" />
+                <p className="text-[10px] text-hicado-navy/40 font-bold ml-1">Gợi ý: {formatMoney(selectedBill.amount - selectedBill.paidAmount)}đ (còn thiếu)</p>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Ngày nộp</label>
+                <input type="date" value={billPayDate} onChange={e => setBillPayDate(e.target.value)}
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-2xl px-5 py-3 text-sm font-black text-hicado-navy outline-none" />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Ghi chú</label>
+                <textarea value={billPayNote} onChange={e => setBillPayNote(e.target.value)} rows={2}
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-2xl px-5 py-3 text-sm font-bold text-hicado-navy outline-none resize-none" />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button onClick={() => setIsBillPayOpen(false)} className="flex-1 py-4 text-sm font-black text-hicado-navy/40">HỦY</button>
+                <button onClick={handleManualBillPayment} disabled={isProcessing || !billPayAmount}
+                  className="flex-[2] py-4 bg-hicado-navy text-hicado-emerald rounded-2xl text-sm font-black shadow-xl disabled:opacity-40">
+                  XÁC NHẬN THU TIỀN
                 </button>
               </div>
             </div>

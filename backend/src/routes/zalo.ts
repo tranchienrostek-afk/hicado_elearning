@@ -4,6 +4,7 @@ import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 import { buildCustomTuitionMessage, CustomTuitionPayload } from '../lib/zaloMessage';
+import { generateBillCode } from '../lib/billCode';
 
 export const formatPhone = (p: string) => {
   const digits = p.replace(/\D/g, '');
@@ -639,6 +640,58 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       } else {
         failedCount++;
         results.push({ studentId: student.id, studentName: student.name, status: 'FAILED', total, channel, error: errorReason, coveredClassIds });
+      }
+
+      const user = (req as any).user;
+
+      // Phase 3: Auto-create TuitionBill on success
+      if (success) {
+        try {
+          const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
+          const billDetail = await Promise.all(classes.map(async (cls) => {
+            const attendedAgg = await prisma.attendance.aggregate({
+              _sum: { sessionUnits: true },
+              where: {
+                studentId: student.id,
+                classId: cls.id,
+                status: 'PRESENT',
+                date: { gte: from || new Date(0), lte: to || new Date() }
+              }
+            });
+            const sess = attendedAgg._sum.sessionUnits || 0;
+            return {
+              classId: cls.id,
+              className: cls.name,
+              sessions: sess,
+              pricePerSession: cls.tuitionPerSession,
+              subtotal: sess * cls.tuitionPerSession
+            };
+          }));
+
+          const bill = await prisma.tuitionBill.create({
+            data: {
+              studentId: student.id,
+              coveredClassIds,
+              fromDate: from || new Date(),
+              toDate: to || new Date(),
+              amount: total,
+              sessionsDetail: JSON.stringify(billDetail),
+              referenceCode: generateBillCode(),
+              createdByName: user.name || user.username || 'System',
+              sentAt: new Date(),
+              notes: item.note
+            }
+          });
+
+          // Link log to bill
+          await prisma.zaloMessageLog.update({
+            where: { trackingId },
+            data: { billId: bill.id }
+          });
+        } catch (billErr) {
+          console.error('[Auto-Bill Error]', billErr);
+          // Don't fail the whole request if bill creation fails
+        }
       }
     } catch (err: any) {
       failedCount++;

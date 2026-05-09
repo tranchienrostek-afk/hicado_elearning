@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { buildClassCollectionStats, buildStudentPaymentRows } from '../lib/financeMath';
+import { generateBillCode } from '../lib/billCode';
 
 const router = Router();
 
@@ -73,13 +74,27 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
     const bankCfgMap = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
     const bankBin = bankCfgMap.BANK_BIN || process.env.BANK_BIN || '970436';
     const accountNo = bankCfgMap.BANK_ACC || process.env.BANK_ACC || '123456789';
+    
+    // Check if we have a specific bill
+    const billId = req.query.billId as string;
+    let billRef = '';
+    let billAmount = 0;
+    if (billId) {
+      const bill = await prisma.tuitionBill.findUnique({ where: { id: billId } });
+      if (bill) {
+        billRef = bill.referenceCode;
+        billAmount = bill.amount - bill.paidAmount;
+      }
+    }
+
     const attendedAgg = await prisma.attendance.aggregate({
       _sum: { sessionUnits: true },
       where: { studentId, classId, status: 'PRESENT' },
     });
     const attended = attendedAgg._sum.sessionUnits || 0;
-    const amount = classItem.tuitionPerSession * attended;
-    const memo = deaccent(`${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`).trim().toUpperCase().slice(0, 50);
+    const amount = billAmount || (classItem.tuitionPerSession * attended);
+    const memoPrefix = billRef ? `${billRef} ` : '';
+    const memo = deaccent(`${memoPrefix}${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`).trim().toUpperCase().slice(0, 50);
 
     const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
     const qrImage = await QRCode.toDataURL(qrData, {
@@ -87,7 +102,7 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
       color: { dark: '#000000', light: '#ffffff' }
     });
 
-    res.json({ qrImage, student: student.name, className: classItem.name, attended, amount, memo });
+    res.json({ qrImage, student: student.name, className: classItem.name, attended, amount, memo, billRef });
   } catch (error) {
     console.error('[QR] Error generating QR:', error);
     res.status(500).json({ message: 'Lỗi khi tạo mã QR' });
@@ -469,4 +484,236 @@ router.get('/payment-adjustments', authenticateToken, authorizeRoles('ADMIN', 'M
   }
 });
 
+// --- Tuition Bills ---
+
+// Preview bill calculation
+router.post('/bills/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { studentId, coveredClassIds, fromDate, toDate } = req.body;
+  if (!studentId || !coveredClassIds?.length || !fromDate || !toDate) {
+    return res.status(400).json({ message: 'Thiếu thông tin để preview hóa đơn' });
+  }
+
+  try {
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+    from.setHours(0,0,0,0);
+    to.setHours(23,59,59,999);
+
+    const classes = await prisma.class.findMany({
+      where: { id: { in: coveredClassIds } }
+    });
+
+    const sessionsDetail = await Promise.all(classes.map(async (cls) => {
+      const attendedAgg = await prisma.attendance.aggregate({
+        _sum: { sessionUnits: true },
+        where: {
+          studentId,
+          classId: cls.id,
+          status: 'PRESENT',
+          date: { gte: from, lte: to }
+        }
+      });
+      const sessions = attendedAgg._sum.sessionUnits || 0;
+      return {
+        classId: cls.id,
+        className: cls.name,
+        sessions,
+        pricePerSession: cls.tuitionPerSession,
+        subtotal: sessions * cls.tuitionPerSession
+      };
+    }));
+
+    const amount = sessionsDetail.reduce((sum, item) => sum + item.subtotal, 0);
+    res.json({ sessionsDetail, amount });
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi preview hóa đơn' });
+  }
+});
+
+// Create bill
+router.post('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const user = (req as any).user;
+  const { studentId, coveredClassIds, fromDate, toDate, dueDate, notes } = req.body;
+
+  try {
+    const from = new Date(fromDate);
+    const to = new Date(toDate);
+    from.setHours(0,0,0,0);
+    to.setHours(23,59,59,999);
+
+    const classes = await prisma.class.findMany({
+      where: { id: { in: coveredClassIds } }
+    });
+
+    const detailItems = await Promise.all(classes.map(async (cls) => {
+      const attendedAgg = await prisma.attendance.aggregate({
+        _sum: { sessionUnits: true },
+        where: {
+          studentId,
+          classId: cls.id,
+          status: 'PRESENT',
+          date: { gte: from, lte: to }
+        }
+      });
+      const sessions = attendedAgg._sum.sessionUnits || 0;
+      return {
+        classId: cls.id,
+        className: cls.name,
+        sessions,
+        pricePerSession: cls.tuitionPerSession,
+        subtotal: sessions * cls.tuitionPerSession
+      };
+    }));
+
+    const amount = detailItems.reduce((sum, item) => sum + item.subtotal, 0);
+    if (amount === 0) return res.status(400).json({ message: 'Hóa đơn có số tiền bằng 0, không thể tạo' });
+
+    const bill = await prisma.tuitionBill.create({
+      data: {
+        studentId,
+        coveredClassIds,
+        fromDate: from,
+        toDate: to,
+        dueDate: dueDate ? new Date(dueDate) : null,
+        amount,
+        sessionsDetail: JSON.stringify(detailItems),
+        referenceCode: generateBillCode(),
+        notes,
+        createdByName: user.name || user.username || 'System',
+        status: 'UNPAID'
+      }
+    });
+
+    res.status(201).json(bill);
+  } catch (error) {
+    console.error('[Create Bill]', error);
+    res.status(500).json({ message: 'Lỗi tạo hóa đơn' });
+  }
+});
+
+// List bills
+router.get('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { studentId, status, from, to } = req.query;
+  const where: any = {};
+  if (studentId) where.studentId = studentId as string;
+  if (status && status !== 'ALL') where.status = status as any;
+  if (from || to) {
+    where.createdAt = {};
+    if (from) where.createdAt.gte = new Date(from as string);
+    if (to) { const d = new Date(to as string); d.setHours(23, 59, 59, 999); where.createdAt.lte = d; }
+  }
+
+  try {
+    const bills = await prisma.tuitionBill.findMany({
+      where,
+      include: {
+        student: { select: { id: true, name: true, studentCode: true } },
+        payments: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(bills);
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi danh sách hóa đơn' });
+  }
+});
+
+// Bill detail
+router.get('/bills/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const bill = await prisma.tuitionBill.findUnique({
+      where: { id: req.params.id as string },
+      include: {
+        student: { select: { id: true, name: true, studentCode: true } },
+        payments: { orderBy: { paidAt: 'desc' } },
+        messageLog: { orderBy: { sentAt: 'desc' }, take: 10 }
+      }
+    });
+    if (!bill) return res.status(404).json({ message: 'Không tìm thấy hóa đơn' });
+    res.json(bill);
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi chi tiết hóa đơn' });
+  }
+});
+
+// Cancel bill
+router.patch('/bills/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const { status, notes, dueDate } = req.body;
+  try {
+    const data: any = {};
+    if (status === 'CANCELLED') data.status = 'CANCELLED';
+    if (notes !== undefined) data.notes = notes;
+    if (dueDate !== undefined) data.dueDate = dueDate ? new Date(dueDate) : null;
+
+    const updated = await prisma.tuitionBill.update({
+      where: { id: req.params.id as string },
+      data
+    });
+    res.json(updated);
+  } catch (error) {
+    res.status(500).json({ message: 'Lỗi cập nhật hóa đơn' });
+  }
+});
+
+// Manual payment for a bill
+router.post('/bills/:id/manual-payment', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const user = (req as any).user;
+  const { amount, source, note, date } = req.body;
+  const billId = req.params.id;
+
+  try {
+    const bill = await prisma.tuitionBill.findUnique({ where: { id: billId as string } });
+    if (!bill) return res.status(404).json({ message: 'Không tìm thấy hóa đơn' });
+
+    const paidVal = Number(amount);
+    const newPaidAmount = bill.paidAmount + paidVal;
+    let newStatus: any = 'PARTIAL';
+    if (newPaidAmount >= bill.amount) newStatus = 'PAID';
+
+    const result = await prisma.$transaction(async (tx) => {
+      // 1. Create payment record linked to bill
+      const payment = await tx.billPayment.create({
+        data: {
+          billId: billId as string,
+          amount: paidVal,
+          source: source || 'CASH',
+          note: note || null,
+          paidAt: date ? new Date(date) : new Date()
+        }
+      });
+
+      // 2. Update bill status and amount
+      await tx.tuitionBill.update({
+        where: { id: billId as string },
+        data: {
+          paidAmount: newPaidAmount,
+          status: newStatus
+        }
+      });
+
+      // 3. Create a PaymentAdjustment (Legacy compatibility) so it shows up in general tracking
+      await tx.paymentAdjustment.create({
+        data: {
+          studentId: bill.studentId,
+          amount: paidVal,
+          source: source === 'ADJUSTMENT' ? 'ADJUSTMENT' : 'CASH',
+          note: `Thanh toán cho HĐ ${bill.referenceCode}. ${note || ''}`,
+          effectiveDate: date ? new Date(date) : new Date(),
+          createdByUserId: user.id,
+          createdByName: user.name || user.username || 'System',
+          createdByRole: user.role
+        }
+      });
+
+      return payment;
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error('[Manual Payment]', error);
+    res.status(500).json({ message: 'Lỗi ghi nhận thanh toán' });
+  }
+});
+
 export default router;
+

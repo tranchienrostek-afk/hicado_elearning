@@ -1,3 +1,5 @@
+import prisma from './prisma';
+
 type PaymentStudent = {
   id: string;
   name: string;
@@ -44,4 +46,14 @@ export function normalizeSepayWebhookPayload(body: any) {
     referenceCode: body.referenceCode ?? body.reference_number,
     sepayCode: body.code ?? null,
   };
+}
+
+export async function findBillByPaymentContent(content: string) {
+  const match = content.match(/HD-[A-Z0-9]{6}/i);
+  if (!match) return null;
+  const referenceCode = match[0].toUpperCase();
+  return prisma.tuitionBill.findUnique({
+    where: { referenceCode },
+    include: { student: true }
+  });
 }

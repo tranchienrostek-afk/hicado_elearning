@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
-import { findStudentByPaymentContent, normalizeSepayWebhookPayload } from '../lib/sepayMatch';
+import { findStudentByPaymentContent, normalizeSepayWebhookPayload, findBillByPaymentContent } from '../lib/sepayMatch';
 import { getZaloConfig, ZALO_OA_API, zaloApiClient } from '../lib/zaloAuth';
 
 const digitsOnly = (value: string) => value.replace(/\D/g, '');
@@ -195,8 +195,7 @@ async function processSepayTransaction(payload: {
 
   console.log(`[SePay] Matched student=${matchedStudent.name} class=${matchedClass?.name ?? 'none'}`);
 
-  // Record transaction (upsert on sepayId to avoid duplicates; null sepayId always inserts)
-  await prisma.transaction.upsert({
+  const transaction = await prisma.transaction.upsert({
     where: { sepayId: id ?? -1 } as any,
     update: {},
     create: {
@@ -212,6 +211,33 @@ async function processSepayTransaction(payload: {
       classId: matchedClass?.id ?? null,
     } as any,
   });
+
+  // NEW: Check if this is a TuitionBill payment
+  const bill = await findBillByPaymentContent(combinedContent);
+  if (bill && bill.status !== 'CANCELLED') {
+    const newPaidAmount = bill.paidAmount + transferAmount;
+    const newStatus = newPaidAmount >= bill.amount ? 'PAID' : 'PARTIAL';
+
+    await prisma.$transaction([
+      prisma.billPayment.create({
+        data: {
+          billId: bill.id,
+          amount: transferAmount,
+          source: 'SEPAY',
+          transactionId: (transaction as any).id,
+          note: `Auto-matched via SePay content: "${content}"`
+        }
+      }),
+      prisma.tuitionBill.update({
+        where: { id: bill.id },
+        data: {
+          paidAmount: newPaidAmount,
+          status: newStatus
+        }
+      })
+    ]);
+    console.log(`[SePay] Linked to TuitionBill: ${bill.referenceCode} status=${newStatus}`);
+  }
 
   await prisma.student.update({ where: { id: matchedStudent.id }, data: { tuitionStatus: 'PAID' } });
 
