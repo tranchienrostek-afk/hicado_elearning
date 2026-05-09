@@ -549,7 +549,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     const trackingId = `CT_${campaign.id}_${item.studentId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const coveredClassIds = studentCoveredClasses[item.studentId] ?? (item.classId ? [item.classId] : []);
     const total = item.totalOverride ?? (item.sessions * item.pricePerSession);
-    const payload: CustomTuitionPayload = { sessions: item.sessions, pricePerSession: item.pricePerSession, total, note: item.note };
+    const payload: CustomTuitionPayload = { className: '', sessions: item.sessions, pricePerSession: item.pricePerSession, total, note: item.note };
 
     try {
       const student = await prisma.student.findUnique({ where: { id: item.studentId } });
@@ -656,9 +656,13 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       }
 
       const billItems = billId ? billDetail : [];
+      const fmt = (d: string | Date) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const fmtFrom = fromDate ? fmt(fromDate) : undefined;
+      const fmtTo = toDate ? fmt(toDate) : undefined;
+
       const messageText = billItems.length > 1
-        ? buildMultiClassTuitionMessage(student.name, billItems, total, billingMonth)
-        : buildCustomTuitionMessage(student.name, payload);
+        ? buildMultiClassTuitionMessage(student.name, billItems, total, fmtFrom, fmtTo)
+        : buildCustomTuitionMessage(student.name, { ...payload, className: billItems[0]?.className ?? '', fromDate: fmtFrom, toDate: fmtTo });
 
       let success = false;
       let channel: 'CS' | 'ZNS' | 'NONE' = 'NONE';
@@ -834,7 +838,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
           classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true } } } },
           attendances: {
             where: { status: 'PRESENT', ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}) },
-            select: { classId: true, sessionUnits: true }
+            select: { classId: true, sessionUnits: true, date: true }
           }
         }
       }
@@ -857,19 +861,41 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
 
   const results = classStudents.map(cs => {
     const s = cs.student;
-    const mainAttended = s.attendances.filter(a => a.classId === classId).reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
     const mainClass = s.classes.find(c => c.classId === classId);
+    const mainClassAtts = s.attendances.filter(a => a.classId === classId);
+    const mainAttended = mainClassAtts.reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
+    
+    const mainSubtotal = expectedForStudentClass(
+      mainClass?.class as any, s.id, mainClassAtts as any, cs
+    );
+
     const otherClasses = s.classes
       .filter(c => c.classId !== classId)
       .map(c => {
-        const attended = s.attendances.filter(a => a.classId === c.classId).reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
-        return { classId: c.classId, className: c.class.name, classCode: c.class.classCode, attended, tuitionPerSession: c.class.tuitionPerSession, subtotal: attended * c.class.tuitionPerSession };
+        const atts = s.attendances.filter(a => a.classId === c.classId);
+        const attended = atts.reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
+        const subtotal = expectedForStudentClass(c.class as any, s.id, atts as any, c);
+        return { 
+          classId: c.classId, 
+          className: c.class.name, 
+          classCode: c.class.classCode, 
+          attended, 
+          tuitionPerSession: c.class.tuitionPerSession, 
+          subtotal 
+        };
       });
+
     const logs = sentByStudent.get(s.id) ?? [];
     return {
       studentId: s.id, studentName: s.name, studentCode: s.studentCode,
       hasZalo: !!s.zaloUserId,
-      mainClass: { classId, attended: mainAttended, tuitionPerSession: mainClass?.class.tuitionPerSession ?? 0 },
+      mainClass: { 
+        classId, 
+        className: mainClass?.class.name ?? '',
+        attended: mainAttended, 
+        tuitionPerSession: mainClass?.class.tuitionPerSession ?? 0,
+        subtotal: mainSubtotal
+      },
       otherClasses,
       alreadySent: logs.length > 0,
       sentLogs: logs.slice(0, 3).map(l => ({ sentAt: l.sentAt, coveredClassIds: l.coveredClassIds }))

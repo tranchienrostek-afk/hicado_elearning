@@ -22,7 +22,7 @@ interface MultiClassPreviewItem {
   studentName: string;
   studentCode?: string;
   hasZalo: boolean;
-  mainClass: { classId: string; attended: number; tuitionPerSession: number };
+  mainClass: { classId: string; className: string; attended: number; tuitionPerSession: number; subtotal: number };
   otherClasses: Array<{ classId: string; className: string; classCode?: string; attended: number; tuitionPerSession: number; subtotal: number }>;
   alreadySent: boolean;
   sentLogs: Array<{ sentAt: string; coveredClassIds: string[] }>;
@@ -254,39 +254,7 @@ export const ZaloCampaignPage = () => {
   };
 
 
-  const buildSampleMessage = () => {
-    const first = recipientPreview[0] as any;
-    if (!first) return 'Không có người nhận phù hợp.';
-    if (wizardType === 'GENERAL') return wizardMessage || '(Chưa nhập nội dung)';
 
-    if (wizardType === 'CUSTOM_TUITION') {
-      const item = customTuitionItems[first.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
-      return [
-        `Kính gửi phụ huynh em ${first.name}!`,
-        ``,
-        `Trung tâm Hicado xin thông báo học phí${item.note ? ` (${item.note})` : ''}:`,
-        ``,
-        `  📚 Số buổi học : ${item.sessions} buổi`,
-        `  💵 Đơn giá/buổi: ${item.pricePerSession.toLocaleString('vi-VN')}đ`,
-        `  ─────────────────────────────`,
-        `  💰 Tổng cộng   : ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}đ`,
-        ``,
-        `Quý phụ huynh vui lòng thanh toán đúng hạn.`,
-        `Trân trọng - Hicado Center 🌱`,
-      ].join('\n');
-    }
-
-    const cls = classes.find(c => ((first.classes || []).map((x: any) => x.classId ?? x.id)).includes(c.id));
-    const amount = cls ? cls.tuitionPerSession * cls.totalSessions : 0;
-    return [
-      `Kính gửi phụ huynh em ${first.name}!`,
-      `Trung tâm Hicado xin thông báo học phí (từ ${new Date(wizardFromDate).toLocaleDateString('vi-VN')} đến ${new Date(wizardToDate).toLocaleDateString('vi-VN')}):\n`,
-      cls ? `• Lớp ${cls.name}\n  Học phí ước tính: ${amount.toLocaleString('vi-VN')}đ` : '• (Dữ liệu lớp)',
-      `\n💰 Tổng: ${amount.toLocaleString('vi-VN')}đ`,
-      `📱 Quét QR nộp tiền: [link QR]`,
-      first.studentCode ? `📝 Nội dung CK: ${first.studentCode}` : '',
-    ].filter(Boolean).join('\n');
-  };
 
   const handleSendCampaign = async () => {
     setIsSending(true);
@@ -1024,7 +992,7 @@ export const ZaloCampaignPage = () => {
                                 {mc.alreadySent && (
                                   <label className="flex items-center gap-2 text-amber-700">
                                     <input type="checkbox" checked={getMergeOption(s.id).forceResend} onChange={e => setForceResend(s.id, e.target.checked)} />
-                                    V?n g?i l?i h?c ph? k? n?y
+                                    Vẫn gửi lại học phí kỳ này
                                   </label>
                                 )}
                                 {mc.otherClasses.length > 0 && (
@@ -1032,7 +1000,7 @@ export const ZaloCampaignPage = () => {
                                     {mc.otherClasses.map((o: any) => (
                                       <label key={o.classId} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-lg">
                                         <input type="checkbox" checked={getMergeOption(s.id).extraClassIds.includes(o.classId)} onChange={e => setMergeExtra(s.id, o.classId, e.target.checked)} />
-                                        G?p {o.className} ({o.subtotal.toLocaleString()}?)
+                                        Gộp {o.className} ({o.subtotal.toLocaleString('vi-VN')}đ)
                                       </label>
                                     ))}
                                   </div>
@@ -1080,7 +1048,7 @@ export const ZaloCampaignPage = () => {
                               <td className="px-4 py-3">
                                 {mc ? (
                                   <div className="flex flex-col gap-0.5">
-                                    <span className="font-black text-hicado-navy">{(mc.mainClass.attended * mc.mainClass.tuitionPerSession).toLocaleString()}đ</span>
+                                    <span className="font-black text-hicado-navy">{mc.mainClass.subtotal.toLocaleString('vi-VN')}đ</span>
                                     {mc.otherClasses.map((o: any) => (
                                       <span key={o.classId} className="text-[10px] opacity-40">+{o.subtotal.toLocaleString()}đ</span>
                                     ))}
@@ -1125,48 +1093,86 @@ export const ZaloCampaignPage = () => {
                 <div className="space-y-3 max-h-[420px] overflow-y-auto custom-scrollbar">
                   {recipientPreview.slice(0, 20).map(s => {
                     const item = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
-                    const coveredNames = getCoveredClassIdsForStudent(s.id).map(id => classes.find(c => c.id === id)?.name ?? id).join(' + ') || 'Ch?a ch?n l?p';
+                    const coveredNames = getCoveredClassIdsForStudent(s.id).map(id => classes.find(c => c.id === id)?.name ?? id).join(' + ') || 'Chưa chọn lớp';
+                    const fmt = (d: string) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    const fmtFrom = wizardFromDate ? fmt(wizardFromDate) : '';
+                    const fmtTo = wizardToDate ? fmt(wizardToDate) : '';
+                    
                     return (
                       <details key={s.id} className="border border-hicado-slate rounded-2xl p-4 bg-white" open={recipientPreview.length <= 3}>
                         <summary className="cursor-pointer font-black text-hicado-navy flex justify-between gap-3">
                           <span>{s.name}</span>
-                          <span className="text-xs text-hicado-emerald">{((item.totalOverride ?? (item.sessions * item.pricePerSession))).toLocaleString('vi-VN')}?</span>
+                          <span className="text-xs text-hicado-emerald">{((item.totalOverride ?? (item.sessions * item.pricePerSession))).toLocaleString('vi-VN')}đ</span>
                         </summary>
                         <p className="text-[10px] font-bold text-hicado-navy/40 uppercase mt-2">Cover: {coveredNames}</p>
                         <div className="mt-3 bg-[#e7f3ff] rounded-xl p-4 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed border border-blue-100">
                           {[
-                            `K?nh g?i ph? huynh em ${s.name}!`,
+                            `Kính gửi phụ huynh em ${s.name}`,
+                            `Trung tâm Hicado xin thông báo học phí từ ${fmtFrom} đến ${fmtTo}`,
                             ``,
-                            `Trung t?m Hicado xin th?ng b?o h?c ph?${item.note ? ` (${item.note})` : ''}:`,
+                            ...getCoveredClassIdsForStudent(s.id).map(cid => {
+                              const cls = classes.find(c => c.id === cid);
+                              const cItem = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+                              return `${cls?.name ?? cid}   ${cItem.sessions} buổi   ${(cItem.pricePerSession/1000).toFixed(0)}k/buổi   ${(cItem.sessions * cItem.pricePerSession).toLocaleString('vi-VN')}đ`;
+                            }),
                             ``,
-                            `  ?? S? bu?i h?c : ${item.sessions} bu?i`,
-                            `  ?? ??n gi?/bu?i: ${item.pricePerSession.toLocaleString('vi-VN')}?`,
-                            `  ?????????????????????????????`,
-                            `  ?? T?ng c?ng   : ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}?`,
-                            ``,
-                            `Qu? ph? huynh vui l?ng thanh to?n ??ng h?n.`,
-                            `Tr?n tr?ng - Hicado Center ??`,
+                            `Tổng cộng: ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}đ`,
+                            `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
+                            `Thời gian thu: từ ngày ${fmtFrom} đến ngày ${fmtTo}`,
+                            `Phụ huynh vui lòng thanh toán đúng hạn`,
+                            `Trân trọng - Hicado Center`,
                           ].join('\n')}
                         </div>
                       </details>
                     );
                   })}
-                  {recipientPreview.length > 20 && <p className="text-xs text-hicado-navy/40 font-bold">Ch? hi?n th? 20 preview ??u ti?n ?? gi? trang nh?.</p>}
+                  {recipientPreview.length > 20 && <p className="text-xs text-hicado-navy/40 font-bold">Chỉ hiển thị 20 preview đầu tiên để giữ trang nhẹ.</p>}
                 </div>
               ) : wizardType === 'TUITION_REMINDER' ? (
-                <div>
-                  <p className="text-xs font-bold text-hicado-navy/40 uppercase tracking-widest mb-3">M?u tin g?i cho: <strong className="text-hicado-navy">{recipientPreview[0]?.name ?? '?'}</strong></p>
-                  <div className="bg-[#e7f3ff] rounded-2xl p-5 font-mono text-sm text-gray-800 whitespace-pre-wrap leading-relaxed border border-blue-100">
-                    {buildSampleMessage()}
-                  </div>
-                  <p className="text-xs text-hicado-navy/30 mt-3 font-bold">N?i dung th?c t? s? ???c t?nh ch?nh x?c t? d? li?u ?i?m danh v? l?p c?a t?ng h?c sinh.</p>
+                <div className="space-y-3 max-h-[420px] overflow-y-auto custom-scrollbar">
+                  {recipientPreview.slice(0, 20).map(s => {
+                    const mc = multiClassPreview.find(p => p.studentId === s.id);
+                    const fmt = (d: string) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    const fmtFrom = wizardFromDate ? fmt(wizardFromDate) : '';
+                    const fmtTo = wizardToDate ? fmt(wizardToDate) : '';
+
+                    const allItems = mc
+                      ? [{ name: mc.mainClass.className, sessions: mc.mainClass.attended, price: mc.mainClass.tuitionPerSession, subtotal: mc.mainClass.subtotal },
+                         ...mc.otherClasses.map(o => ({ name: o.className, sessions: o.attended, price: o.tuitionPerSession, subtotal: o.subtotal }))]
+                      : [];
+                    const total = allItems.reduce((sum, it) => sum + it.subtotal, 0);
+                    const previewText = [
+                      `Kính gửi phụ huynh em ${s.name}`,
+                      `Trung tâm Hicado xin thông báo học phí từ ${fmtFrom} đến ${fmtTo}`,
+                      ``,
+                      ...allItems.map(it => `${it.name}   ${it.sessions} buổi   ${(it.price/1000).toFixed(0)}k/buổi   ${it.subtotal.toLocaleString('vi-VN')}đ`),
+                      ``,
+                      `Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
+                      `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
+                      `Thời gian thu: từ ngày ${fmtFrom} đến ngày ${fmtTo}`,
+                      `Phụ huynh vui lòng thanh toán đúng hạn`,
+                      `Trân trọng - Hicado Center`,
+                    ].join('\n');
+                    return (
+                      <details key={s.id} className="border border-hicado-slate rounded-2xl p-4 bg-white" open={recipientPreview.length <= 3}>
+                        <summary className="cursor-pointer font-black text-hicado-navy flex justify-between gap-3">
+                          <span>{s.name}</span>
+                          <span className="text-xs text-hicado-emerald">{total.toLocaleString('vi-VN')}đ</span>
+                        </summary>
+                        <div className="mt-3 bg-[#e7f3ff] rounded-xl p-4 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed border border-blue-100">
+                          {previewText}
+                        </div>
+                      </details>
+                    );
+                  })}
+                  {recipientPreview.length > 20 && <p className="text-xs text-hicado-navy/40 font-bold">Chỉ hiển thị 20 preview đầu tiên để giữ trang nhẹ.</p>}
                 </div>
               ) : (
                 <div>
-                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">N?i dung th?ng b?o</label>
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Nội dung thông báo</label>
                   <textarea value={wizardMessage} onChange={e => setWizardMessage(e.target.value)} rows={6}
                     className="w-full bg-hicado-slate/20 border border-transparent rounded-2xl px-5 py-4 text-hicado-navy font-bold focus:bg-white focus:border-hicado-navy/30 outline-none resize-none"
-                    placeholder="Nh?p n?i dung th?ng b?o g?i ??n ph? huynh/h?c sinh..." />
+                    placeholder="Nhập nội dung thông báo gửi đến phụ huynh/học sinh..." />
                 </div>
               )}
               <div className="flex gap-3">

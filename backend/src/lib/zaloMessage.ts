@@ -48,40 +48,49 @@ export function buildZaloImageMessage(attachmentId: string, text?: string): Zalo
 }
 
 export interface CustomTuitionPayload {
+  className:       string;
   sessions:        number;
   pricePerSession: number;
   total:           number;
   note?:           string;
+  fromDate?:       string;  // "dd/MM/yyyy"
+  toDate?:         string;
 }
 
 export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionPayload): string {
+  const dateRange = p.fromDate && p.toDate ? ` từ ${p.fromDate} đến ${p.toDate}` : '';
   return [
-    `Kính gửi phụ huynh em ${studentName}!`,
+    `Kính gửi phụ huynh em ${studentName}`,
+    `Trung tâm Hicado xin thông báo học phí${dateRange}`,
     ``,
-    `Trung tâm Hicado xin thông báo học phí${p.note ? ` (${p.note})` : ''}:`,
+    `${p.className}   ${p.sessions} buổi   ${(p.pricePerSession/1000).toFixed(0)}k/buổi   ${p.total.toLocaleString('vi-VN')}đ`,
     ``,
-    `  📚 Số buổi học : ${p.sessions} buổi`,
-    `  💵 Đơn giá/buổi: ${p.pricePerSession.toLocaleString('vi-VN')}đ`,
-    `  ─────────────────────────────`,
-    `  💰 Tổng cộng   : ${p.total.toLocaleString('vi-VN')}đ`,
-    ``,
-    `Quý phụ huynh vui lòng thanh toán đúng hạn.`,
-    `Trân trọng - Hicado Center 🌱`,
-  ].join('\n');
+    `Tổng cộng: ${p.total.toLocaleString('vi-VN')}đ`,
+    `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
+    p.fromDate && p.toDate ? `Thời gian thu: từ ngày ${p.fromDate} đến ngày ${p.toDate}` : null,
+    `Phụ huynh vui lòng thanh toán đúng hạn`,
+    `Trân trọng - Hicado Center`,
+  ].filter(Boolean).join('\n');
 }
 
-export function buildMultiClassTuitionMessage(studentName: string, items: any[], total: number, note?: string): string {
-  const itemLines = items.map(it => `  • ${it.className}: ${it.sessions} buổi x ${(it.pricePerSession/1000)}k = ${it.subtotal.toLocaleString('vi-VN')}đ`);
+export function buildMultiClassTuitionMessage(
+  studentName: string, items: any[], total: number,
+  fromDate?: string, toDate?: string
+): string {
+  const dateRange = fromDate && toDate ? ` từ ${fromDate} đến ${toDate}` : '';
+  const itemLines = items.map(it =>
+    `${it.className}   ${it.sessions} buổi   ${(it.pricePerSession/1000).toFixed(0)}k/buổi   ${it.subtotal.toLocaleString('vi-VN')}đ`
+  );
   return [
-    `Kính gửi phụ huynh em ${studentName}!`,
-    ``,
-    `Trung tâm Hicado xin thông báo học phí${note ? ` (${note})` : ''}:`,
+    `Kính gửi phụ huynh em ${studentName}`,
+    `Trung tâm Hicado xin thông báo học phí${dateRange}`,
     ``,
     ...itemLines,
-    `  ─────────────────────────────`,
-    `  💰 Tổng cộng   : ${total.toLocaleString('vi-VN')}đ`,
     ``,
-    `Quý phụ huynh vui lòng thanh toán đúng hạn (Chi tiết trong ảnh).`,
-    `Trân trọng - Hicado Center 🌱`,
-  ].join('\n');
+    `Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
+    `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
+    fromDate && toDate ? `Thời gian thu: từ ngày ${fromDate} đến ngày ${toDate}` : null,
+    `Phụ huynh vui lòng thanh toán đúng hạn`,
+    `Trân trọng - Hicado Center`,
+  ].filter(Boolean).join('\n');
 }

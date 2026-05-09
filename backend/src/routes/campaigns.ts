@@ -8,6 +8,7 @@ import { buildPaymentSlipPNG, buildMultiClassPaymentSlipPNG, deaccent } from '..
 import { generateVietQRString } from '../lib/vietqr';
 import { buildZaloImageMessage, uploadZaloImage, buildCustomTuitionMessage, buildMultiClassTuitionMessage } from '../lib/zaloMessage';
 import { generateBillCode } from '../lib/billCode';
+import { expectedForStudentClass } from '../lib/financeMath';
 
 const router = Router();
 
@@ -82,7 +83,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           status: 'PRESENT',
           ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
         },
-        select: { classId: true, sessionUnits: true }
+        select: { classId: true, sessionUnits: true, date: true }
       },
       paymentAdjustments: {
         where: {
@@ -230,18 +231,20 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       let billRef = '';
       try {
         const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
-        billDetail = classes.map((cls) => {
-          const attended = student.attendances
-            .filter((a: any) => a.classId === cls.id)
-            .reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
+        billDetail = await Promise.all(classes.map(async (cls) => {
+          const cs = student.classes.find((c: any) => c.classId === cls.id);
+          const classAtts = student.attendances.filter((a: any) => a.classId === cls.id);
+          const sess = classAtts.reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
+          const subtotal = expectedForStudentClass(cls as any, student.id, classAtts as any, cs as any);
+
           return {
             classId: cls.id,
             className: cls.name,
-            sessions: attended,
-            pricePerSession: cls.tuitionPerSession,
-            subtotal: attended * cls.tuitionPerSession
+            sessions: sess,
+            pricePerSession: (cs as any)?.customTuitionPerSession != null ? (cs as any).customTuitionPerSession : cls.tuitionPerSession,
+            subtotal
           };
-        });
+        }));
 
         const bill = await prisma.tuitionBill.create({
           data: {
@@ -267,9 +270,21 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', totalDue, memo);
       
       const billItems = billDetail;
+      const fmt = (d: string | Date) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+      const fmtFrom = from ? fmt(from) : undefined;
+      const fmtTo = to ? fmt(to) : undefined;
+
       const textMessage = billItems.length > 1 
-        ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, periodStr)
-        : buildCustomTuitionMessage(student.name, { sessions: billItems[0]?.sessions || 0, pricePerSession: billItems[0]?.pricePerSession || 0, total: totalDue, note: periodStr });
+        ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, fmtFrom, fmtTo)
+        : buildCustomTuitionMessage(student.name, { 
+            className: billItems[0]?.className ?? '',
+            sessions: billItems[0]?.sessions || 0, 
+            pricePerSession: billItems[0]?.pricePerSession || 0, 
+            total: totalDue, 
+            note: periodStr,
+            fromDate: fmtFrom,
+            toDate: fmtTo
+          });
 
       // Step 2: Build PNG
       trace.push('②PNG...');
