@@ -5,6 +5,69 @@ import { normalizePhone, normalizeVietnameseName, calculateStudentMatchScore } f
 
 const router = Router();
 
+type StudentDuplicateInput = {
+  name?: string;
+  parentPhone?: string;
+  studentPhone?: string;
+  birthYear?: number;
+  cccd?: string;
+  studentCode?: string;
+};
+
+const uniquePhones = (input: StudentDuplicateInput) =>
+  Array.from(new Set([normalizePhone(input.parentPhone), normalizePhone(input.studentPhone)].filter(Boolean))) as string[];
+
+async function findStudentDuplicateCandidates(input: StudentDuplicateInput, excludeId?: string) {
+  const phones = uniquePhones(input);
+  const orConditions: any[] = [];
+  const normalizedName = input.name ? normalizeVietnameseName(input.name) : '';
+
+  if (normalizedName) orConditions.push({ nameNorm: { contains: normalizedName } });
+  for (const phone of phones) {
+    orConditions.push({ parentPhoneNorm: phone }, { phoneNorm: phone });
+  }
+  if (input.cccd) orConditions.push({ cccd: input.cccd });
+  if (input.studentCode) orConditions.push({ studentCode: input.studentCode });
+
+  if (orConditions.length === 0) return [];
+
+  const candidates = await prisma.student.findMany({
+    where: {
+      isActive: true,
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      OR: orConditions
+    },
+    include: { classes: { include: { class: { select: { name: true } } } } }
+  });
+
+  return candidates
+    .map(c => {
+      const match = calculateStudentMatchScore(
+        {
+          name: input.name || '',
+          parentPhone: input.parentPhone,
+          studentPhone: input.studentPhone,
+          birthYear: input.birthYear,
+          cccd: input.cccd,
+          studentCode: input.studentCode
+        },
+        c
+      );
+      return {
+        studentId: c.id,
+        name: c.name,
+        studentCode: c.studentCode,
+        parentPhone: c.parentPhone,
+        studentPhone: c.studentPhone,
+        birthYear: c.birthYear,
+        classes: c.classes.map(cl => cl.class.name),
+        ...match
+      };
+    })
+    .filter(r => r.score >= 30)
+    .sort((a, b) => b.score - a.score);
+}
+
 // Get students - STUDENT role only sees their own record
 router.get('/', authenticateToken, async (req: any, res) => {
   try {
@@ -54,38 +117,7 @@ router.post('/duplicate-preview', authenticateToken, authorizeRoles('ADMIN', 'MA
     const { name, parentPhone, studentPhone, birthYear, cccd, studentCode } = req.body;
     if (!name) return res.status(400).json({ message: 'Tên học sinh là bắt buộc' });
 
-    const candidates = await prisma.student.findMany({
-      where: {
-        OR: [
-          { nameNorm: { contains: normalizeVietnameseName(name) } },
-          parentPhone ? { parentPhoneNorm: normalizePhone(parentPhone) } : {},
-          studentPhone ? { phoneNorm: normalizePhone(studentPhone) } : {},
-          cccd ? { cccd } : {},
-          studentCode ? { studentCode } : {}
-        ].filter(cond => Object.keys(cond).length > 0),
-        isActive: true
-      },
-      include: { classes: { include: { class: { select: { name: true } } } } }
-    });
-
-    const results = candidates
-      .map(c => {
-        const match = calculateStudentMatchScore(
-          { name, parentPhone, studentPhone, birthYear, cccd, studentCode },
-          c
-        );
-        return {
-          studentId: c.id,
-          name: c.name,
-          studentCode: c.studentCode,
-          parentPhone: c.parentPhone,
-          birthYear: c.birthYear,
-          classes: c.classes.map(cl => cl.class.name),
-          ...match
-        };
-      })
-      .filter(r => r.score >= 30)
-      .sort((a, b) => b.score - a.score);
+    const results = await findStudentDuplicateCandidates({ name, parentPhone, studentPhone, birthYear, cccd, studentCode });
 
     res.json({
       decision: results.length > 0 && results[0].score >= 90 ? 'MATCH_EXISTING' : results.length > 0 ? 'REVIEW' : 'CREATE_NEW',
@@ -101,8 +133,19 @@ router.post('/duplicate-preview', authenticateToken, authorizeRoles('ADMIN', 'MA
 router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
     const { forceCreate, ...studentData } = req.body;
-    const { name, parentPhone, studentPhone } = studentData;
+    const { name, parentPhone, studentPhone, birthYear, cccd, studentCode } = studentData;
 
+    if (!forceCreate) {
+      const duplicateCandidates = await findStudentDuplicateCandidates({ name, parentPhone, studentPhone, birthYear, cccd, studentCode });
+      const strongest = duplicateCandidates[0];
+      if (strongest && strongest.score >= 90) {
+        return res.status(409).json({
+          message: `Hoc sinh co the da ton tai: ${strongest.name} (${strongest.score}%). Ly do: ${strongest.reasons.join(', ')}`,
+          candidate: strongest,
+          candidates: duplicateCandidates
+        });
+      }
+    }
     // Auto-populate normalized fields
     const data = {
       ...studentData,

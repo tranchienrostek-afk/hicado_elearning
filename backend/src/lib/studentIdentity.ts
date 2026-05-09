@@ -106,27 +106,26 @@ export function calculateStudentMatchScore(
   const nameNormExisting = existing.nameNorm || normalizeVietnameseName(existing.name);
   const exactNameMatch = nameNormInput === nameNormExisting;
 
-  // 4. Phone matching
+  // 4. Phone matching. Imported files often put the same contact number in
+  // either parentPhone or studentPhone, so compare the two phone pools.
   const pPhoneInput = normalizePhone(input.parentPhone);
   const pPhoneExisting = normalizePhone(existing.parentPhone);
   const sPhoneInput = normalizePhone(input.studentPhone);
   const sPhoneExisting = normalizePhone(existing.studentPhone);
 
-  const parentPhoneMatch = pPhoneInput && pPhoneInput === pPhoneExisting;
-  const studentPhoneMatch = sPhoneInput && sPhoneInput === sPhoneExisting;
+  const inputPhones = [pPhoneInput, sPhoneInput].filter(Boolean);
+  const existingPhones = [pPhoneExisting, sPhoneExisting].filter(Boolean);
+  const anyPhoneMatch = inputPhones.some(phone => existingPhones.includes(phone));
 
-  if (parentPhoneMatch && nameSim >= 85) {
+  if (anyPhoneMatch && nameSim >= 85) {
     score = 95;
-    reasons.push('Trùng số phụ huynh và tên giống nhau');
-  } else if (studentPhoneMatch && nameSim >= 85) {
-    score = 90;
-    reasons.push('Trùng số học sinh và tên giống nhau');
-  } else if ((parentPhoneMatch || studentPhoneMatch) && exactNameMatch) {
+    reasons.push('Trung so dien thoai va ten giong nhau');
+  } else if (anyPhoneMatch && exactNameMatch) {
     score = 95;
-    reasons.push('Trùng số điện thoại và tên chính xác');
-  } else if (parentPhoneMatch || studentPhoneMatch) {
+    reasons.push('Trung so dien thoai va ten chinh xac');
+  } else if (anyPhoneMatch) {
     score = 75;
-    reasons.push('Trùng số điện thoại');
+    reasons.push('Trung so dien thoai');
   } else if (exactNameMatch && input.birthYear && input.birthYear === existing.birthYear) {
     score = 80;
     reasons.push('Trùng tên và năm sinh');
