@@ -256,14 +256,10 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
       ]);
 
       const allConflicts = [...existingStudents, ...existingTeachers];
-      const conflictTarget = allConflicts[0]; // For legacy compatibility if needed
-      const isSameTarget = allConflicts.some(c =>
-        (studentId && c.id === studentId) || (teacherId && c.id === teacherId)
-      );
 
       // Only warn if there are OTHER people already using this ID
       const otherConflicts = allConflicts.filter(c =>
-        (studentId && c.id !== studentId) || (teacherId && c.id !== teacherId)
+        !(studentId && c.id === studentId) && !(teacherId && c.id === teacherId)
       );
 
       if (otherConflicts.length > 0) {
@@ -308,13 +304,14 @@ router.post('/link', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
     res.json({ message: 'Liên kết thành công!', zaloUserId, targetId, targetType });
   } catch (err: any) {
     if (err.message === 'CONFLICT') {
-      const { conflictType, conflictId, conflictName } = err.conflictInfo;
+      const { conflictCount, conflictNames, conflictName, conflictId } = err.conflictInfo;
       return res.status(409).json({
         conflict: true,
-        message: `zalo_user_id này đang được ghép với ${conflictType === 'STUDENT' ? 'học sinh' : 'giáo viên'} "${conflictName}". Xác nhận override?`,
-        conflictType,
-        conflictId,
+        message: `Zalo ID này đang được ghép với: ${conflictNames}. Xác nhận dùng chung?`,
+        conflictCount,
+        conflictNames,
         conflictName,
+        conflictId,
       });
     }
     if (err.code === 'P2002') {
