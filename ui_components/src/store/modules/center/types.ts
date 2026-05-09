@@ -44,8 +44,11 @@ export interface Student {
   studentPhone?: string;
   tuitionStatus: 'PAID' | 'PENDING' | 'DEBT';
   notes?: string;
+  isActive?: boolean;
   sortOrder?: number;
 }
+
+
 
 export interface Class {
   id: string;

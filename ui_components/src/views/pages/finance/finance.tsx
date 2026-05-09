@@ -166,6 +166,20 @@ export const FinancialPage = () => {
   const [billPayNote, setBillPayNote] = useState('');
   const [billPayDate, setBillPayDate] = useState(new Date().toISOString().slice(0, 10));
 
+  // Cash Payment Modal
+  const [isCashPayOpen, setIsCashPayOpen] = useState(false);
+  const [cashStudentId, setCashStudentId] = useState('');
+  const [cashClassIds, setCashClassIds] = useState<string[]>([]);
+  const [cashBillingMonth, setCashBillingMonth] = useState(getCurrentMonth());
+  const [cashFromDate, setCashFromDate] = useState('');
+  const [cashToDate, setCashToDate] = useState('');
+  const [cashPreview, setCashPreview] = useState<{ sessionsDetail: Array<{ classId: string; className: string; sessions: number; pricePerSession: number; subtotal: number }>; amount: number } | null>(null);
+  const [cashAmountOverride, setCashAmountOverride] = useState('');
+  const [cashNote, setCashNote] = useState('');
+  const [cashDate, setCashDate] = useState(new Date().toISOString().slice(0, 10));
+  const [cashLoading, setCashLoading] = useState(false);
+
+
   const fetchTracking = () => {
     const token = auth?.token;
     if (!token) return;
@@ -279,7 +293,63 @@ export const FinancialPage = () => {
     }
   };
 
+  const fetchCashPreview = async () => {
+    if (!cashStudentId || !cashClassIds.length || !cashFromDate || !cashToDate) return;
+    try {
+      const r = await fetch('/api/finance/bills/preview', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${auth?.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentId: cashStudentId, coveredClassIds: cashClassIds, fromDate: cashFromDate, toDate: cashToDate })
+      });
+      if (r.ok) {
+        const data = await r.json();
+        setCashPreview(data);
+        setCashAmountOverride(String(data.amount));
+      }
+    } catch { toast.error('Lỗi tính học phí'); }
+  };
+
+  const handleCashPayment = async () => {
+    if (!cashStudentId || !cashClassIds.length || !cashFromDate || !cashToDate) {
+      toast.error('Vui lòng điền đầy đủ thông tin');
+      return;
+    }
+    const amount = parseInt(cashAmountOverride.replace(/\D/g, '') || '0');
+    if (!amount) { toast.error('Số tiền không hợp lệ'); return; }
+    setCashLoading(true);
+    try {
+      const r = await fetch('/api/finance/cash-payment', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${auth?.token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          studentId: cashStudentId,
+          coveredClassIds: cashClassIds,
+          fromDate: cashFromDate,
+          toDate: cashToDate,
+          billingMonth: cashBillingMonth || undefined,
+          totalAmountOverride: amount,
+          note: cashNote || undefined,
+          date: cashDate,
+        })
+      });
+      if (r.ok) {
+        const data = await r.json();
+        toast.success(`Đã ghi nhận tiền mặt — ${data.bill.referenceCode}`);
+        setIsCashPayOpen(false);
+        // Reset
+        setCashStudentId(''); setCashClassIds([]); setCashPreview(null);
+        setCashAmountOverride(''); setCashNote('');
+        fetchBills();
+      } else {
+        const d = await r.json();
+        toast.error(d.message || 'Lỗi ghi nhận');
+      }
+    } catch { toast.error('Lỗi kết nối'); }
+    finally { setCashLoading(false); }
+  };
+
   const handleCancelBill = async (id: string) => {
+
     if (!window.confirm('Bạn có chắc muốn hủy hóa đơn này?')) return;
     try {
       const r = await fetch(`/api/finance/bills/${id}`, {
@@ -1038,11 +1108,18 @@ export const FinancialPage = () => {
                   {billsLoading ? 'Đang tải...' : '↻ Làm mới'}
                 </button>
                 <button
+                  onClick={() => { setIsCashPayOpen(true); setCashDate(new Date().toISOString().slice(0, 10)); }}
+                  className="px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg flex items-center gap-2"
+                >
+                  <span className="text-sm">💵</span> Ghi nhận tiền mặt
+                </button>
+                <button
                   onClick={() => setIsCreateBillOpen(true)}
                   className="px-6 py-2.5 bg-hicado-navy text-hicado-emerald rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-105 transition-all shadow-lg"
                 >
                   + Tạo hóa đơn mới
                 </button>
+
               </div>
             </div>
 
@@ -1404,6 +1481,165 @@ export const FinancialPage = () => {
           </div>
         </div>
       )}
+
+      {/* ── CASH PAYMENT MODAL ── */}
+      {isCashPayOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-hicado-navy/80 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-lg shadow-2xl overflow-hidden border border-hicado-slate animate-in zoom-in-95 duration-300">
+            <div className="bg-emerald-600 p-6 text-white">
+              <p className="text-[10px] font-black uppercase tracking-widest mb-1">Cash Payment</p>
+              <h3 className="text-xl font-black">Ghi nhận tiền mặt</h3>
+              <p className="text-white/60 text-xs font-bold mt-1">Tạo hóa đơn PAID + Ghi nhận BillPayment</p>
+            </div>
+
+            <div className="p-8 space-y-5 overflow-y-auto max-h-[70vh] custom-scrollbar">
+              {/* Student picker */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Học sinh</label>
+                <select
+                  value={cashStudentId}
+                  onChange={e => { setCashStudentId(e.target.value); setCashClassIds([]); setCashPreview(null); }}
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent focus:border-hicado-navy/10 focus:bg-white rounded-xl px-4 py-3 text-sm font-bold text-hicado-navy outline-none"
+                >
+                  <option value="">-- Chọn học sinh --</option>
+                  {students.filter(s => s.isActive !== false).sort((a, b) => a.name.localeCompare(b.name, 'vi')).map(s => (
+                    <option key={s.id} value={s.id}>{s.name}{s.studentCode ? ` (${s.studentCode})` : ''}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {/* Billing month */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Tháng học phí</label>
+                  <input
+                    type="month"
+                    value={cashBillingMonth}
+                    onChange={e => setCashBillingMonth(e.target.value)}
+                    className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none"
+                  />
+                </div>
+                {/* Date of payment */}
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Ngày nộp</label>
+                  <input type="date" value={cashDate} onChange={e => setCashDate(e.target.value)}
+                    className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none" />
+                </div>
+              </div>
+
+              {/* Date range */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Từ ngày (tính buổi)</label>
+                  <input type="date" value={cashFromDate} onChange={e => { setCashFromDate(e.target.value); setCashPreview(null); }}
+                    className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-4 py-2.5 text-xs font-bold text-hicado-navy outline-none" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Đến ngày</label>
+                  <input type="date" value={cashToDate} onChange={e => { setCashToDate(e.target.value); setCashPreview(null); }}
+                    className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-4 py-2.5 text-xs font-bold text-hicado-navy outline-none" />
+                </div>
+              </div>
+
+              {/* Class multi-select */}
+              {cashStudentId && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Lớp học áp dụng</label>
+                  <div className="space-y-1 max-h-36 overflow-y-auto bg-hicado-slate/10 rounded-xl p-3 border border-hicado-slate">
+                    {classes
+                      .filter(c => c.studentIds?.includes(cashStudentId))
+                      .map(cls => (
+                        <label key={cls.id} className="flex items-center gap-2 text-xs font-bold text-hicado-navy cursor-pointer hover:bg-white/50 rounded px-1 py-1">
+                          <input
+                            type="checkbox"
+                            checked={cashClassIds.includes(cls.id)}
+                            onChange={e => {
+                              setCashClassIds(prev => e.target.checked ? [...prev, cls.id] : prev.filter(id => id !== cls.id));
+                              setCashPreview(null);
+                            }}
+                            className="rounded text-emerald-600 focus:ring-emerald-500"
+                          />
+                          {cls.name}
+                        </label>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Calculate button */}
+              {cashStudentId && cashClassIds.length > 0 && cashFromDate && cashToDate && (
+                <button onClick={fetchCashPreview} className="w-full py-3 bg-hicado-navy text-hicado-emerald rounded-xl text-[10px] font-black uppercase tracking-widest hover:scale-[1.02] active:scale-95 transition-all shadow-lg">
+                  🔢 Tính số buổi & học phí
+                </button>
+              )}
+
+              {/* Preview table */}
+              {cashPreview && (
+                <div className="bg-hicado-slate/20 rounded-2xl p-4 space-y-3">
+                  <table className="w-full text-[10px]">
+                    <thead>
+                      <tr className="text-hicado-navy/40 font-black uppercase tracking-widest text-left">
+                        <th className="pb-2">Lớp</th>
+                        <th className="pb-2 text-right">Buổi</th>
+                        <th className="pb-2 text-right">Thành tiền</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-hicado-navy/5">
+                      {cashPreview.sessionsDetail.map((row, i) => (
+                        <tr key={i}>
+                          <td className="py-2 font-black text-hicado-navy">{row.className}</td>
+                          <td className="py-2 text-right font-mono font-bold">{row.sessions}</td>
+                          <td className="py-2 text-right font-mono font-black">{row.subtotal.toLocaleString('vi-VN')}đ</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="flex justify-between pt-3 border-t-2 border-dashed border-hicado-navy/10 font-black text-sm">
+                    <span className="uppercase text-[10px] text-hicado-navy/40">Tổng cộng</span>
+                    <span className="text-emerald-600">{cashPreview.amount.toLocaleString('vi-VN')}đ</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Amount override */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Số tiền thực thu (VNĐ)</label>
+                <input
+                  type="text"
+                  value={cashAmountOverride ? parseInt(cashAmountOverride.replace(/\D/g, '') || '0').toLocaleString('vi-VN') : ''}
+                  onChange={e => setCashAmountOverride(e.target.value.replace(/\D/g, ''))}
+                  placeholder="Nhập số tiền..."
+                  className="w-full bg-hicado-slate/20 border-2 border-transparent focus:border-hicado-navy/10 focus:bg-white rounded-xl px-5 py-4 text-xl font-black text-hicado-navy outline-none transition-all"
+                />
+              </div>
+
+              {/* Note */}
+              <div className="space-y-1">
+                <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest ml-1">Ghi chú</label>
+                <input type="text" value={cashNote} onChange={e => setCashNote(e.target.value)}
+                  placeholder="VD: Nộp trực tiếp cho quản lý" className="w-full bg-hicado-slate/20 border-2 border-transparent rounded-xl px-4 py-3 text-sm font-bold text-hicado-navy outline-none" />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-4">
+                <button onClick={() => setIsCashPayOpen(false)}
+                  className="flex-1 py-4 text-sm font-black text-hicado-navy/40">
+                  HỦY
+                </button>
+                <button
+                  onClick={handleCashPayment}
+                  disabled={cashLoading || !cashStudentId || !cashClassIds.length || !cashFromDate || !cashToDate || !cashAmountOverride}
+                  className="flex-[2] py-4 bg-hicado-navy text-hicado-emerald rounded-2xl text-sm font-black uppercase tracking-widest shadow-xl disabled:opacity-40 hover:scale-[1.02] active:scale-95 transition-all"
+                >
+                  {cashLoading ? 'Đang lưu...' : '✓ Xác nhận thu tiền'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+
 
       {/* Bill Detail Slide-over */}
       {isBillDetailOpen && selectedBill && (
