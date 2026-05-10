@@ -83,7 +83,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           status: 'PRESENT',
           ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
         },
-        select: { studentId: true, classId: true, sessionUnits: true, date: true }
+        select: { studentId: true, classId: true, status: true, sessionUnits: true, date: true }
       },
       paymentAdjustments: {
         where: {
