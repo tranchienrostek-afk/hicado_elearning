@@ -49,6 +49,7 @@ export function buildZaloImageMessage(attachmentId: string, text?: string): Zalo
 
 export interface CustomTuitionPayload {
   className:       string;
+  teacherNames?:   string[];
   sessions:        number;
   pricePerSession: number;
   total:           number;
@@ -59,10 +60,13 @@ export interface CustomTuitionPayload {
   collectionTo?:   string;    // Collection to
 }
 
+const formatTeacherNames = (teacherNames?: string[]) =>
+  teacherNames?.length ? ` | Giáo viên: ${teacherNames.join(', ')}` : '';
+
 export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionPayload): string {
   const dateRange = p.fromDate && p.toDate ? ` từ ${p.fromDate} đến ${p.toDate}` : '';
   const itemLine = p.sessions > 0
-    ? `${p.className} | Số buổi học: ${p.sessions} | Học phí: ${p.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${p.total.toLocaleString('vi-VN')}đ`
+    ? `${p.className}${formatTeacherNames(p.teacherNames)} | Số buổi học: ${p.sessions} | Học phí: ${p.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${p.total.toLocaleString('vi-VN')}đ`
     : `(Không có buổi học trong kỳ)`;
 
   return [
@@ -86,7 +90,7 @@ export function buildMultiClassTuitionMessage(
 ): string {
   const dateRange = fromDate && toDate ? ` từ ${fromDate} đến ${toDate}` : '';
   const itemLines = items.length > 0
-    ? items.map(it => `${it.className} | Số buổi học: ${it.sessions} | Học phí: ${it.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
+    ? items.map(it => `${it.className}${formatTeacherNames(it.teacherNames)} | Số buổi học: ${it.sessions} | Học phí: ${it.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
     : ["(Không có buổi học trong kỳ)"];
 
   return [

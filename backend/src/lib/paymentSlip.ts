@@ -66,8 +66,16 @@ export interface MultiClassPaymentSlipOpts {
   studentName: string;
   studentCode: string;
   billingMonth?: string;
+  tuitionFromDate?: string;
+  tuitionToDate?: string;
+  collectionFromDate?: string;
+  collectionToDate?: string;
+  bankName?: string;
+  bankAccount?: string;
+  accountName?: string;
   items: Array<{
     className: string;
+    teacherNames?: string[];
     sessions: number;
     pricePerSession: number;
     subtotal: number;
@@ -77,11 +85,48 @@ export interface MultiClassPaymentSlipOpts {
   qrData: string;
 }
 
+const ascii = (value: string) => deaccent(value || '').toUpperCase();
+const money = (value: number) => `${Math.round(value || 0).toLocaleString('vi-VN')}D`;
+const shortText = (value: string, max = 34) => {
+  const text = ascii(value).replace(/\s+/g, ' ').trim();
+  return text.length > max ? `${text.slice(0, max - 1)}.` : text;
+};
+
+export function buildMultiClassPaymentSlipTextLines(opts: MultiClassPaymentSlipOpts): string[] {
+  const lines = [
+    `HOC SINH: ${ascii(opts.studentName)} (${opts.studentCode})`,
+  ];
+
+  if (opts.tuitionFromDate && opts.tuitionToDate) {
+    lines.push(`KY HOC PHI: ${opts.tuitionFromDate} - ${opts.tuitionToDate}`);
+  } else if (opts.billingMonth) {
+    lines.push(`KY HOC PHI: ${opts.billingMonth}`);
+  }
+
+  for (const item of opts.items) {
+    const teachers = item.teacherNames?.length ? item.teacherNames.join(', ') : 'Chua phan cong';
+    lines.push(
+      `${shortText(item.className, 18)} | GV: ${shortText(teachers, 18)} | ${item.sessions} BUOI | ${money(item.pricePerSession)} | ${money(item.subtotal)}`
+    );
+  }
+
+  lines.push(`TONG CONG: ${money(opts.totalAmount)}`);
+
+  if (opts.collectionFromDate && opts.collectionToDate) {
+    lines.push(`THOI GIAN THU: ${opts.collectionFromDate} - ${opts.collectionToDate}`);
+  }
+
+  const bankParts = [opts.bankName, opts.bankAccount, opts.accountName].filter(Boolean);
+  if (bankParts.length) lines.push(bankParts.map(part => ascii(String(part))).join(' | '));
+
+  lines.push(`NOI DUNG CK: ${ascii(opts.memo)}`);
+  return lines;
+}
+
 export async function buildMultiClassPaymentSlipPNG(opts: MultiClassPaymentSlipOpts): Promise<Buffer> {
   const W = 600;
-  // Calculate height based on items (header 84 + padding/info 120 + items * 30 + total 60 + QR 300 + footer 60)
-  const baseH = 580;
-  const itemsH = opts.items.length * 35;
+  const baseH = 690;
+  const itemsH = Math.max(opts.items.length, 1) * 50;
   const H = baseH + itemsH;
   
   const canvas = new Jimp(W, H, 0xFFFFFFFF);
@@ -103,19 +148,23 @@ export async function buildMultiClassPaymentSlipPNG(opts: MultiClassPaymentSlipO
 
   const px = 40;
   canvas.print(f32w, px, 14, 'HICADO');
-  canvas.print(f16w, px, 54, `THONG BAO HOC PHI ${opts.billingMonth ? `THANG ${opts.billingMonth}` : ''}`);
+  canvas.print(f16w, px, 54, 'THONG BAO HOC PHI');
 
   canvas.print(f16b, px, 110, `HOC SINH : ${deaccent(opts.studentName).toUpperCase()} (${opts.studentCode})`);
+  const periodText = opts.tuitionFromDate && opts.tuitionToDate
+    ? `KY HOC PHI: ${opts.tuitionFromDate} - ${opts.tuitionToDate}`
+    : (opts.billingMonth ? `KY HOC PHI: ${opts.billingMonth}` : '');
+  if (periodText) canvas.print(f14b, px, 134, periodText);
   
   // Table Header
-  let currY = 150;
+  let currY = 170;
   const sep = new Jimp(W - 80, 1, 0xE2E8F0FF);
   canvas.composite(sep, 40, currY);
   currY += 10;
-  canvas.print(f12b, px, currY, 'LOP HOC');
+  canvas.print(f12b, px, currY, 'LOP / GIAO VIEN');
   canvas.print(f12b, 300, currY, 'BUOI');
-  canvas.print(f12b, 380, currY, 'DON GIA');
-  canvas.print(f12b, 500, currY, 'THANH TIEN');
+  canvas.print(f12b, 365, currY, 'DON GIA');
+  canvas.print(f12b, 490, currY, 'THANH TIEN');
   
   currY += 25;
   canvas.composite(sep, 40, currY);
@@ -123,11 +172,13 @@ export async function buildMultiClassPaymentSlipPNG(opts: MultiClassPaymentSlipO
 
   // Items
   for (const item of opts.items) {
-    canvas.print(f14b, px, currY, deaccent(item.className).toUpperCase());
+    const teachers = item.teacherNames?.length ? item.teacherNames.join(', ') : 'Chua phan cong';
+    canvas.print(f14b, px, currY, shortText(item.className, 24));
+    canvas.print(f12b, px, currY + 18, `GV: ${shortText(teachers, 26)}`);
     canvas.print(f14b, 300, currY, String(item.sessions));
-    canvas.print(f14b, 380, currY, `${(item.pricePerSession/1000)}k`);
-    canvas.print(f14b, 500, currY, `${(item.subtotal).toLocaleString('vi-VN')}d`);
-    currY += 35;
+    canvas.print(f14b, 365, currY, money(item.pricePerSession));
+    canvas.print(f14b, 490, currY, money(item.subtotal));
+    currY += 50;
   }
 
   canvas.composite(sep, 40, currY);
@@ -135,9 +186,22 @@ export async function buildMultiClassPaymentSlipPNG(opts: MultiClassPaymentSlipO
   
   // Total
   canvas.print(f16b, px, currY + 10, 'TONG CONG:');
-  canvas.print(f32b, 300, currY, `${opts.totalAmount.toLocaleString('vi-VN')}d`);
+  canvas.print(f32b, 300, currY, money(opts.totalAmount));
   
-  currY += 60;
+  currY += 55;
+  if (opts.collectionFromDate && opts.collectionToDate) {
+    canvas.print(f14b, px, currY, `THOI GIAN THU: ${opts.collectionFromDate} - ${opts.collectionToDate}`);
+    currY += 28;
+  }
+
+  if (opts.bankName || opts.bankAccount || opts.accountName) {
+    canvas.print(f12b, px, currY, `NH: ${shortText(opts.bankName || '', 20)} | STK: ${opts.bankAccount || ''}`);
+    currY += 20;
+    if (opts.accountName) {
+      canvas.print(f12b, px, currY, `TEN TK: ${shortText(opts.accountName, 42)}`);
+      currY += 22;
+    }
+  }
   
   // QR Section
   const qrSize = 280;
@@ -150,11 +214,10 @@ export async function buildMultiClassPaymentSlipPNG(opts: MultiClassPaymentSlipO
   currY += qrSize + 30;
   
   canvas.print(f12b, px, currY, 'NOI DUNG CHUYEN KHOAN:');
-  canvas.print(f16b, px, currY + 20, deaccent(opts.memo).toUpperCase());
+  canvas.print(f16b, px, currY + 20, ascii(opts.memo));
   
   currY += 60;
   canvas.print(f12b, px, currY, 'Trung tam Hicado | hicado-elearning.onrender.com');
 
   return canvas.getBufferAsync(Jimp.MIME_PNG) as Promise<Buffer>;
 }
-

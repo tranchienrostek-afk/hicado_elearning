@@ -541,7 +541,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     });
   }
   
-  const bankCfg = await prisma.systemConfig.findMany({ where: { key: { in: ['BANK_BIN', 'BANK_ACC'] } } });
+  const bankCfg = await prisma.systemConfig.findMany({ where: { key: { in: ['BANK_BIN', 'BANK_ACC', 'BANK_NAME', 'BANK_LABEL'] } } });
   const bm = bankCfg.reduce((a: any, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
 
   let sentCount = 0;
@@ -563,11 +563,16 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       }
 
       const coveredClasses = coveredClassIds.length
-        ? await prisma.class.findMany({ where: { id: { in: coveredClassIds } }, select: { id: true, name: true } })
+        ? await prisma.class.findMany({
+            where: { id: { in: coveredClassIds } },
+            select: { id: true, name: true, teacher: { select: { name: true } } }
+          })
         : [];
       const coveredClassName = coveredClasses.map(c => c.name).join(' + ') || 'Manual tuition';
+      const teacherNames = coveredClasses.map(c => c.teacher?.name).filter(Boolean) as string[];
       const payload: CustomTuitionPayload = {
         className: coveredClassName,
+        teacherNames,
         sessions: item.sessions,
         pricePerSession: item.pricePerSession,
         total,
@@ -618,7 +623,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       const user = (req as any).user;
       let billId: string | null = null;
       let billRef: string | null = null;
-      let billDetail: Array<{ classId: string; className: string; sessions: number; pricePerSession: number; subtotal: number }> = [];
+      let billDetail: Array<{ classId: string; className: string; teacherNames?: string[]; sessions: number; pricePerSession: number; subtotal: number }> = [];
 
       // Phase 3: Pre-create TuitionBill. This endpoint is intentionally manual:
       // the operator-provided sessions, unit price, and override total are the source of truth.
@@ -626,6 +631,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
         billDetail = [{
           classId: coveredClassIds[0] || '',
           className: coveredClassName,
+          teacherNames,
           sessions: item.sessions,
           pricePerSession: item.pricePerSession,
           subtotal: total,
@@ -688,6 +694,13 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
                 studentName: student.name,
                 studentCode: student.studentCode || student.id,
                 billingMonth: billingMonth,
+                tuitionFromDate: fmtFrom,
+                tuitionToDate: fmtTo,
+                collectionFromDate: fmtCollFrom,
+                collectionToDate: fmtCollTo,
+                bankName: bm.BANK_NAME || bm.BANK_LABEL || '',
+                bankAccount: bm.BANK_ACC || process.env.BANK_ACC || '',
+                accountName: bm.BANK_NAME || '',
                 items: billItems,
                 totalAmount: total,
                 memo: memo,
@@ -843,7 +856,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
         include: {
           classes: { 
             include: { 
-              class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true } } 
+              class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, teacher: { select: { name: true } } } } 
             } 
           },
           attendances: {
@@ -890,6 +903,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
           classId: c.classId, 
           className: c.class.name, 
           classCode: c.class.classCode, 
+          teacherNames: c.class.teacher?.name ? [c.class.teacher.name] : [],
           attended, 
           tuitionPerSession: c.class.tuitionPerSession, 
           subtotal 
@@ -903,6 +917,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
       mainClass: { 
         classId: primaryId, 
         className: mainClass?.class.name ?? '',
+        teacherNames: mainClass?.class.teacher?.name ? [mainClass.class.teacher.name] : [],
         attended: mainAttended, 
         tuitionPerSession: mainClass?.class.tuitionPerSession ?? 0,
         subtotal: mainSubtotal

@@ -78,7 +78,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     include: {
       classes: {
         ...(filters.classIds?.length ? { where: { classId: { in: filters.classIds } } } : {}),
-        include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } },
+        include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true, teacher: { select: { name: true } } } } },
       },
       attendances: {
         where: {
@@ -95,7 +95,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     },
   });
 
-  const bankCfg = await prisma.systemConfig.findMany({ where: { key: { in: ['BANK_BIN', 'BANK_ACC'] } } });
+  const bankCfg = await prisma.systemConfig.findMany({ where: { key: { in: ['BANK_BIN', 'BANK_ACC', 'BANK_NAME', 'BANK_LABEL'] } } });
   const bm = bankCfg.reduce((a: any, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
   const appBaseUrl = process.env.APP_URL || `https://${req.get('host')}`;
 
@@ -224,13 +224,16 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     const trace: string[] = [];
     let message: any;
     let billId: string | null = null;
-    let billDetail: Array<{ classId: string; className: string; sessions: number; pricePerSession: number; subtotal: number }> = [];
+    let billDetail: Array<{ classId: string; className: string; teacherNames?: string[]; sessions: number; pricePerSession: number; subtotal: number }> = [];
 
     if (type === 'TUITION_REMINDER') {
       trace.push('①BILL...');
       let billRef = '';
       try {
-        const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
+        const classes = await prisma.class.findMany({
+          where: { id: { in: coveredClassIds } },
+          include: { teacher: { select: { name: true } } }
+        });
         billDetail = await Promise.all(classes.map(async (cls) => {
           const cs = student.classes.find((c: any) => c.classId === cls.id);
           const classAtts = student.attendances.filter((a: any) => a.classId === cls.id);
@@ -240,6 +243,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           return {
             classId: cls.id,
             className: cls.name,
+            teacherNames: cls.teacher?.name ? [cls.teacher.name] : [],
             sessions: sess,
             pricePerSession: (cs as any)?.customTuitionPerSession != null ? (cs as any).customTuitionPerSession : cls.tuitionPerSession,
             subtotal
@@ -296,6 +300,13 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
         const pngBuffer = await buildMultiClassPaymentSlipPNG({
           studentName: student.name, studentCode: student.studentCode ?? student.id,
           billingMonth: filters.billingMonth,
+          tuitionFromDate: fmtFrom,
+          tuitionToDate: fmtTo,
+          collectionFromDate: fmtCollFrom,
+          collectionToDate: fmtCollTo,
+          bankName: bm.BANK_NAME || bm.BANK_LABEL || '',
+          bankAccount: bm.BANK_ACC || process.env.BANK_ACC || '',
+          accountName: bm.BANK_NAME || '',
           items: billItems,
           totalAmount: totalDue, memo, qrData,
         });

@@ -23,8 +23,8 @@ interface MultiClassPreviewItem {
   studentName: string;
   studentCode?: string;
   hasZalo: boolean;
-  mainClass: { classId: string; className: string; attended: number; tuitionPerSession: number; subtotal: number };
-  otherClasses: Array<{ classId: string; className: string; classCode?: string; attended: number; tuitionPerSession: number; subtotal: number }>;
+  mainClass: { classId: string; className: string; teacherNames?: string[]; attended: number; tuitionPerSession: number; subtotal: number };
+  otherClasses: Array<{ classId: string; className: string; classCode?: string; teacherNames?: string[]; attended: number; tuitionPerSession: number; subtotal: number }>;
   alreadySent: boolean;
   sentLogs: Array<{ sentAt: string; coveredClassIds: string[] }>;
 }
@@ -1175,12 +1175,12 @@ export const ZaloCampaignPage = () => {
                     const fmtCollTo = collectionToDate ? fmt(collectionToDate) : '';
 
                     const allItems = mc
-                      ? [{ name: mc.mainClass.className, sessions: mc.mainClass.attended, price: mc.mainClass.tuitionPerSession, subtotal: mc.mainClass.subtotal },
-                         ...mc.otherClasses.map(o => ({ name: o.className, sessions: o.attended, price: o.tuitionPerSession, subtotal: o.subtotal }))]
+                      ? [{ name: mc.mainClass.className, teacherNames: mc.mainClass.teacherNames ?? [], sessions: mc.mainClass.attended, price: mc.mainClass.tuitionPerSession, subtotal: mc.mainClass.subtotal },
+                         ...mc.otherClasses.map(o => ({ name: o.className, teacherNames: o.teacherNames ?? [], sessions: o.attended, price: o.tuitionPerSession, subtotal: o.subtotal }))]
                       : [];
                     const total = allItems.reduce((sum, it) => sum + it.subtotal, 0);
                     const itemLines = allItems.length > 0
-                      ? allItems.map(it => `${it.name} | Số buổi học: ${it.sessions} | Học phí: ${it.price.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
+                      ? allItems.map(it => `${it.name}${it.teacherNames.length ? ` | Giáo viên: ${it.teacherNames.join(', ')}` : ''} | Số buổi học: ${it.sessions} | Học phí: ${it.price.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
                       : ["(Không có buổi học trong kỳ)"];
 
                     const previewText = [
@@ -1196,11 +1196,44 @@ export const ZaloCampaignPage = () => {
                       `Trân trọng - Hicado Center`,
                     ].join('\n');
                     return (
-                      <details key={s.id} className="border border-hicado-slate rounded-2xl p-4 bg-white" open={recipientPreview.length <= 3}>
-                        <summary className="cursor-pointer font-black text-hicado-navy flex justify-between gap-3">
-                          <span>{s.name}</span>
-                          <span className="text-xs text-hicado-emerald">{total.toLocaleString('vi-VN')}đ</span>
+                      <details key={s.id} className="border border-hicado-slate rounded-[1.75rem] p-4 bg-white shadow-sm" open={recipientPreview.length <= 3}>
+                        <summary className="cursor-pointer font-black text-hicado-navy flex justify-between gap-3 items-center">
+                          <span className="flex items-center gap-2">
+                            <span className="w-8 h-8 rounded-2xl bg-hicado-navy text-white grid place-items-center text-[10px]">HS</span>
+                            <span>{s.name}</span>
+                          </span>
+                          <span className={`text-xs px-3 py-1 rounded-full ${total > 0 ? 'bg-hicado-emerald/10 text-hicado-emerald' : 'bg-red-50 text-red-600'}`}>{total.toLocaleString('vi-VN')}đ</span>
                         </summary>
+                        <div className="mt-4 grid gap-3">
+                          <div className="grid md:grid-cols-2 gap-3">
+                            <div className="rounded-2xl border border-hicado-slate bg-hicado-slate/10 p-3">
+                              <p className="text-[10px] uppercase tracking-widest font-black text-hicado-navy/35">Kỳ học phí</p>
+                              <p className="text-sm font-black text-hicado-navy mt-1">{fmtFrom} đến {fmtTo}</p>
+                            </div>
+                            <div className="rounded-2xl border border-hicado-slate bg-hicado-slate/10 p-3">
+                              <p className="text-[10px] uppercase tracking-widest font-black text-hicado-navy/35">Thời gian thu</p>
+                              <p className="text-sm font-black text-hicado-navy mt-1">{fmtCollFrom} đến {fmtCollTo}</p>
+                            </div>
+                          </div>
+                          <div className="rounded-2xl border border-hicado-slate overflow-hidden">
+                            <div className="grid grid-cols-[1.4fr_.7fr_.8fr_.8fr] bg-hicado-slate/20 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-hicado-navy/45">
+                              <span>Lớp / Giáo viên</span><span>Buổi</span><span>Học phí</span><span>Thành tiền</span>
+                            </div>
+                            {allItems.length > 0 ? allItems.map(it => (
+                              <div key={`${s.id}-${it.name}`} className="grid grid-cols-[1.4fr_.7fr_.8fr_.8fr] gap-2 px-3 py-3 border-t border-hicado-slate/60 text-xs">
+                                <div>
+                                  <p className="font-black text-hicado-navy">{it.name}</p>
+                                  <p className="text-[10px] font-bold text-hicado-navy/40">{it.teacherNames.length ? it.teacherNames.join(', ') : 'Chưa có giáo viên'}</p>
+                                </div>
+                                <span className="font-bold text-hicado-navy">{it.sessions}</span>
+                                <span className="font-bold text-hicado-navy">{it.price.toLocaleString('vi-VN')}đ</span>
+                                <span className="font-black text-hicado-emerald">{it.subtotal.toLocaleString('vi-VN')}đ</span>
+                              </div>
+                            )) : (
+                              <div className="px-3 py-3 text-xs font-bold text-red-600">Không có buổi học trong kỳ, cần kiểm tra lại trước khi gửi.</div>
+                            )}
+                          </div>
+                        </div>
                         <div className="mt-3 bg-[#e7f3ff] rounded-xl p-4 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed border border-blue-100">
                           {previewText}
                         </div>
