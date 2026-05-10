@@ -474,6 +474,8 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     templateId,
     fromDate,
     toDate,
+    collectionFromDate,
+    collectionToDate,
     studentCoveredClasses = {},
     forceResendStudentIds = [],
     billingMonth
@@ -485,6 +487,8 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     templateId?: string;
     fromDate?: string;
     toDate?: string;
+    collectionFromDate?: string;
+    collectionToDate?: string;
     studentCoveredClasses?: Record<string, string[]>;
     forceResendStudentIds?: string[];
     billingMonth?: string;
@@ -651,10 +655,19 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       const fmt = (d: string | Date) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
       const fmtFrom = fromDate ? fmt(fromDate) : undefined;
       const fmtTo = toDate ? fmt(toDate) : undefined;
+      const fmtCollFrom = collectionFromDate ? fmt(collectionFromDate) : undefined;
+      const fmtCollTo = collectionToDate ? fmt(collectionToDate) : undefined;
 
       const messageText = billItems.length > 1
-        ? buildMultiClassTuitionMessage(student.name, billItems, total, fmtFrom, fmtTo)
-        : buildCustomTuitionMessage(student.name, { ...payload, className: billItems[0]?.className ?? '', fromDate: fmtFrom, toDate: fmtTo });
+        ? buildMultiClassTuitionMessage(student.name, billItems, total, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo)
+        : buildCustomTuitionMessage(student.name, { 
+            ...payload, 
+            className: billItems[0]?.className ?? '', 
+            fromDate: fmtFrom, 
+            toDate: fmtTo,
+            collectionFrom: fmtCollFrom,
+            collectionTo: fmtCollTo
+          });
 
       let success = false;
       let channel: 'CS' | 'ZNS' | 'NONE' = 'NONE';

@@ -51,6 +51,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       znsTemplateId?: string;
       fromDate?: string;
       toDate?: string;
+      collectionFromDate?: string;
+      collectionToDate?: string;
       studentCoveredClasses?: Record<string, string[]>;
       forceResendStudentIds?: string[];
       billingMonth?: string;
@@ -271,9 +273,11 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       const fmt = (d: string | Date) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
       const fmtFrom = from ? fmt(from) : undefined;
       const fmtTo = to ? fmt(to) : undefined;
+      const fmtCollFrom = filters.collectionFromDate ? fmt(filters.collectionFromDate) : undefined;
+      const fmtCollTo = filters.collectionToDate ? fmt(filters.collectionToDate) : undefined;
 
       const textMessage = billItems.length > 1 
-        ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, fmtFrom, fmtTo)
+        ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo)
         : buildCustomTuitionMessage(student.name, { 
             className: billItems[0]?.className ?? '',
             sessions: billItems[0]?.sessions || 0, 
@@ -281,7 +285,9 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
             total: totalDue, 
             note: periodStr,
             fromDate: fmtFrom,
-            toDate: fmtTo
+            toDate: fmtTo,
+            collectionFrom: fmtCollFrom,
+            collectionTo: fmtCollTo
           });
 
       // Step 2: Build PNG

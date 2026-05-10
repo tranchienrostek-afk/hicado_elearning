@@ -110,6 +110,8 @@ export const ZaloCampaignPage = () => {
   const [wizardFromDate, setWizardFromDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().slice(0, 10));
   const [wizardToDate, setWizardToDate] = useState(new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().slice(0, 10));
   const [wizardBillingMonth, setWizardBillingMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`);
+  const [collectionFromDate, setCollectionFromDate] = useState(new Date().toISOString().slice(0, 10));
+  const [collectionToDate, setCollectionToDate] = useState(new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
 
   // Custom Tuition State (Task #9)
   const [customTuitionItems, setCustomTuitionItems] = useState<Record<string, { sessions: number; pricePerSession: number; totalOverride?: number; note?: string }>>({});
@@ -282,6 +284,8 @@ export const ZaloCampaignPage = () => {
             templateId: customSendVia !== 'CS' ? wizardZnsTemplateId : undefined,
             fromDate: wizardFromDate,
             toDate: wizardToDate,
+            collectionFromDate,
+            collectionToDate,
             studentCoveredClasses: buildStudentCoveredClasses(),
             forceResendStudentIds: buildForceResendStudentIds(),
             billingMonth: wizardBillingMonth,
@@ -315,6 +319,8 @@ export const ZaloCampaignPage = () => {
             znsTemplateId: wizardFallbackZNS ? wizardZnsTemplateId : undefined,
             fromDate: wizardFromDate,
             toDate: wizardToDate,
+            collectionFromDate,
+            collectionToDate,
             studentCoveredClasses: buildStudentCoveredClasses(),
             forceResendStudentIds: buildForceResendStudentIds(),
             billingMonth: wizardBillingMonth,
@@ -339,6 +345,8 @@ export const ZaloCampaignPage = () => {
     setStep(1); setWizardName(''); setWizardType('TUITION_REMINDER');
     setWizardClassIds([]); setWizardStatuses(['PENDING', 'DEBT']); setWizardRequireZalo(true);
     setWizardMessage(''); setSendResult(null); setCustomTuitionItems({}); setMergeOptions({}); setCustomSendVia('AUTO');
+    setCollectionFromDate(new Date().toISOString().slice(0, 10));
+    setCollectionToDate(new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   };
 
   // ── Followers helpers ──────────────────────────────────────────────────────
@@ -839,6 +847,27 @@ export const ZaloCampaignPage = () => {
                     </div>
                   </div>
 
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Hạn thu: Từ ngày</label>
+                      <input
+                        type="date"
+                        value={collectionFromDate}
+                        onChange={e => setCollectionFromDate(e.target.value)}
+                        className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Hạn thu: Đến ngày</label>
+                      <input
+                        type="date"
+                        value={collectionToDate}
+                        onChange={e => setCollectionToDate(e.target.value)}
+                        className="w-full bg-hicado-slate/20 border border-transparent rounded-xl px-4 py-2.5 text-sm font-bold text-hicado-navy outline-none focus:bg-white focus:border-hicado-navy/30"
+                      />
+                    </div>
+                  </div>
+
                   <div className="space-y-1">
                     <label className="text-[10px] font-black text-hicado-navy/40 uppercase tracking-widest block mb-2">Kỳ thu học phí (Tháng)</label>
                     <input
@@ -1098,6 +1127,8 @@ export const ZaloCampaignPage = () => {
                     const fmt = (d: string) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
                     const fmtFrom = wizardFromDate ? fmt(wizardFromDate) : '';
                     const fmtTo = wizardToDate ? fmt(wizardToDate) : '';
+                    const fmtCollFrom = collectionFromDate ? fmt(collectionFromDate) : '';
+                    const fmtCollTo = collectionToDate ? fmt(collectionToDate) : '';
                     
                     return (
                       <details key={s.id} className="border border-hicado-slate rounded-2xl p-4 bg-white" open={recipientPreview.length <= 3}>
@@ -1116,12 +1147,14 @@ export const ZaloCampaignPage = () => {
                               const names = coveredIds.map(cid => classes.find(c => c.id === cid)?.name || cid).join(' + ');
                               const cItem = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
                               const subtotal = cItem.totalOverride ?? (cItem.sessions * cItem.pricePerSession);
-                              return `${names}   ${cItem.sessions} buổi   ${(cItem.pricePerSession/1000).toFixed(0)}k/buổi   ${subtotal.toLocaleString('vi-VN')}đ`;
+                              return cItem.sessions > 0
+                                ? `${names} | Số buổi học: ${cItem.sessions} | Học phí: ${cItem.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`
+                                : `(Không có buổi học trong kỳ)`;
                             })(),
                             ``,
                             `Tổng cộng: ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}đ`,
                             `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-                            `Thời gian thu: từ ngày ${fmtFrom} đến ngày ${fmtTo}`,
+                            `Thời gian thu: từ ngày ${fmtCollFrom} đến ngày ${fmtCollTo}`,
                             `Phụ huynh vui lòng thanh toán đúng hạn`,
                             `Trân trọng - Hicado Center`,
                           ].join('\n')}
@@ -1138,21 +1171,27 @@ export const ZaloCampaignPage = () => {
                     const fmt = (d: string) => new Date(d).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
                     const fmtFrom = wizardFromDate ? fmt(wizardFromDate) : '';
                     const fmtTo = wizardToDate ? fmt(wizardToDate) : '';
+                    const fmtCollFrom = collectionFromDate ? fmt(collectionFromDate) : '';
+                    const fmtCollTo = collectionToDate ? fmt(collectionToDate) : '';
 
                     const allItems = mc
                       ? [{ name: mc.mainClass.className, sessions: mc.mainClass.attended, price: mc.mainClass.tuitionPerSession, subtotal: mc.mainClass.subtotal },
                          ...mc.otherClasses.map(o => ({ name: o.className, sessions: o.attended, price: o.tuitionPerSession, subtotal: o.subtotal }))]
                       : [];
                     const total = allItems.reduce((sum, it) => sum + it.subtotal, 0);
+                    const itemLines = allItems.length > 0
+                      ? allItems.map(it => `${it.name} | Số buổi học: ${it.sessions} | Học phí: ${it.price.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
+                      : ["(Không có buổi học trong kỳ)"];
+
                     const previewText = [
                       `Kính gửi phụ huynh em ${s.name}`,
                       `Trung tâm Hicado xin thông báo học phí từ ${fmtFrom} đến ${fmtTo}`,
                       ``,
-                      ...allItems.map(it => `${it.name}   ${it.sessions} buổi   ${(it.price/1000).toFixed(0)}k/buổi   ${it.subtotal.toLocaleString('vi-VN')}đ`),
+                      ...itemLines,
                       ``,
                       `Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
                       `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-                      `Thời gian thu: từ ngày ${fmtFrom} đến ngày ${fmtTo}`,
+                      `Thời gian thu: từ ngày ${fmtCollFrom} đến ngày ${fmtCollTo}`,
                       `Phụ huynh vui lòng thanh toán đúng hạn`,
                       `Trân trọng - Hicado Center`,
                     ].join('\n');

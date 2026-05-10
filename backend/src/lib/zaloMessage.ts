@@ -53,21 +53,27 @@ export interface CustomTuitionPayload {
   pricePerSession: number;
   total:           number;
   note?:           string;
-  fromDate?:       string;  // "dd/MM/yyyy"
-  toDate?:         string;
+  fromDate?:       string;  // Tuition from
+  toDate?:         string;    // Tuition to
+  collectionFrom?: string;  // Collection from
+  collectionTo?:   string;    // Collection to
 }
 
 export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionPayload): string {
   const dateRange = p.fromDate && p.toDate ? ` từ ${p.fromDate} đến ${p.toDate}` : '';
+  const itemLine = p.sessions > 0
+    ? `${p.className} | Số buổi học: ${p.sessions} | Học phí: ${p.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${p.total.toLocaleString('vi-VN')}đ`
+    : `(Không có buổi học trong kỳ)`;
+
   return [
     `Kính gửi phụ huynh em ${studentName}`,
     `Trung tâm Hicado xin thông báo học phí${dateRange}`,
     ``,
-    `${p.className}   ${p.sessions} buổi   ${(p.pricePerSession/1000).toFixed(0)}k/buổi   ${p.total.toLocaleString('vi-VN')}đ`,
+    itemLine,
     ``,
     `Tổng cộng: ${p.total.toLocaleString('vi-VN')}đ`,
     `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-    p.fromDate && p.toDate ? `Thời gian thu: từ ngày ${p.fromDate} đến ngày ${p.toDate}` : null,
+    p.collectionFrom && p.collectionTo ? `Thời gian thu: từ ngày ${p.collectionFrom} đến ngày ${p.collectionTo}` : null,
     `Phụ huynh vui lòng thanh toán đúng hạn`,
     `Trân trọng - Hicado Center`,
   ].filter(Boolean).join('\n');
@@ -75,12 +81,14 @@ export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionP
 
 export function buildMultiClassTuitionMessage(
   studentName: string, items: any[], total: number,
-  fromDate?: string, toDate?: string
+  fromDate?: string, toDate?: string,
+  collectionFrom?: string, collectionTo?: string
 ): string {
   const dateRange = fromDate && toDate ? ` từ ${fromDate} đến ${toDate}` : '';
-  const itemLines = items.map(it =>
-    `${it.className}   ${it.sessions} buổi   ${(it.pricePerSession/1000).toFixed(0)}k/buổi   ${it.subtotal.toLocaleString('vi-VN')}đ`
-  );
+  const itemLines = items.length > 0
+    ? items.map(it => `${it.className} | Số buổi học: ${it.sessions} | Học phí: ${it.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
+    : ["(Không có buổi học trong kỳ)"];
+
   return [
     `Kính gửi phụ huynh em ${studentName}`,
     `Trung tâm Hicado xin thông báo học phí${dateRange}`,
@@ -89,7 +97,7 @@ export function buildMultiClassTuitionMessage(
     ``,
     `Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
     `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-    fromDate && toDate ? `Thời gian thu: từ ngày ${fromDate} đến ngày ${toDate}` : null,
+    collectionFrom && collectionTo ? `Thời gian thu: từ ngày ${collectionFrom} đến ngày ${collectionTo}` : null,
     `Phụ huynh vui lòng thanh toán đúng hạn`,
     `Trân trọng - Hicado Center`,
   ].filter(Boolean).join('\n');
