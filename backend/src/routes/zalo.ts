@@ -816,14 +816,15 @@ router.get('/tuition/check-sent', authenticateToken, authorizeRoles('ADMIN', 'MA
 
 // 5d. Preview Multi-class (Task #10)
 router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
-  const { classId, fromDate, toDate } = req.query as Record<string, string>;
-  if (!isNonEmptyString(classId)) return res.status(400).json({ message: 'Missing classId' });
+  const { classId, classIds: classIdsRaw, fromDate, toDate } = req.query as Record<string, string>;
   let from: Date | null = null;
   let to: Date | null = null;
   try { ({ from, to } = normalizeDateRange(fromDate, toDate)); } catch (err: any) { return res.status(400).json({ message: err.message }); }
 
+  const classIds = classIdsRaw ? classIdsRaw.split(',') : (classId ? [classId] : []);
+
   const classStudents = await prisma.classStudent.findMany({
-    where: { classId },
+    where: classIds.length > 0 ? { classId: { in: classIds } } : {},
     include: {
       student: {
         include: {
@@ -857,8 +858,9 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
 
   const results = classStudents.map(cs => {
     const s = cs.student;
-    const mainClass = s.classes.find(c => c.classId === classId);
-    const mainClassAtts = s.attendances.filter(a => a.classId === classId);
+    const primaryId = classIds.length > 0 ? (classIds.includes(classId) ? classId : classIds[0]) : (s.classes[0]?.classId);
+    const mainClass = s.classes.find(c => c.classId === primaryId);
+    const mainClassAtts = s.attendances.filter(a => a.classId === primaryId);
     const mainAttended = mainClassAtts.reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
     
     const mainSubtotal = expectedForStudentClass(
@@ -866,7 +868,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
     );
 
     const otherClasses = s.classes
-      .filter(c => c.classId !== classId)
+      .filter(c => c.classId !== primaryId)
       .map(c => {
         const atts = s.attendances.filter(a => a.classId === c.classId);
         const attended = atts.reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
@@ -886,7 +888,7 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
       studentId: s.id, studentName: s.name, studentCode: s.studentCode,
       hasZalo: !!s.zaloUserId,
       mainClass: { 
-        classId, 
+        classId: primaryId, 
         className: mainClass?.class.name ?? '',
         attended: mainAttended, 
         tuitionPerSession: mainClass?.class.tuitionPerSession ?? 0,

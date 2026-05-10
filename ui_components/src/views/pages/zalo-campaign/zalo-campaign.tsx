@@ -452,11 +452,12 @@ export const ZaloCampaignPage = () => {
 
   useEffect(() => {
 
-    if (activeTab === 'create' && step === 3 && wizardType === 'TUITION_REMINDER' && wizardClassIds.length === 1) {
+    if (activeTab === 'create' && step === 3 && wizardType === 'TUITION_REMINDER') {
       const fetchPreview = async () => {
         setIsPreviewLoading(true);
         try {
-          const r = await fetch(`/api/zalo/tuition/preview-multiclass?classId=${wizardClassIds[0]}&fromDate=${wizardFromDate}&toDate=${wizardToDate}`, { headers: authHeaders });
+          const ids = wizardClassIds.join(',');
+          const r = await fetch(`/api/zalo/tuition/preview-multiclass?classIds=${ids}&fromDate=${wizardFromDate}&toDate=${wizardToDate}`, { headers: authHeaders });
           if (r.ok) setMultiClassPreview(await r.json());
         } catch { console.error('Failed to fetch multi-class preview'); }
         finally { setIsPreviewLoading(false); }
