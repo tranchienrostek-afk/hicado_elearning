@@ -332,7 +332,18 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
         where: studentWhere,
         include: {
           classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } } },
-          attendances: { where: { status: 'PRESENT' }, select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true } },
+          attendances: { 
+            where: { 
+              status: 'PRESENT',
+              ...(dateFrom || dateTo ? { 
+                date: { 
+                  ...(dateFrom ? { gte: new Date(dateFrom) } : {}), 
+                  ...(dateTo ? { lte: (() => { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); return d; })() } : {})
+                } 
+              } : {})
+            }, 
+            select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true } 
+          },
         },
         orderBy: { name: 'asc' },
       }),

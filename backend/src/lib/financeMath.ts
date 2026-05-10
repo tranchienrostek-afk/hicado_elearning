@@ -61,11 +61,7 @@ export function expectedForStudentClass(
 ): number {
   if (!attendances) return (override?.customTuitionPerSession ?? classItem.tuitionPerSession) * classItem.totalSessions;
   
-  const studentAttendances = attendances.filter(a => 
-    a.classId === classItem.id && 
-    a.studentId === studentId && 
-    a.status === 'PRESENT'
-  );
+  const studentAttendances = attendances || [];
   
   let total = 0;
   for (const att of studentAttendances) {

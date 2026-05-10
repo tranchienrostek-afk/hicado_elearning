@@ -827,7 +827,11 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
     include: {
       student: {
         include: {
-          classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true } } } },
+          classes: { 
+            include: { 
+              class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true } } 
+            } 
+          },
           attendances: {
             where: { status: 'PRESENT', ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {}) },
             select: { studentId: true, classId: true, status: true, sessionUnits: true, date: true }
