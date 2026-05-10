@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCenterStore, useAuthStore } from '@/store';
+import { shouldLoadMultiClassPreview } from '@/utils/zalo-campaign-preview';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MainTab = 'campaigns' | 'create' | 'tracking' | 'followers' | 'mapping' | 'config';
@@ -459,8 +460,7 @@ export const ZaloCampaignPage = () => {
   }, [activeTab, step, wizardType, recipientPreview, classes, primaryWizardClassId, customGlobalSessions, customGlobalPrice]);
 
   useEffect(() => {
-
-    if (activeTab === 'create' && step === 3 && wizardType === 'TUITION_REMINDER') {
+    if (shouldLoadMultiClassPreview(activeTab, step, wizardType)) {
       const fetchPreview = async () => {
         setIsPreviewLoading(true);
         try {
