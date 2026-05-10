@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCenterStore, useAuthStore } from '@/store';
-import { shouldLoadMultiClassPreview } from '@/utils/zalo-campaign-preview';
+import { getUnconfirmedAlreadySentRecipients, shouldLoadMultiClassPreview } from '@/utils/zalo-campaign-preview';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MainTab = 'campaigns' | 'create' | 'tracking' | 'followers' | 'mapping' | 'config';
@@ -124,6 +124,7 @@ export const ZaloCampaignPage = () => {
   const [multiClassPreview, setMultiClassPreview] = useState<MultiClassPreviewItem[]>([]);
   const [mergeOptions, setMergeOptions] = useState<Record<string, MergeOption>>({});
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [resendConfirmStudents, setResendConfirmStudents] = useState<Array<{ id: string; name: string }>>([]);
 
   // ── Followers ──────────────────────────────────────────────────────────────
   const [followers, setFollowers] = useState<Follower[]>([]);
@@ -239,7 +240,13 @@ export const ZaloCampaignPage = () => {
     recipientPreview.forEach(s => { result[s.id] = getCoveredClassIdsForStudent(s.id); });
     return result;
   };
-  const buildForceResendStudentIds = () => recipientPreview.filter(s => getMergeOption(s.id).forceResend).map(s => s.id);
+  const buildForceResendStudentIds = (forceAllAlreadySent = false) => {
+    const selected = recipientPreview.filter(s => getMergeOption(s.id).forceResend).map(s => s.id);
+    if (!forceAllAlreadySent) return selected;
+
+    const alreadySent = multiClassPreview.filter(item => item.alreadySent).map(item => item.studentId);
+    return Array.from(new Set([...selected, ...alreadySent]));
+  };
   const setMergeExtra = (studentId: string, classId: string, checked: boolean) => {
     setMergeOptions(prev => {
       const current = prev[studentId] ?? { extraClassIds: [], forceResend: false };
@@ -259,7 +266,19 @@ export const ZaloCampaignPage = () => {
 
 
 
-  const handleSendCampaign = async () => {
+  const handleSendCampaign = async (forceAllAlreadySent = false, skipResendConfirm = false) => {
+    if (wizardType === 'TUITION_REMINDER' && !skipResendConfirm) {
+      const candidates = getUnconfirmedAlreadySentRecipients(
+        recipientPreview.map(s => ({ id: s.id, name: s.name })),
+        multiClassPreview,
+        buildForceResendStudentIds(forceAllAlreadySent)
+      );
+      if (candidates.length > 0) {
+        setResendConfirmStudents(candidates);
+        return;
+      }
+    }
+
     setIsSending(true);
     setSendResult(null);
     try {
@@ -288,7 +307,7 @@ export const ZaloCampaignPage = () => {
             collectionFromDate,
             collectionToDate,
             studentCoveredClasses: buildStudentCoveredClasses(),
-            forceResendStudentIds: buildForceResendStudentIds(),
+            forceResendStudentIds: buildForceResendStudentIds(forceAllAlreadySent),
             billingMonth: wizardBillingMonth,
           }),
         });
@@ -323,7 +342,7 @@ export const ZaloCampaignPage = () => {
             collectionFromDate,
             collectionToDate,
             studentCoveredClasses: buildStudentCoveredClasses(),
-            forceResendStudentIds: buildForceResendStudentIds(),
+            forceResendStudentIds: buildForceResendStudentIds(forceAllAlreadySent),
             billingMonth: wizardBillingMonth,
           },
         }),
@@ -345,7 +364,7 @@ export const ZaloCampaignPage = () => {
   const resetWizard = () => {
     setStep(1); setWizardName(''); setWizardType('TUITION_REMINDER');
     setWizardClassIds([]); setWizardStatuses(['PENDING', 'DEBT']); setWizardRequireZalo(true);
-    setWizardMessage(''); setSendResult(null); setCustomTuitionItems({}); setMergeOptions({}); setCustomSendVia('AUTO');
+    setWizardMessage(''); setSendResult(null); setCustomTuitionItems({}); setMergeOptions({}); setCustomSendVia('AUTO'); setResendConfirmStudents([]);
     setCollectionFromDate(new Date().toISOString().slice(0, 10));
     setCollectionToDate(new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
   };
@@ -1328,7 +1347,7 @@ export const ZaloCampaignPage = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <button onClick={handleSendCampaign} disabled={isSending}
+                  <button onClick={() => handleSendCampaign()} disabled={isSending}
                     className="w-full bg-hicado-navy text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest disabled:bg-hicado-slate/50 hover:scale-[1.02] transition-all shadow-lg">
                     {isSending ? '⏳ Đang gửi...' : `🚀 Gửi cho ${uidGroup.length + (wizardFallbackZNS && !wizardRequireZalo ? phoneGroup.length : 0)} người nhận`}
                   </button>
@@ -1939,6 +1958,51 @@ export const ZaloCampaignPage = () => {
             {drawerStudentList.all.length === 0 && drawerSearch && (
               <p className="text-center text-sm text-hicado-navy/30 font-bold py-10">Không tìm thấy học sinh phù hợp</p>
             )}
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* ══ RESEND CONFIRM MODAL ══════════════════════════════════════ */}
+    {resendConfirmStudents.length > 0 && (
+      <div className="fixed inset-0 z-[260] flex items-center justify-center p-4 bg-hicado-navy/45 backdrop-blur-sm animate-in fade-in duration-200">
+        <div className="bg-white rounded-[2.5rem] border border-hicado-slate shadow-2xl p-8 max-w-lg w-full animate-in zoom-in-95 duration-200">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center text-3xl mb-6 mx-auto">⚠️</div>
+          <h3 className="text-xl font-serif font-black text-hicado-navy text-center mb-2">Có học sinh đã được gửi trước đó</h3>
+          <p className="text-sm text-hicado-navy/55 text-center leading-relaxed mb-5">
+            Có <strong className="text-amber-600">{resendConfirmStudents.length}</strong> học sinh đã từng nhận thông báo trong kỳ này.
+            ADMIN cần chọn rõ có gửi lại hay bỏ qua, tránh gửi lặp ngoài ý muốn.
+          </p>
+          <div className="max-h-36 overflow-y-auto custom-scrollbar border border-hicado-slate rounded-2xl p-3 mb-6 bg-hicado-slate/10">
+            <div className="flex flex-wrap gap-2">
+              {resendConfirmStudents.map(student => (
+                <span key={student.id} className="px-2.5 py-1 rounded-xl bg-white border border-amber-200 text-[11px] font-black text-amber-700">
+                  {student.name}
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3">
+            <button
+              onClick={() => { setResendConfirmStudents([]); handleSendCampaign(false, true); }}
+              disabled={isSending}
+              className="w-full py-4 rounded-2xl border border-hicado-slate font-black text-xs uppercase tracking-widest text-hicado-navy/60 hover:bg-hicado-slate/40 transition-all"
+            >
+              Bỏ qua nhóm đã gửi, chỉ gửi người còn lại
+            </button>
+            <button
+              onClick={() => { setResendConfirmStudents([]); handleSendCampaign(true, true); }}
+              disabled={isSending}
+              className="w-full bg-hicado-navy text-white py-4 rounded-2xl font-black text-xs uppercase tracking-widest hover:scale-[1.02] transition-all shadow-lg"
+            >
+              Vẫn gửi lại cho toàn bộ nhóm này
+            </button>
+            <button
+              onClick={() => setResendConfirmStudents([])}
+              className="w-full py-2 text-hicado-navy/35 font-black text-xs uppercase tracking-widest hover:bg-hicado-slate/20 rounded-2xl transition-all"
+            >
+              Quay lại chỉnh từng học sinh
+            </button>
           </div>
         </div>
       </div>
