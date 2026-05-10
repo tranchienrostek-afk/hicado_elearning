@@ -263,6 +263,19 @@ export const ZaloCampaignPage = () => {
     });
   };
 
+  const returnToResendSelection = (studentIds: string[]) => {
+    setMergeOptions(prev => {
+      const next = { ...prev };
+      studentIds.forEach(id => {
+        const current = next[id] ?? { extraClassIds: [], forceResend: false };
+        next[id] = { ...current, forceResend: true };
+      });
+      return next;
+    });
+    setSendResult(null);
+    setStep(3);
+  };
+
 
 
 
@@ -1039,9 +1052,10 @@ export const ZaloCampaignPage = () => {
                             {mc && wizardType !== 'GENERAL' && (
                               <div className="mt-2 space-y-1 text-[10px] font-bold">
                                 {mc.alreadySent && (
-                                  <label className="flex items-center gap-2 text-amber-700">
-                                    <input type="checkbox" checked={getMergeOption(s.id).forceResend} onChange={e => setForceResend(s.id, e.target.checked)} />
-                                    Vẫn gửi lại học phí kỳ này
+                                  <label className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl border cursor-pointer transition-all ${getMergeOption(s.id).forceResend ? 'bg-amber-500 border-amber-500 text-white shadow-sm' : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'}`}>
+                                    <input className="accent-amber-600" type="checkbox" checked={getMergeOption(s.id).forceResend} onChange={e => setForceResend(s.id, e.target.checked)} />
+                                    <span className="font-black uppercase tracking-widest">Gửi lại</span>
+                                    <span className="opacity-70">học phí kỳ này</span>
                                   </label>
                                 )}
                                 {mc.otherClasses.length > 0 && (
@@ -1336,7 +1350,17 @@ export const ZaloCampaignPage = () => {
                           ))}
                         </div>
                       </div>
-                      <p className="text-[10px] text-amber-500 italic font-bold">Tick "Gửi lại" ở bước trước nếu bạn thực sự muốn gửi thêm.</p>
+                      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+                        <p className="text-[10px] text-amber-500 italic font-bold">
+                          Muốn gửi lại? Bấm nút bên cạnh để quay về danh sách và tự động tick "Vẫn gửi lại".
+                        </p>
+                        <button
+                          onClick={() => returnToResendSelection((sendResult.skippedStudents ?? []).map((s: any) => s.studentId).filter(Boolean))}
+                          className="px-4 py-2 rounded-xl bg-amber-100 text-amber-700 text-[10px] font-black uppercase tracking-widest hover:bg-amber-200 transition-all"
+                        >
+                          Chọn gửi lại
+                        </button>
+                      </div>
                     </div>
                   )}
 
