@@ -9,7 +9,7 @@ type CampaignType = 'TUITION_REMINDER' | 'GENERAL' | 'CUSTOM_TUITION';
 
 interface Campaign {
   id: string; name: string; type: CampaignType; status: string;
-  sentCount: number; znsSentCount?: number; readCount: number; failedCount: number; readRate: number;
+  sentCount: number; znsSentCount?: number; readCount: number; failedCount: number; skippedCount?: number; readRate: number;
   createdAt: string; sentAt?: string;
 }
 interface CampaignLog {
@@ -1356,6 +1356,7 @@ export const ZaloCampaignPage = () => {
               <div className="flex gap-4 text-sm font-bold">
                 <span className="text-hicado-navy/40">Gửi: <strong className="text-hicado-navy">{campaignDetail.sentCount}</strong></span>
                 <span className="text-hicado-navy/40">Đọc: <strong className="text-hicado-emerald">{campaignDetail.readCount} ({campaignDetail.readRate}%)</strong></span>
+                <span className="text-hicado-navy/40">Bỏ qua: <strong className="text-amber-600">{campaignDetail.skippedCount ?? 0}</strong></span>
                 <span className="text-hicado-navy/40">Lỗi: <strong className="text-rose-500">{campaignDetail.failedCount}</strong></span>
               </div>
             )}

@@ -9,6 +9,7 @@ import { generateVietQRString } from '../lib/vietqr';
 import { buildZaloImageMessage, uploadZaloImage, buildCustomTuitionMessage, buildMultiClassTuitionMessage } from '../lib/zaloMessage';
 import { generateBillCode } from '../lib/billCode';
 import { expectedForStudentClass } from '../lib/financeMath';
+import { summarizeCampaignLogs } from '../lib/campaignStats';
 
 const router = Router();
 
@@ -34,7 +35,7 @@ router.get('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async 
       },
     });
     if (!campaign) return res.status(404).json({ message: 'Chiến dịch không tồn tại' });
-    res.json({ ...campaign, readRate: campaign.sentCount > 0 ? Math.round((campaign.readCount / campaign.sentCount) * 100) : 0 });
+    res.json({ ...campaign, ...summarizeCampaignLogs(campaign.logs) });
   } catch { res.status(500).json({ message: 'Lỗi khi lấy chi tiết chiến dịch' }); }
 });
 
@@ -106,6 +107,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   let sentCount = 0;
   let znsSentCount = 0;
   let failedCount = 0;
+  let skippedCount = 0;
   const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
   const forceResendSet = new Set(filters.forceResendStudentIds ?? []);
   const sentAtFilter = from && to
@@ -125,7 +127,22 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     : '';
 
   for (const student of students) {
-    if (!student.classes.length) { failedCount++; continue; }
+    if (!student.classes.length) {
+      failedCount++;
+      await (prisma as any).zaloMessageLog.create({
+        data: {
+          phone: student.parentPhone || student.studentPhone || '',
+          templateId: `CAMPAIGN_${type}`,
+          trackingId: `CAMP_${campaign.id}_${student.id}_${Date.now()}_NO_CLASS`,
+          status: 'FAILED',
+          errorReason: 'NO_CLASS',
+          studentId: student.id,
+          campaignId: campaign.id,
+          messageType: type,
+        },
+      });
+      continue;
+    }
 
     const primaryClassId = student.classes[0]?.class?.id ?? null;
     const phone = student.parentPhone || student.studentPhone || '';
@@ -141,7 +158,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
         LIMIT 1
       `;
       if (existing.length > 0) {
-        failedCount++;
+        skippedCount++;
         await (prisma as any).zaloMessageLog.create({
           data: { phone, templateId: `CAMPAIGN_${type}`, trackingId: `CAMP_${campaign.id}_${student.id}_${Date.now()}_SKIP`, status: 'SKIPPED', errorReason: 'DEDUP_ALREADY_SENT', studentId: student.id, campaignId: campaign.id, classId: primaryClassId, coveredClassIds, messageType: 'TUITION_REMINDER' },
         });
@@ -215,7 +232,24 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     }
 
     // ── Branch: OA CS message (requires zaloUserId) ──
-    if (!student.zaloUserId) { failedCount++; continue; }
+    if (!student.zaloUserId) {
+      failedCount++;
+      await (prisma as any).zaloMessageLog.create({
+        data: {
+          phone,
+          templateId: `CAMPAIGN_${type}`,
+          trackingId: `CAMP_${campaign.id}_${student.id}_${Date.now()}_NO_ZALO`,
+          status: 'FAILED',
+          errorReason: 'MISSING_ZALO_UID',
+          studentId: student.id,
+          campaignId: campaign.id,
+          classId: primaryClassId,
+          coveredClassIds,
+          messageType: type,
+        },
+      });
+      continue;
+    }
 
     // Build message + capture step-by-step trace (stored in errorReason for full UI visibility)
     const primaryAttended = student.attendances
@@ -395,8 +429,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   });
 
   res.json({
-    message: `Chiến dịch "${name}": gửi thành công ${sentCount} (ZNS: ${znsSentCount}), thất bại ${failedCount}`,
-    campaign: { ...finalCampaign, readRate: 0 },
+    message: `Chiến dịch "${name}": gửi thành công ${sentCount} (ZNS: ${znsSentCount}), thất bại ${failedCount}, bỏ qua ${skippedCount}`,
+    campaign: { ...finalCampaign, skippedCount, readRate: 0 },
   });
 });
 
