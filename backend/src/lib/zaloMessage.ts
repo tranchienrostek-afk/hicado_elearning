@@ -60,26 +60,47 @@ export interface CustomTuitionPayload {
   collectionTo?:   string;    // Collection to
 }
 
-const formatTeacherNames = (teacherNames?: string[]) =>
-  teacherNames?.length ? ` | Giáo viên: ${teacherNames.join(', ')}` : '';
+const classIcon = (index: number) => ['📘', '📙', '📗', '📕', '📒'][index % 5];
+const teacherLabel = (teacherNames?: string[]) => teacherNames?.length ? teacherNames.join(', ') : 'Chưa có giáo viên';
+const classTitle = (className: string, teacherNames?: string[]) =>
+  teacherNames?.length ? `${className} - ${teacherNames.join(', ')}` : className;
+
+function buildTuitionClassBlock(
+  className: string,
+  teacherNames: string[] | undefined,
+  sessions: number,
+  pricePerSession: number,
+  subtotal: number,
+  index: number
+) {
+  return [
+    `${classIcon(index)} **${classTitle(className, teacherNames)}**`,
+    ``,
+    `* 👨‍🏫 Giáo viên: ${teacherLabel(teacherNames)}`,
+    `* 🗓️ Số buổi học: ${sessions}`,
+    `* 💵 Học phí: ${pricePerSession.toLocaleString('vi-VN')}đ/buổi`,
+    `* 🏷️ Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`,
+  ].join('\n');
+}
 
 export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionPayload): string {
   const dateRange = p.fromDate && p.toDate ? ` từ ${p.fromDate} đến ${p.toDate}` : '';
-  const itemLine = p.sessions > 0
-    ? `${p.className}${formatTeacherNames(p.teacherNames)} | Số buổi học: ${p.sessions} | Học phí: ${p.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${p.total.toLocaleString('vi-VN')}đ`
+  const itemBlock = p.sessions > 0
+    ? buildTuitionClassBlock(p.className, p.teacherNames, p.sessions, p.pricePerSession, p.total, 0)
     : `(Không có buổi học trong kỳ)`;
 
   return [
-    `Kính gửi phụ huynh em ${studentName}`,
-    `Trung tâm Hicado xin thông báo học phí${dateRange}`,
+    `💌 **Kính gửi phụ huynh em ${studentName}**`,
+    `🏫 Trung tâm Hicado xin thông báo học phí${dateRange}`,
     ``,
-    itemLine,
+    itemBlock,
     ``,
-    `Tổng cộng: ${p.total.toLocaleString('vi-VN')}đ`,
-    `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-    p.collectionFrom && p.collectionTo ? `Thời gian thu: từ ngày ${p.collectionFrom} đến ngày ${p.collectionTo}` : null,
-    `Phụ huynh vui lòng thanh toán đúng hạn`,
-    `Trân trọng - Hicado Center`,
+    `💰 **Tổng cộng: ${p.total.toLocaleString('vi-VN')}đ**`,
+    ``,
+    `💳 PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
+    p.collectionFrom && p.collectionTo ? `⏳ Thời gian thu: từ ngày ${p.collectionFrom} đến ngày ${p.collectionTo}` : null,
+    `📌 Phụ huynh vui lòng thanh toán đúng hạn`,
+    `✨ Trân trọng - Hicado Center`,
   ].filter(Boolean).join('\n');
 }
 
@@ -90,19 +111,20 @@ export function buildMultiClassTuitionMessage(
 ): string {
   const dateRange = fromDate && toDate ? ` từ ${fromDate} đến ${toDate}` : '';
   const itemLines = items.length > 0
-    ? items.map(it => `${it.className}${formatTeacherNames(it.teacherNames)} | Số buổi học: ${it.sessions} | Học phí: ${it.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
+    ? items.map((it, index) => buildTuitionClassBlock(it.className, it.teacherNames, it.sessions, it.pricePerSession, it.subtotal, index))
     : ["(Không có buổi học trong kỳ)"];
 
   return [
-    `Kính gửi phụ huynh em ${studentName}`,
-    `Trung tâm Hicado xin thông báo học phí${dateRange}`,
+    `💌 **Kính gửi phụ huynh em ${studentName}**`,
+    `🏫 Trung tâm Hicado xin thông báo học phí${dateRange}`,
     ``,
-    ...itemLines,
+    itemLines.join('\n\n'),
     ``,
-    `Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
-    `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-    collectionFrom && collectionTo ? `Thời gian thu: từ ngày ${collectionFrom} đến ngày ${collectionTo}` : null,
-    `Phụ huynh vui lòng thanh toán đúng hạn`,
-    `Trân trọng - Hicado Center`,
+    `💰 **Tổng cộng: ${total.toLocaleString('vi-VN')}đ**`,
+    ``,
+    `💳 PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
+    collectionFrom && collectionTo ? `⏳ Thời gian thu: từ ngày ${collectionFrom} đến ngày ${collectionTo}` : null,
+    `📌 Phụ huynh vui lòng thanh toán đúng hạn`,
+    `✨ Trân trọng - Hicado Center`,
   ].filter(Boolean).join('\n');
 }

@@ -81,7 +81,7 @@ const nameMatchScore = (a: string, b: string): number => {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export const ZaloCampaignPage = () => {
-  const { classes, students, fetchClasses, fetchStudents, fetchTeachers } = useCenterStore();
+  const { classes, students, teachers, fetchClasses, fetchStudents, fetchTeachers } = useCenterStore();
   const { auth } = useAuthStore();
   const token = auth?.token;
   const authHeaders = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' };
@@ -230,6 +230,50 @@ export const ZaloCampaignPage = () => {
 
   const primaryWizardClassId = wizardClassIds[0];
   const getMergeOption = (studentId: string): MergeOption => mergeOptions[studentId] ?? { extraClassIds: [], forceResend: false };
+  const getClassTeacherNames = (classId: string) => {
+    const teacherId = classes.find(c => c.id === classId)?.teacherId;
+    const teacherName = teachers.find(t => t.id === teacherId)?.name;
+    return teacherName ? [teacherName] : [];
+  };
+  const formatTuitionMessage = (
+    studentName: string,
+    items: Array<{ name: string; teacherNames?: string[]; sessions: number; price: number; subtotal: number }>,
+    total: number,
+    fromDate: string,
+    toDate: string,
+    collectionFrom: string,
+    collectionTo: string
+  ) => {
+    const icons = ['📘', '📙', '📗', '📕', '📒'];
+    const itemText = items.length > 0
+      ? items.map((it, index) => {
+          const teacherText = it.teacherNames?.length ? it.teacherNames.join(', ') : 'Chưa có giáo viên';
+          const title = it.teacherNames?.length ? `${it.name} - ${it.teacherNames.join(', ')}` : it.name;
+          return [
+            `${icons[index % icons.length]} **${title}**`,
+            ``,
+            `* 👨‍🏫 Giáo viên: ${teacherText}`,
+            `* 🗓️ Số buổi học: ${it.sessions}`,
+            `* 💵 Học phí: ${it.price.toLocaleString('vi-VN')}đ/buổi`,
+            `* 🏷️ Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`,
+          ].join('\n');
+        }).join('\n\n')
+      : '(Không có buổi học trong kỳ)';
+
+    return [
+      `💌 **Kính gửi phụ huynh em ${studentName}**`,
+      `🏫 Trung tâm Hicado xin thông báo học phí từ ${fromDate} đến ${toDate}`,
+      ``,
+      itemText,
+      ``,
+      `💰 **Tổng cộng: ${total.toLocaleString('vi-VN')}đ**`,
+      ``,
+      `💳 PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
+      `⏳ Thời gian thu: từ ngày ${collectionFrom} đến ngày ${collectionTo}`,
+      `📌 Phụ huynh vui lòng thanh toán đúng hạn`,
+      `✨ Trân trọng - Hicado Center`,
+    ].join('\n');
+  };
   const getCoveredClassIdsForStudent = (studentId: string) => {
     if (!primaryWizardClassId) return [];
     const opt = getMergeOption(studentId);
@@ -1162,6 +1206,16 @@ export const ZaloCampaignPage = () => {
                     const fmtTo = wizardToDate ? fmt(wizardToDate) : '';
                     const fmtCollFrom = collectionFromDate ? fmt(collectionFromDate) : '';
                     const fmtCollTo = collectionToDate ? fmt(collectionToDate) : '';
+                    const coveredIds = getCoveredClassIdsForStudent(s.id);
+                    const cItem = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+                    const subtotal = cItem.totalOverride ?? (cItem.sessions * cItem.pricePerSession);
+                    const customItems = [{
+                      name: coveredIds.map(cid => classes.find(c => c.id === cid)?.name || cid).join(' + ') || 'Chưa chọn lớp',
+                      teacherNames: coveredIds.flatMap(getClassTeacherNames),
+                      sessions: cItem.sessions,
+                      price: cItem.pricePerSession,
+                      subtotal,
+                    }];
                     
                     return (
                       <details key={s.id} className="border border-hicado-slate rounded-2xl p-4 bg-white" open={recipientPreview.length <= 3}>
@@ -1171,26 +1225,7 @@ export const ZaloCampaignPage = () => {
                         </summary>
                         <p className="text-[10px] font-bold text-hicado-navy/40 uppercase mt-2">Cover: {coveredNames}</p>
                         <div className="mt-3 bg-[#e7f3ff] rounded-xl p-4 font-mono text-xs text-gray-800 whitespace-pre-wrap leading-relaxed border border-blue-100">
-                          {[
-                            `Kính gửi phụ huynh em ${s.name}`,
-                            `Trung tâm Hicado xin thông báo học phí từ ${fmtFrom} đến ${fmtTo}`,
-                            ``,
-                            (() => {
-                              const coveredIds = getCoveredClassIdsForStudent(s.id);
-                              const names = coveredIds.map(cid => classes.find(c => c.id === cid)?.name || cid).join(' + ');
-                              const cItem = customTuitionItems[s.id] || { sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
-                              const subtotal = cItem.totalOverride ?? (cItem.sessions * cItem.pricePerSession);
-                              return cItem.sessions > 0
-                                ? `${names} | Số buổi học: ${cItem.sessions} | Học phí: ${cItem.pricePerSession.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`
-                                : `(Không có buổi học trong kỳ)`;
-                            })(),
-                            ``,
-                            `Tổng cộng: ${(item.totalOverride ?? (item.sessions * item.pricePerSession)).toLocaleString('vi-VN')}đ`,
-                            `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-                            `Thời gian thu: từ ngày ${fmtCollFrom} đến ngày ${fmtCollTo}`,
-                            `Phụ huynh vui lòng thanh toán đúng hạn`,
-                            `Trân trọng - Hicado Center`,
-                          ].join('\n')}
+                          {formatTuitionMessage(s.name, cItem.sessions > 0 ? customItems : [], subtotal, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo)}
                         </div>
                       </details>
                     );
@@ -1212,22 +1247,7 @@ export const ZaloCampaignPage = () => {
                          ...mc.otherClasses.map(o => ({ name: o.className, teacherNames: o.teacherNames ?? [], sessions: o.attended, price: o.tuitionPerSession, subtotal: o.subtotal }))]
                       : [];
                     const total = allItems.reduce((sum, it) => sum + it.subtotal, 0);
-                    const itemLines = allItems.length > 0
-                      ? allItems.map(it => `${it.name}${it.teacherNames.length ? ` | Giáo viên: ${it.teacherNames.join(', ')}` : ''} | Số buổi học: ${it.sessions} | Học phí: ${it.price.toLocaleString('vi-VN')}đ/buổi | Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`)
-                      : ["(Không có buổi học trong kỳ)"];
-
-                    const previewText = [
-                      `Kính gửi phụ huynh em ${s.name}`,
-                      `Trung tâm Hicado xin thông báo học phí từ ${fmtFrom} đến ${fmtTo}`,
-                      ``,
-                      ...itemLines,
-                      ``,
-                      `Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
-                      `PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
-                      `Thời gian thu: từ ngày ${fmtCollFrom} đến ngày ${fmtCollTo}`,
-                      `Phụ huynh vui lòng thanh toán đúng hạn`,
-                      `Trân trọng - Hicado Center`,
-                    ].join('\n');
+                    const previewText = formatTuitionMessage(s.name, allItems, total, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo);
                     return (
                       <details key={s.id} className="border border-hicado-slate rounded-[1.75rem] p-4 bg-white shadow-sm" open={recipientPreview.length <= 3}>
                         <summary className="cursor-pointer font-black text-hicado-navy flex justify-between gap-3 items-center">

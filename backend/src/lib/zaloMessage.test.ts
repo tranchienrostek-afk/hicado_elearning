@@ -32,9 +32,14 @@ const tuitionMessage = buildMultiClassTuitionMessage(
   '17/05/2026'
 );
 
-assert(tuitionMessage.includes('Toán 5 | Giáo viên: Cô Lan | Số buổi học: 4 | Học phí: 200.000đ/buổi | Thành tiền: 800.000đ'));
-assert(tuitionMessage.includes('Văn 5 | Giáo viên: Thầy Minh | Số buổi học: 3 | Học phí: 150.000đ/buổi | Thành tiền: 450.000đ'));
-assert(tuitionMessage.includes('Tổng cộng: 1.250.000đ'));
-assert(tuitionMessage.includes('Thời gian thu: từ ngày 10/05/2026 đến ngày 17/05/2026'));
+assert(tuitionMessage.includes('💌 **Kính gửi phụ huynh em Lê Quốc Tiến**'));
+assert(tuitionMessage.includes('📘 **Toán 5 - Cô Lan**'));
+assert(tuitionMessage.includes('* 👨‍🏫 Giáo viên: Cô Lan'));
+assert(tuitionMessage.includes('* 🗓️ Số buổi học: 4'));
+assert(tuitionMessage.includes('* 💵 Học phí: 200.000đ/buổi'));
+assert(tuitionMessage.includes('* 🏷️ Thành tiền: 800.000đ'));
+assert(tuitionMessage.includes('📙 **Văn 5 - Thầy Minh**'));
+assert(tuitionMessage.includes('💰 **Tổng cộng: 1.250.000đ**'));
+assert(tuitionMessage.includes('⏳ Thời gian thu: từ ngày 10/05/2026 đến ngày 17/05/2026'));
 
 console.log('zaloMessage tests passed');
