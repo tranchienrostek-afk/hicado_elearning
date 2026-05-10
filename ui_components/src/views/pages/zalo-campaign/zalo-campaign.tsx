@@ -250,23 +250,25 @@ export const ZaloCampaignPage = () => {
           const teacherText = it.teacherNames?.length ? it.teacherNames.join(', ') : 'Chưa có giáo viên';
           const title = it.teacherNames?.length ? `${it.name} - ${it.teacherNames.join(', ')}` : it.name;
           return [
-            `${icons[index % icons.length]} **${title}**`,
+            `${icons[index % icons.length]} ${title}`,
             ``,
-            `* 👨‍🏫 Giáo viên: ${teacherText}`,
-            `* 🗓️ Số buổi học: ${it.sessions}`,
-            `* 💵 Học phí: ${it.price.toLocaleString('vi-VN')}đ/buổi`,
-            `* 🏷️ Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`,
+            `👨‍🏫 Giáo viên: ${teacherText}`,
+            `🗓️ Số buổi học: ${it.sessions}`,
+            `💵 Học phí: ${it.price.toLocaleString('vi-VN')}đ/buổi`,
+            `🏷️ Thành tiền: ${it.subtotal.toLocaleString('vi-VN')}đ`,
           ].join('\n');
-        }).join('\n\n')
+        }).join('\n\n------\n\n')
       : '(Không có buổi học trong kỳ)';
 
     return [
-      `💌 **Kính gửi phụ huynh em ${studentName}**`,
+      `💌 Kính gửi phụ huynh em ${studentName}`,
       `🏫 Trung tâm Hicado xin thông báo học phí từ ${fromDate} đến ${toDate}`,
       ``,
+      `------`,
       itemText,
       ``,
-      `💰 **Tổng cộng: ${total.toLocaleString('vi-VN')}đ**`,
+      `------`,
+      `💰 Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
       ``,
       `💳 PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
       `⏳ Thời gian thu: từ ngày ${collectionFrom} đến ngày ${collectionTo}`,

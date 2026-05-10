@@ -74,12 +74,12 @@ function buildTuitionClassBlock(
   index: number
 ) {
   return [
-    `${classIcon(index)} **${classTitle(className, teacherNames)}**`,
+    `${classIcon(index)} ${classTitle(className, teacherNames)}`,
     ``,
-    `* 👨‍🏫 Giáo viên: ${teacherLabel(teacherNames)}`,
-    `* 🗓️ Số buổi học: ${sessions}`,
-    `* 💵 Học phí: ${pricePerSession.toLocaleString('vi-VN')}đ/buổi`,
-    `* 🏷️ Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`,
+    `👨‍🏫 Giáo viên: ${teacherLabel(teacherNames)}`,
+    `🗓️ Số buổi học: ${sessions}`,
+    `💵 Học phí: ${pricePerSession.toLocaleString('vi-VN')}đ/buổi`,
+    `🏷️ Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`,
   ].join('\n');
 }
 
@@ -90,12 +90,14 @@ export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionP
     : `(Không có buổi học trong kỳ)`;
 
   return [
-    `💌 **Kính gửi phụ huynh em ${studentName}**`,
+    `💌 Kính gửi phụ huynh em ${studentName}`,
     `🏫 Trung tâm Hicado xin thông báo học phí${dateRange}`,
     ``,
+    `------`,
     itemBlock,
     ``,
-    `💰 **Tổng cộng: ${p.total.toLocaleString('vi-VN')}đ**`,
+    `------`,
+    `💰 Tổng cộng: ${p.total.toLocaleString('vi-VN')}đ`,
     ``,
     `💳 PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
     p.collectionFrom && p.collectionTo ? `⏳ Thời gian thu: từ ngày ${p.collectionFrom} đến ngày ${p.collectionTo}` : null,
@@ -115,12 +117,14 @@ export function buildMultiClassTuitionMessage(
     : ["(Không có buổi học trong kỳ)"];
 
   return [
-    `💌 **Kính gửi phụ huynh em ${studentName}**`,
+    `💌 Kính gửi phụ huynh em ${studentName}`,
     `🏫 Trung tâm Hicado xin thông báo học phí${dateRange}`,
     ``,
-    itemLines.join('\n\n'),
+    `------`,
+    itemLines.join('\n\n------\n\n'),
     ``,
-    `💰 **Tổng cộng: ${total.toLocaleString('vi-VN')}đ**`,
+    `------`,
+    `💰 Tổng cộng: ${total.toLocaleString('vi-VN')}đ`,
     ``,
     `💳 PH có thể thanh toán qua chuyển khoản hoặc đóng tiền mặt tại Trung tâm.`,
     collectionFrom && collectionTo ? `⏳ Thời gian thu: từ ngày ${collectionFrom} đến ngày ${collectionTo}` : null,

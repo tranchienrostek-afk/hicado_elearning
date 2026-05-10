@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { buildClassCollectionStats, buildStudentPaymentRows } from './financeMath';
+import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass } from './financeMath';
 
 const classItem = {
   id: 'class-toan-1',
@@ -68,6 +68,16 @@ assert.deepStrictEqual(
     { id: 'student-1', totalDebt: 200000, paymentStatus: 'NOT_PAID' },
     { id: 'S1777712808642', totalDebt: 600000, paymentStatus: 'NOT_PAID' },
   ]
+);
+
+assert.strictEqual(
+  expectedForStudentClass(
+    { ...classItem, tuitionPerSession: 300000 },
+    'student-1',
+    [{ classId: 'class-toan-1', studentId: 'student-1', status: 'PRESENT' }],
+    { customTuitionPerSession: 100000 }
+  ),
+  100000
 );
 
 console.log('financeMath tests passed');

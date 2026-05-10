@@ -61,27 +61,36 @@ export function expectedForStudentClass(
 ): number {
   if (!attendances) return (override?.customTuitionPerSession ?? classItem.tuitionPerSession) * classItem.totalSessions;
   
-  const studentAttendances = attendances || [];
+  const studentAttendances = (attendances || []).filter(
+    attendance =>
+      attendance.classId === classItem.id &&
+      attendance.studentId === studentId &&
+      attendance.status === 'PRESENT'
+  );
   
   let total = 0;
   for (const att of studentAttendances) {
     let price = classItem.tuitionPerSession;
     
-    if (override?.customTuitionPerSession != null && att.date) {
-      const attDate = new Date(att.date);
-      attDate.setHours(0, 0, 0, 0);
-
-      const from = override.discountFrom ? new Date(override.discountFrom) : null;
-      if (from) from.setHours(0, 0, 0, 0);
-
-      const to = override.discountTo ? new Date(override.discountTo) : null;
-      if (to) to.setHours(23, 59, 59, 999);
-      
-      const isAfterFrom = !from || attDate >= from;
-      const isBeforeTo = !to || attDate <= to;
-      
-      if (isAfterFrom && isBeforeTo) {
+    if (override?.customTuitionPerSession != null) {
+      if (!att.date) {
         price = override.customTuitionPerSession;
+      } else {
+        const attDate = new Date(att.date);
+        attDate.setHours(0, 0, 0, 0);
+
+        const from = override.discountFrom ? new Date(override.discountFrom) : null;
+        if (from) from.setHours(0, 0, 0, 0);
+
+        const to = override.discountTo ? new Date(override.discountTo) : null;
+        if (to) to.setHours(23, 59, 59, 999);
+        
+        const isAfterFrom = !from || attDate >= from;
+        const isBeforeTo = !to || attDate <= to;
+        
+        if (isAfterFrom && isBeforeTo) {
+          price = override.customTuitionPerSession;
+        }
       }
     }
     
