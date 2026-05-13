@@ -79,6 +79,12 @@ export interface MultiClassPaymentSlipOpts {
     sessions: number;
     pricePerSession: number;
     subtotal: number;
+    breakdown?: Array<{
+      pricePerSession: number;
+      sessions: number;
+      subtotal: number;
+      label?: 'OVERRIDE' | 'CLASS_DEFAULT';
+    }>;
   }>;
   totalAmount: number;
   memo: string;
@@ -105,9 +111,18 @@ export function buildMultiClassPaymentSlipTextLines(opts: MultiClassPaymentSlipO
 
   for (const item of opts.items) {
     const teachers = item.teacherNames?.length ? item.teacherNames.join(', ') : 'Chua phan cong';
-    lines.push(
-      `${shortText(item.className, 18)} | GV: ${shortText(teachers, 18)} | ${item.sessions} BUOI | ${money(item.pricePerSession)} | ${money(item.subtotal)}`
-    );
+    const hasMixed = !!(item.breakdown && item.breakdown.length > 1);
+    if (hasMixed) {
+      lines.push(`${shortText(item.className, 18)} | GV: ${shortText(teachers, 18)} | ${item.sessions} BUOI | ${money(item.subtotal)}`);
+      for (const g of item.breakdown!) {
+        const note = g.label === 'OVERRIDE' ? 'UU DAI' : 'GIA LOP';
+        lines.push(`  - ${g.sessions} BUOI x ${money(g.pricePerSession)} (${note}) = ${money(g.subtotal)}`);
+      }
+    } else {
+      lines.push(
+        `${shortText(item.className, 18)} | GV: ${shortText(teachers, 18)} | ${item.sessions} BUOI | ${money(item.pricePerSession)} | ${money(item.subtotal)}`
+      );
+    }
   }
 
   lines.push(`TONG CONG: ${money(opts.totalAmount)}`);
@@ -126,7 +141,8 @@ export function buildMultiClassPaymentSlipTextLines(opts: MultiClassPaymentSlipO
 export async function buildMultiClassPaymentSlipPNG(opts: MultiClassPaymentSlipOpts): Promise<Buffer> {
   const W = 600;
   const baseH = 690;
-  const itemsH = Math.max(opts.items.length, 1) * 50;
+  const itemRowH = (it: typeof opts.items[number]) => 50 + ((it.breakdown && it.breakdown.length > 1) ? it.breakdown.length * 22 + 6 : 0);
+  const itemsH = opts.items.length > 0 ? opts.items.reduce((sum, it) => sum + itemRowH(it), 0) : 50;
   const H = baseH + itemsH;
   
   const canvas = new Jimp(W, H, 0xFFFFFFFF);
@@ -173,12 +189,29 @@ export async function buildMultiClassPaymentSlipPNG(opts: MultiClassPaymentSlipO
   // Items
   for (const item of opts.items) {
     const teachers = item.teacherNames?.length ? item.teacherNames.join(', ') : 'Chua phan cong';
+    const hasMixed = !!(item.breakdown && item.breakdown.length > 1);
+
     canvas.print(f14b, px, currY, shortText(item.className, 24));
     canvas.print(f12b, px, currY + 18, `GV: ${shortText(teachers, 26)}`);
     canvas.print(f14b, 300, currY, String(item.sessions));
-    canvas.print(f14b, 365, currY, money(item.pricePerSession));
-    canvas.print(f14b, 490, currY, money(item.subtotal));
-    currY += 50;
+
+    if (hasMixed) {
+      // Cột Don gia bỏ trống ở dòng tổng (vì có nhiều mức), Thanh tien hiển thị tổng
+      canvas.print(f12b, 365, currY + 4, '(xem chi tiet)');
+      canvas.print(f14b, 490, currY, money(item.subtotal));
+      currY += 50;
+      for (const g of item.breakdown!) {
+        const note = g.label === 'OVERRIDE' ? 'UU DAI' : 'GIA LOP';
+        canvas.print(f12b, px + 16, currY, `- ${g.sessions} BUOI x ${money(g.pricePerSession)} (${note})`);
+        canvas.print(f12b, 490, currY, money(g.subtotal));
+        currY += 22;
+      }
+      currY += 6;
+    } else {
+      canvas.print(f14b, 365, currY, money(item.pricePerSession));
+      canvas.print(f14b, 490, currY, money(item.subtotal));
+      currY += 50;
+    }
   }
 
   canvas.composite(sep, 40, currY);
