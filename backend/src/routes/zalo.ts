@@ -628,12 +628,13 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       // Phase 3: Pre-create TuitionBill. This endpoint is intentionally manual:
       // the operator-provided sessions, unit price, and override total are the source of truth.
       try {
+        const effectivePrice = item.sessions > 0 ? Math.round(total / item.sessions) : item.pricePerSession;
         billDetail = [{
           classId: coveredClassIds[0] || '',
           className: coveredClassName,
           teacherNames,
           sessions: item.sessions,
-          pricePerSession: item.pricePerSession,
+          pricePerSession: effectivePrice,
           subtotal: total,
         }];
 
@@ -868,23 +869,33 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
     }
   });
 
-  const studentIds = classStudents.map(cs => cs.studentId);
+  // Dedup classStudents theo studentId (khi chọn nhiều lớp, HS học >1 lớp được chọn sẽ xuất hiện nhiều lần)
+  const seenStudents = new Set<string>();
+  const uniqueClassStudents = classStudents.filter(cs => {
+    if (seenStudents.has(cs.studentId)) return false;
+    seenStudents.add(cs.studentId);
+    return true;
+  });
+
+  const studentIds = uniqueClassStudents.map(cs => cs.studentId);
   const sentAtFilter = buildSentAtSql(from, to);
-  const sentLogs = studentIds.length ? await prisma.$queryRaw<Array<{ studentId: string; sentAt: Date; coveredClassIds: string[] }>>`
+  const sentLogs = (studentIds.length && classIds.length) ? await prisma.$queryRaw<Array<{ studentId: string; sentAt: Date; coveredClassIds: string[] }>>`
     SELECT "studentId", "sentAt", "coveredClassIds"
     FROM "ZaloMessageLog"
     WHERE "studentId" = ANY(ARRAY[${Prisma.join(studentIds)}]::text[])
       AND status = 'SENT'
-      AND "coveredClassIds" @> ARRAY[${classId}]::text[]
+      AND "coveredClassIds" && ARRAY[${Prisma.join(classIds)}]::text[]
       ${sentAtFilter}
     ORDER BY "sentAt" DESC
   ` : [];
   const sentByStudent = new Map<string, Array<{ sentAt: Date; coveredClassIds: string[] }>>();
   for (const log of sentLogs) sentByStudent.set(log.studentId, [...(sentByStudent.get(log.studentId) ?? []), { sentAt: log.sentAt, coveredClassIds: log.coveredClassIds }]);
 
-  const results = classStudents.map(cs => {
+  const results = uniqueClassStudents.map(cs => {
     const s = cs.student;
-    const primaryId = classIds.length > 0 ? (classIds.includes(classId) ? classId : classIds[0]) : (s.classes[0]?.classId);
+    // Chọn mainClass: lớp đầu tiên trong classIds mà HS này có; fallback về classId (singular) hoặc lớp đầu của HS
+    const primaryId = classIds.find(cid => s.classes.some(c => c.classId === cid))
+      ?? (classId && s.classes.some(c => c.classId === classId) ? classId : s.classes[0]?.classId);
     const mainClass = s.classes.find(c => c.classId === primaryId);
     const mainClassAtts = s.attendances.filter(a => a.classId === primaryId);
     const mainAttended = mainClassAtts.reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
@@ -899,14 +910,15 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
         const atts = s.attendances.filter(a => a.classId === c.classId);
         const attended = atts.reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
         const subtotal = expectedForStudentClass(c.class as any, s.id, atts as any, c);
-        return { 
-          classId: c.classId, 
-          className: c.class.name, 
-          classCode: c.class.classCode, 
+        return {
+          classId: c.classId,
+          className: c.class.name,
+          classCode: c.class.classCode,
           teacherNames: c.class.teacher?.name ? [c.class.teacher.name] : [],
-          attended, 
-          tuitionPerSession: c.class.tuitionPerSession, 
-          subtotal 
+          attended,
+          tuitionPerSession: c.class.tuitionPerSession,
+          subtotal,
+          isSelected: classIds.includes(c.classId)
         };
       });
 

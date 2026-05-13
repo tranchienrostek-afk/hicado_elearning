@@ -24,7 +24,7 @@ interface MultiClassPreviewItem {
   studentCode?: string;
   hasZalo: boolean;
   mainClass: { classId: string; className: string; teacherNames?: string[]; attended: number; tuitionPerSession: number; subtotal: number };
-  otherClasses: Array<{ classId: string; className: string; classCode?: string; teacherNames?: string[]; attended: number; tuitionPerSession: number; subtotal: number }>;
+  otherClasses: Array<{ classId: string; className: string; classCode?: string; teacherNames?: string[]; attended: number; tuitionPerSession: number; subtotal: number; isSelected?: boolean }>;
   alreadySent: boolean;
   sentLogs: Array<{ sentAt: string; coveredClassIds: string[] }>;
 }
@@ -1105,9 +1105,9 @@ export const ZaloCampaignPage = () => {
                                     <span className="opacity-70">học phí kỳ này</span>
                                   </label>
                                 )}
-                                {mc.otherClasses.length > 0 && (
+                                {mc.otherClasses.filter((o: any) => o.isSelected !== false).length > 0 && (
                                   <div className="flex flex-wrap gap-2">
-                                    {mc.otherClasses.map((o: any) => (
+                                    {mc.otherClasses.filter((o: any) => o.isSelected !== false).map((o: any) => (
                                       <label key={o.classId} className="inline-flex items-center gap-1 px-2 py-1 bg-blue-50 text-blue-700 rounded-lg">
                                         <input type="checkbox" checked={getMergeOption(s.id).extraClassIds.includes(o.classId)} onChange={e => setMergeExtra(s.id, o.classId, e.target.checked)} />
                                         Gộp {o.className} ({o.subtotal.toLocaleString('vi-VN')}đ)
