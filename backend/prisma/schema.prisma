@@ -325,6 +325,8 @@ model ZaloMessageLog {
   customPayload   String?   @db.Text
   coveredClassIds String[]  @default([])
   billingMonth    String?   // "2026-06"
+  renderedMessageText String? @db.Text
+  renderMetadata  String?   @db.Text
   campaign        Campaign? @relation(fields: [campaignId], references: [id])
   student         Student?  @relation(fields: [studentId], references: [id])
   bill            TuitionBill? @relation(fields: [billId], references: [id])

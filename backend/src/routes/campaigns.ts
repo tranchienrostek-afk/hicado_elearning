@@ -290,6 +290,10 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           };
         }));
 
+        // Reconcile totalDue với billDetail để text/PNG/QR/Bill khớp số buổi và tiền
+        const billTotal = billDetail.reduce((s, it) => s + it.subtotal, 0);
+        totalDue = Math.max(0, billTotal - totalAdjustments);
+
         const bill = await prisma.tuitionBill.create({
           data: {
             studentId: student.id,
@@ -320,8 +324,12 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       const fmtCollFrom = filters.collectionFromDate ? fmt(filters.collectionFromDate) : undefined;
       const fmtCollTo = filters.collectionToDate ? fmt(filters.collectionToDate) : undefined;
 
-      const textMessage = billItems.length > 1 
-        ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo)
+      const bankName = bm.BANK_NAME || bm.BANK_LABEL || '';
+      const bankAccount = bm.BANK_ACC || process.env.BANK_ACC || '';
+      const accountName = bm.BANK_NAME || '';
+
+      const textMessage = billItems.length > 1
+        ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo, bankName, bankAccount, accountName, memo)
         : buildCustomTuitionMessage(student.name, {
             className: billItems[0]?.className ?? '',
             sessions: billItems[0]?.sessions || 0,
@@ -334,7 +342,13 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
             collectionTo: fmtCollTo,
             breakdown: billItems[0]?.breakdown,
             discountFrom: billItems[0]?.discountFromFormatted,
+            bankName, bankAccount, accountName, memo,
           });
+
+      const renderMetadata = JSON.stringify({
+        memo, qrData, bankName, bankAccount, accountName,
+        fmtFrom, fmtTo, fmtCollFrom, fmtCollTo, billRef,
+      });
 
       // Step 2: Build PNG
       trace.push('②PNG...');
@@ -405,6 +419,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           coveredClassIds,
           messageType: 'TUITION_REMINDER',
           billingMonth: filters.billingMonth || null,
+          renderedMessageText: textMessage,
+          renderMetadata,
         },
       });
       if (success) sentCount++; else failedCount++;
@@ -426,6 +442,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           classId: primaryClassId,
           coveredClassIds,
           messageType: 'TUITION_REMINDER',
+          renderedMessageText: textMessage,
+          renderMetadata,
         },
       });
     }

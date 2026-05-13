@@ -664,16 +664,32 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       const fmtCollFrom = collectionFromDate ? fmt(collectionFromDate) : undefined;
       const fmtCollTo = collectionToDate ? fmt(collectionToDate) : undefined;
 
+      const bankName = bm.BANK_NAME || bm.BANK_LABEL || '';
+      const bankAccount = bm.BANK_ACC || process.env.BANK_ACC || '';
+      const accountName = bm.BANK_NAME || '';
+      const memo = billRef
+        ? deaccent(`${student.studentCode || student.id} ${billRef} ${student.name}`).toUpperCase().trim().slice(0, 50)
+        : '';
+      const qrData = billRef
+        ? generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bankAccount, total, memo)
+        : '';
+
       const messageText = billItems.length > 1
-        ? buildMultiClassTuitionMessage(student.name, billItems, total, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo)
-        : buildCustomTuitionMessage(student.name, { 
-            ...payload, 
-            className: billItems[0]?.className ?? '', 
-            fromDate: fmtFrom, 
+        ? buildMultiClassTuitionMessage(student.name, billItems, total, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo, bankName, bankAccount, accountName, memo)
+        : buildCustomTuitionMessage(student.name, {
+            ...payload,
+            className: billItems[0]?.className ?? '',
+            fromDate: fmtFrom,
             toDate: fmtTo,
             collectionFrom: fmtCollFrom,
-            collectionTo: fmtCollTo
+            collectionTo: fmtCollTo,
+            bankName, bankAccount, accountName, memo,
           });
+
+      const renderMetadata = JSON.stringify({
+        memo, qrData, bankName, bankAccount, accountName,
+        fmtFrom, fmtTo, fmtCollFrom, fmtCollTo, billRef,
+      });
 
       let success = false;
       let channel: 'CS' | 'ZNS' | 'NONE' = 'NONE';
@@ -687,9 +703,6 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
           // Try to attach image slip
           if (billRef) {
             try {
-              const memo = deaccent(`${student.studentCode || student.id} ${billRef} ${student.name}`).toUpperCase().trim().slice(0, 50);
-              const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', total, memo);
-              
               const pngBuffer = await buildMultiClassPaymentSlipPNG({
                 studentName: student.name,
                 studentCode: student.studentCode || student.id,
@@ -698,13 +711,10 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
                 tuitionToDate: fmtTo,
                 collectionFromDate: fmtCollFrom,
                 collectionToDate: fmtCollTo,
-                bankName: bm.BANK_NAME || bm.BANK_LABEL || '',
-                bankAccount: bm.BANK_ACC || process.env.BANK_ACC || '',
-                accountName: bm.BANK_NAME || '',
+                bankName, bankAccount, accountName,
                 items: billItems,
                 totalAmount: total,
-                memo: memo,
-                qrData: qrData
+                memo, qrData,
               });
               const attachmentId = await uploadZaloImage(pngBuffer, cfg.ZALO_ACCESS_TOKEN);
               message = buildZaloImageMessage(attachmentId, messageText);
@@ -762,6 +772,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
           studentId: student.id, campaignId: campaign.id, classId: item.classId, coveredClassIds,
           billingMonth: billingMonth || null, billId,
           messageType: 'CUSTOM_TUITION', customPayload: JSON.stringify(payload), zaloMsgId,
+          renderedMessageText: messageText, renderMetadata,
         }
       });
 
@@ -1060,6 +1071,56 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
   } catch (error) {
     console.error('Loi gui tin Zalo:', error);
     res.status(500).json({ message: 'Loi gui tin Zalo' });
+  }
+});
+
+// Preview a single ZaloMessageLog: rendered text + payment-slip PNG (regenerated on demand)
+router.get('/logs/:logId/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const log = await prisma.zaloMessageLog.findUnique({
+      where: { id: req.params.logId },
+      include: { student: { select: { name: true, studentCode: true } } }
+    });
+    if (!log) return res.status(404).json({ message: 'Không tìm thấy log' });
+    res.json({
+      logId: log.id,
+      studentName: log.student?.name ?? '',
+      studentCode: log.student?.studentCode ?? '',
+      status: log.status,
+      errorReason: log.errorReason,
+      sentAt: log.sentAt,
+      messageText: log.renderedMessageText ?? '(Không lưu nội dung tin nhắn cho log này)',
+      hasPaymentSlip: !!(log.billId && log.renderMetadata),
+    });
+  } catch (err: any) {
+    console.error('[Log Preview]', err);
+    res.status(500).json({ message: 'Lỗi xem log' });
+  }
+});
+
+router.get('/logs/:logId/payment-slip.png', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  try {
+    const log = await prisma.zaloMessageLog.findUnique({
+      where: { id: req.params.logId },
+      include: { bill: true, student: { select: { name: true, studentCode: true } } }
+    });
+    if (!log?.bill || !log.renderMetadata) return res.status(404).end();
+    const meta = JSON.parse(log.renderMetadata);
+    let items: any[] = [];
+    try { items = JSON.parse(log.bill.sessionsDetail || '[]'); } catch {}
+    const pngBuffer = await buildMultiClassPaymentSlipPNG({
+      studentName: log.student?.name ?? '',
+      studentCode: log.student?.studentCode ?? log.studentId ?? '',
+      tuitionFromDate: meta.fmtFrom, tuitionToDate: meta.fmtTo,
+      collectionFromDate: meta.fmtCollFrom, collectionToDate: meta.fmtCollTo,
+      bankName: meta.bankName, bankAccount: meta.bankAccount, accountName: meta.accountName,
+      items, totalAmount: log.bill.amount,
+      memo: meta.memo, qrData: meta.qrData,
+    });
+    res.type('png').send(pngBuffer);
+  } catch (err: any) {
+    console.error('[Log PNG]', err);
+    res.status(500).end();
   }
 });
 

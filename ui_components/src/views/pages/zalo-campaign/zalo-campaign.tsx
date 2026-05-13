@@ -125,6 +125,13 @@ export const ZaloCampaignPage = () => {
   const [mergeOptions, setMergeOptions] = useState<Record<string, MergeOption>>({});
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [forceResendAllSkipped, setForceResendAllSkipped] = useState(false);
+  const [previewLog, setPreviewLog] = useState<{
+    logId: string; studentName: string; studentCode?: string;
+    status: string; errorReason?: string | null;
+    messageText: string; hasPaymentSlip: boolean;
+    pngObjectUrl?: string;
+  } | null>(null);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [resendConfirmStudents, setResendConfirmStudents] = useState<Array<{ id: string; name: string }>>([]);
 
   // ── Followers ──────────────────────────────────────────────────────────────
@@ -278,9 +285,16 @@ export const ZaloCampaignPage = () => {
     ].join('\n');
   };
   const getCoveredClassIdsForStudent = (studentId: string) => {
-    if (!primaryWizardClassId) return [];
+    if (wizardClassIds.length === 0) return [];
+    const student = students.find(s => s.id === studentId) as any;
+    const sClassIds = (student?.classes ?? []).map((c: any) => c.classId ?? c.id);
+    // Giao của lớp HS đang học và lớp wizard chọn — đảm bảo coveredClassIds chỉ chứa lớp HS thực sự thuộc về
+    const enrolledInSelected = wizardClassIds.filter((cid: string) => sClassIds.includes(cid));
+    const base = enrolledInSelected.length > 0
+      ? enrolledInSelected
+      : (primaryWizardClassId ? [primaryWizardClassId] : []);
     const opt = getMergeOption(studentId);
-    return Array.from(new Set([primaryWizardClassId, ...opt.extraClassIds]));
+    return Array.from(new Set([...base, ...opt.extraClassIds]));
   };
   const buildStudentCoveredClasses = () => {
     const result: Record<string, string[]> = {};
@@ -325,6 +339,33 @@ export const ZaloCampaignPage = () => {
 
 
 
+
+  const openLogPreview = async (logId: string) => {
+    setIsLoadingPreview(true);
+    try {
+      const r = await fetch(`/api/zalo/logs/${logId}/preview`, { headers: authHeaders });
+      if (!r.ok) throw new Error('Không tải được nội dung log');
+      const data = await r.json();
+      let pngObjectUrl: string | undefined;
+      if (data.hasPaymentSlip) {
+        const pngRes = await fetch(`/api/zalo/logs/${logId}/payment-slip.png`, { headers: authHeaders });
+        if (pngRes.ok) {
+          const blob = await pngRes.blob();
+          pngObjectUrl = URL.createObjectURL(blob);
+        }
+      }
+      setPreviewLog({ ...data, logId, pngObjectUrl });
+    } catch (err: any) {
+      alert(err.message || 'Lỗi xem log');
+    } finally {
+      setIsLoadingPreview(false);
+    }
+  };
+
+  const closeLogPreview = () => {
+    if (previewLog?.pngObjectUrl) URL.revokeObjectURL(previewLog.pngObjectUrl);
+    setPreviewLog(null);
+  };
 
   const handleSendCampaign = async (forceAllAlreadySent = false, skipResendConfirm = false) => {
     if (wizardType === 'TUITION_REMINDER' && !skipResendConfirm) {
@@ -1474,7 +1515,9 @@ export const ZaloCampaignPage = () => {
                   </thead>
                   <tbody>
                     {campaignDetail.logs.map(log => (
-                      <tr key={log.id} className="border-t border-hicado-slate/30 hover:bg-hicado-slate/10">
+                      <tr key={log.id} onClick={() => openLogPreview(log.id)}
+                          className="border-t border-hicado-slate/30 hover:bg-hicado-slate/10 cursor-pointer"
+                          title="Bấm để xem tin nhắn + ảnh đã gửi">
                         <td className="px-5 py-4 font-bold text-hicado-navy">{log.student?.name ?? '—'}</td>
                         <td className="px-5 py-4 font-mono text-xs text-hicado-navy/40">{log.student?.studentCode ?? '—'}</td>
                         <td className="px-5 py-4">
@@ -1512,6 +1555,60 @@ export const ZaloCampaignPage = () => {
             <div className="bg-white border border-hicado-slate rounded-[2rem] p-16 text-center">
               <p className="text-4xl mb-4">📊</p>
               <p className="font-black text-hicado-navy/30 uppercase tracking-widest text-sm">Chọn chiến dịch để xem kết quả</p>
+            </div>
+          )}
+
+          {/* Loading overlay khi mở preview */}
+          {isLoadingPreview && (
+            <div className="fixed inset-0 bg-black/30 z-[290] flex items-center justify-center">
+              <div className="bg-white rounded-2xl px-6 py-4 font-bold text-hicado-navy">Đang tải nội dung...</div>
+            </div>
+          )}
+
+          {/* Log Preview Modal */}
+          {previewLog && (
+            <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4" onClick={closeLogPreview}>
+              <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6 space-y-4" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-between items-start gap-3">
+                  <div>
+                    <h3 className="text-lg font-black text-hicado-navy">{previewLog.studentName}</h3>
+                    <p className="text-xs text-hicado-navy/60 font-mono">{previewLog.studentCode} · <span className="font-bold">{previewLog.status}</span></p>
+                    {previewLog.errorReason && <p className="text-[10px] text-red-600 font-bold mt-1">{previewLog.errorReason}</p>}
+                  </div>
+                  <button onClick={closeLogPreview} className="text-2xl text-hicado-navy/40 hover:text-hicado-navy leading-none">✕</button>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-bold text-sm text-hicado-navy">📝 Nội dung tin nhắn</h4>
+                    <button
+                      onClick={() => { navigator.clipboard.writeText(previewLog.messageText); alert('Đã copy nội dung tin nhắn!'); }}
+                      className="text-xs bg-hicado-navy text-white px-3 py-1.5 rounded-lg font-black uppercase tracking-widest hover:bg-hicado-emerald hover:text-hicado-navy transition-all"
+                    >
+                      📋 Copy text
+                    </button>
+                  </div>
+                  <pre className="bg-slate-50 border border-hicado-slate rounded-xl p-4 text-xs whitespace-pre-wrap font-mono max-h-[320px] overflow-y-auto">
+{previewLog.messageText}
+                  </pre>
+                </div>
+
+                {previewLog.hasPaymentSlip && previewLog.pngObjectUrl && (
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-center">
+                      <h4 className="font-bold text-sm text-hicado-navy">🖼️ Ảnh thông báo học phí</h4>
+                      <a
+                        href={previewLog.pngObjectUrl}
+                        download={`payment-slip-${previewLog.studentCode || previewLog.logId}.png`}
+                        className="text-xs bg-hicado-emerald text-hicado-navy px-3 py-1.5 rounded-lg font-black uppercase tracking-widest hover:bg-hicado-navy hover:text-white transition-all"
+                      >
+                        ⬇ Tải ảnh
+                      </a>
+                    </div>
+                    <img src={previewLog.pngObjectUrl} alt="Payment slip" className="w-full rounded-xl border border-hicado-slate" />
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

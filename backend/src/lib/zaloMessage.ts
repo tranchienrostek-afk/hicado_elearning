@@ -54,6 +54,10 @@ export interface CustomTuitionPayload {
   pricePerSession: number;
   total:           number;
   note?:           string;
+  bankName?:       string;
+  bankAccount?:    string;
+  accountName?:    string;
+  memo?:           string;
   fromDate?:       string;  // Tuition from
   toDate?:         string;    // Tuition to
   collectionFrom?: string;  // Collection from
@@ -126,13 +130,25 @@ export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionP
     p.collectionFrom && p.collectionTo ? `⏳ Thời gian thu: từ ngày ${p.collectionFrom} đến ngày ${p.collectionTo}` : null,
     `📌 Phụ huynh vui lòng thanh toán đúng hạn`,
     `✨ Trân trọng - Hicado Center`,
+    ...buildBankFooter(p.bankName, p.bankAccount, p.accountName, p.memo),
   ].filter(Boolean).join('\n');
+}
+
+function buildBankFooter(bankName?: string, bankAccount?: string, accountName?: string, memo?: string): string[] {
+  if (!bankName && !bankAccount && !accountName && !memo) return [];
+  const out: string[] = [``, `━━━━━━━━━━━━━━━━━━━━━`, `💳 THÔNG TIN CHUYỂN KHOẢN`];
+  if (bankName) out.push(`🏦 Ngân hàng: ${bankName}`);
+  if (bankAccount) out.push(`🔢 Số tài khoản: ${bankAccount}`);
+  if (accountName) out.push(`👤 Tên TK: ${accountName}`);
+  if (memo) out.push(`📝 Nội dung CK: ${memo}`);
+  return out;
 }
 
 export function buildMultiClassTuitionMessage(
   studentName: string, items: any[], total: number,
   fromDate?: string, toDate?: string,
-  collectionFrom?: string, collectionTo?: string
+  collectionFrom?: string, collectionTo?: string,
+  bankName?: string, bankAccount?: string, accountName?: string, memo?: string
 ): string {
   const dateRange = fromDate && toDate ? ` từ ${fromDate} đến ${toDate}` : '';
   const itemLines = items.length > 0
@@ -153,5 +169,6 @@ export function buildMultiClassTuitionMessage(
     collectionFrom && collectionTo ? `⏳ Thời gian thu: từ ngày ${collectionFrom} đến ngày ${collectionTo}` : null,
     `📌 Phụ huynh vui lòng thanh toán đúng hạn`,
     `✨ Trân trọng - Hicado Center`,
+    ...buildBankFooter(bankName, bankAccount, accountName, memo),
   ].filter(Boolean).join('\n');
 }
