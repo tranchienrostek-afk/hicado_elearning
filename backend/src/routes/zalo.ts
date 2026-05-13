@@ -664,7 +664,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       const fmtCollFrom = collectionFromDate ? fmt(collectionFromDate) : undefined;
       const fmtCollTo = collectionToDate ? fmt(collectionToDate) : undefined;
 
-      const bankName = bm.BANK_NAME || bm.BANK_LABEL || '';
+      const bankName = bm.BANK_LABEL || '';
       const bankAccount = bm.BANK_ACC || process.env.BANK_ACC || '';
       const accountName = bm.BANK_NAME || '';
       const memo = billRef

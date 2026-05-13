@@ -266,9 +266,12 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     if (type === 'TUITION_REMINDER') {
       trace.push('①BILL...');
       let billRef = '';
+      // Chỉ lấy những lớp mà HS thực sự được enroll (tránh in lớp 0 buổi cho HS không học)
+      const enrolledClassIds = new Set(student.classes.map((c: any) => c.classId));
+      const effectiveCoveredIds = coveredClassIds.filter((id: string) => enrolledClassIds.has(id));
       try {
         const classes = await prisma.class.findMany({
-          where: { id: { in: coveredClassIds } },
+          where: { id: { in: effectiveCoveredIds } },
           include: { teacher: { select: { name: true } } }
         });
         billDetail = await Promise.all(classes.map(async (cls) => {
@@ -292,14 +295,39 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           };
         }));
 
+        // Bỏ những lớp có 0 buổi học trong kỳ — không hiển thị cho phụ huynh
+        billDetail = billDetail.filter(it => it.sessions > 0);
+
         // Reconcile totalDue với billDetail để text/PNG/QR/Bill khớp số buổi và tiền
         const billTotal = billDetail.reduce((s, it) => s + it.subtotal, 0);
         totalDue = Math.max(0, billTotal - totalAdjustments);
 
+        // Không có lớp nào để báo (HS chưa enroll hoặc 0 buổi toàn bộ kỳ) — skip
+        if (billDetail.length === 0) {
+          skippedCount++;
+          await (prisma as any).zaloMessageLog.create({
+            data: {
+              phone,
+              zaloUserId: student.zaloUserId,
+              templateId: `CAMPAIGN_${type}`,
+              trackingId: `CAMP_${campaign.id}_${student.id}_${Date.now()}_NO_BILLABLE`,
+              status: 'SKIPPED',
+              errorReason: 'NO_BILLABLE_CLASS',
+              studentId: student.id,
+              campaignId: campaign.id,
+              classId: primaryClassId,
+              coveredClassIds: effectiveCoveredIds,
+              messageType: 'TUITION_REMINDER',
+              billingMonth: filters.billingMonth || null,
+            },
+          });
+          continue;
+        }
+
         const bill = await prisma.tuitionBill.create({
           data: {
             studentId: student.id,
-            coveredClassIds,
+            coveredClassIds: effectiveCoveredIds,
             fromDate: from || new Date(),
             toDate: to || new Date(),
             amount: totalDue,
@@ -326,7 +354,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       const fmtCollFrom = filters.collectionFromDate ? fmt(filters.collectionFromDate) : undefined;
       const fmtCollTo = filters.collectionToDate ? fmt(filters.collectionToDate) : undefined;
 
-      const bankName = bm.BANK_NAME || bm.BANK_LABEL || '';
+      const bankName = bm.BANK_LABEL || '';
       const bankAccount = bm.BANK_ACC || process.env.BANK_ACC || '';
       const accountName = bm.BANK_NAME || '';
 
@@ -362,7 +390,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           tuitionToDate: fmtTo,
           collectionFromDate: fmtCollFrom,
           collectionToDate: fmtCollTo,
-          bankName: bm.BANK_NAME || bm.BANK_LABEL || '',
+          bankName: bm.BANK_LABEL || '',
           bankAccount: bm.BANK_ACC || process.env.BANK_ACC || '',
           accountName: bm.BANK_NAME || '',
           items: billItems,

@@ -228,7 +228,7 @@ router.get('/public/student/:studentId', async (req, res) => {
     const bm = bankCfg.reduce((a: any, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
     const bankBin = bm.BANK_BIN || process.env.BANK_BIN || '970436';
     const accountNo = bm.BANK_ACC || process.env.BANK_ACC || '';
-    const bankName = bm.BANK_NAME || bm.BANK_LABEL || '';
+    const bankName = bm.BANK_LABEL || '';
 
     const { from, to } = req.query as Record<string, string>;
     const fromDate = from ? new Date(from) : null;
