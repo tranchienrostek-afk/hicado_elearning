@@ -628,13 +628,12 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       // Phase 3: Pre-create TuitionBill. This endpoint is intentionally manual:
       // the operator-provided sessions, unit price, and override total are the source of truth.
       try {
-        const effectivePrice = item.sessions > 0 ? Math.round(total / item.sessions) : item.pricePerSession;
         billDetail = [{
           classId: coveredClassIds[0] || '',
           className: coveredClassName,
           teacherNames,
           sessions: item.sessions,
-          pricePerSession: effectivePrice,
+          pricePerSession: item.pricePerSession,
           subtotal: total,
         }];
 

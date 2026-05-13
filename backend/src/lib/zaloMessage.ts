@@ -65,31 +65,51 @@ const teacherLabel = (teacherNames?: string[]) => teacherNames?.length ? teacher
 const classTitle = (className: string, teacherNames?: string[]) =>
   teacherNames?.length ? `${className} - ${teacherNames.join(', ')}` : className;
 
+export type TuitionItemBreakdown = {
+  pricePerSession: number;
+  sessions: number;
+  subtotal: number;
+  label?: 'OVERRIDE' | 'CLASS_DEFAULT';
+};
+
 function buildTuitionClassBlock(
   className: string,
   teacherNames: string[] | undefined,
   sessions: number,
   pricePerSession: number,
   subtotal: number,
-  index: number
+  index: number,
+  breakdown?: TuitionItemBreakdown[],
+  discountFrom?: string,
 ) {
-  // Đơn giá hiển thị phải khớp với subtotal/sessions để 4 số (buổi × đơn giá = thành tiền) nhất quán.
-  // Khi có date-range override, subtotal được tính theo split nên ≠ pricePerSession × sessions.
-  const displayPrice = sessions > 0 ? Math.round(subtotal / sessions) : pricePerSession;
-  return [
+  const lines = [
     `${classIcon(index)} ${classTitle(className, teacherNames)}`,
     ``,
     `👨‍🏫 Giáo viên: ${teacherLabel(teacherNames)}`,
     `🗓️ Số buổi học: ${sessions}`,
-    `💵 Học phí: ${displayPrice.toLocaleString('vi-VN')}đ/buổi`,
-    `🏷️ Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`,
-  ].join('\n');
+  ];
+
+  if (breakdown && breakdown.length > 1) {
+    lines.push(`💵 Học phí:`);
+    for (const g of breakdown) {
+      const note = g.label === 'OVERRIDE'
+        ? (discountFrom ? `ưu đãi từ ${discountFrom}` : 'giá ưu đãi')
+        : 'giá lớp';
+      lines.push(`   • ${g.sessions} buổi × ${g.pricePerSession.toLocaleString('vi-VN')}đ/buổi (${note}) = ${g.subtotal.toLocaleString('vi-VN')}đ`);
+    }
+  } else {
+    const singlePrice = breakdown?.[0]?.pricePerSession ?? pricePerSession;
+    lines.push(`💵 Học phí: ${singlePrice.toLocaleString('vi-VN')}đ/buổi`);
+  }
+
+  lines.push(`🏷️ Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`);
+  return lines.join('\n');
 }
 
-export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionPayload): string {
+export function buildCustomTuitionMessage(studentName: string, p: CustomTuitionPayload & { breakdown?: TuitionItemBreakdown[]; discountFrom?: string }): string {
   const dateRange = p.fromDate && p.toDate ? ` từ ${p.fromDate} đến ${p.toDate}` : '';
   const itemBlock = p.sessions > 0
-    ? buildTuitionClassBlock(p.className, p.teacherNames, p.sessions, p.pricePerSession, p.total, 0)
+    ? buildTuitionClassBlock(p.className, p.teacherNames, p.sessions, p.pricePerSession, p.total, 0, p.breakdown, p.discountFrom)
     : `(Không có buổi học trong kỳ)`;
 
   return [
@@ -116,7 +136,7 @@ export function buildMultiClassTuitionMessage(
 ): string {
   const dateRange = fromDate && toDate ? ` từ ${fromDate} đến ${toDate}` : '';
   const itemLines = items.length > 0
-    ? items.map((it, index) => buildTuitionClassBlock(it.className, it.teacherNames, it.sessions, it.pricePerSession, it.subtotal, index))
+    ? items.map((it, index) => buildTuitionClassBlock(it.className, it.teacherNames, it.sessions, it.pricePerSession, it.subtotal, index, it.breakdown, it.discountFromFormatted))
     : ["(Không có buổi học trong kỳ)"];
 
   return [

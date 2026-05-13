@@ -8,7 +8,7 @@ import { buildPaymentSlipPNG, buildMultiClassPaymentSlipPNG, deaccent } from '..
 import { generateVietQRString } from '../lib/vietqr';
 import { buildZaloImageMessage, uploadZaloImage, buildCustomTuitionMessage, buildMultiClassTuitionMessage } from '../lib/zaloMessage';
 import { generateBillCode } from '../lib/billCode';
-import { expectedForStudentClass } from '../lib/financeMath';
+import { expectedForStudentClass, breakdownForStudentClass } from '../lib/financeMath';
 import { summarizeCampaignLogs } from '../lib/campaignStats';
 
 const router = Router();
@@ -259,7 +259,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     const trace: string[] = [];
     let message: any;
     let billId: string | null = null;
-    let billDetail: Array<{ classId: string; className: string; teacherNames?: string[]; sessions: number; pricePerSession: number; subtotal: number }> = [];
+    let billDetail: Array<{ classId: string; className: string; teacherNames?: string[]; sessions: number; pricePerSession: number; subtotal: number; breakdown?: any[]; discountFromFormatted?: string }> = [];
 
     if (type === 'TUITION_REMINDER') {
       trace.push('①BILL...');
@@ -272,16 +272,21 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
         billDetail = await Promise.all(classes.map(async (cls) => {
           const cs = student.classes.find((c: any) => c.classId === cls.id);
           const classAtts = student.attendances.filter((a: any) => a.classId === cls.id);
-          const sess = classAtts.reduce((sum: number, a: any) => sum + (a.sessionUnits ?? 1), 0);
-          const subtotal = expectedForStudentClass(cls as any, student.id, classAtts as any, cs as any);
+          const { total: subtotal, groups } = breakdownForStudentClass(cls as any, student.id, classAtts as any, cs as any);
+          const sess = groups.reduce((s, g) => s + g.sessions, 0);
+          const dFmt = (cs as any)?.discountFrom
+            ? new Date((cs as any).discountFrom).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })
+            : undefined;
 
           return {
             classId: cls.id,
             className: cls.name,
             teacherNames: cls.teacher?.name ? [cls.teacher.name] : [],
             sessions: sess,
-            pricePerSession: (cs as any)?.customTuitionPerSession != null ? (cs as any).customTuitionPerSession : cls.tuitionPerSession,
-            subtotal
+            pricePerSession: groups[0]?.pricePerSession ?? cls.tuitionPerSession,
+            subtotal,
+            breakdown: groups,
+            discountFromFormatted: dFmt
           };
         }));
 
@@ -317,16 +322,18 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 
       const textMessage = billItems.length > 1 
         ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo)
-        : buildCustomTuitionMessage(student.name, { 
+        : buildCustomTuitionMessage(student.name, {
             className: billItems[0]?.className ?? '',
-            sessions: billItems[0]?.sessions || 0, 
-            pricePerSession: billItems[0]?.pricePerSession || 0, 
-            total: totalDue, 
+            sessions: billItems[0]?.sessions || 0,
+            pricePerSession: billItems[0]?.pricePerSession || 0,
+            total: totalDue,
             note: periodStr,
             fromDate: fmtFrom,
             toDate: fmtTo,
             collectionFrom: fmtCollFrom,
-            collectionTo: fmtCollTo
+            collectionTo: fmtCollTo,
+            breakdown: billItems[0]?.breakdown,
+            discountFrom: billItems[0]?.discountFromFormatted,
           });
 
       // Step 2: Build PNG
