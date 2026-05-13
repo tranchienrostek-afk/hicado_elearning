@@ -764,7 +764,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
             : 'No usable Zalo UID, phone number, or ZNS template';
       }
 
-      await prisma.zaloMessageLog.create({
+      await (prisma as any).zaloMessageLog.create({
         data: {
           phone: student.parentPhone || student.studentPhone || '', zaloUserId: student.zaloUserId,
           templateId: channel === 'ZNS' && templateId ? `ZNS_${templateId}` : 'CUSTOM_TUITION', trackingId,
@@ -1077,8 +1077,9 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
 // Preview a single ZaloMessageLog: rendered text + payment-slip PNG (regenerated on demand)
 router.get('/logs/:logId/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const log = await prisma.zaloMessageLog.findUnique({
-      where: { id: req.params.logId },
+    const logId = req.params.logId as string;
+    const log = await (prisma as any).zaloMessageLog.findUnique({
+      where: { id: logId },
       include: { student: { select: { name: true, studentCode: true } } }
     });
     if (!log) return res.status(404).json({ message: 'Không tìm thấy log' });
@@ -1100,8 +1101,9 @@ router.get('/logs/:logId/preview', authenticateToken, authorizeRoles('ADMIN', 'M
 
 router.get('/logs/:logId/payment-slip.png', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
   try {
-    const log = await prisma.zaloMessageLog.findUnique({
-      where: { id: req.params.logId },
+    const logId = req.params.logId as string;
+    const log = await (prisma as any).zaloMessageLog.findUnique({
+      where: { id: logId },
       include: { bill: true, student: { select: { name: true, studentCode: true } } }
     });
     if (!log?.bill || !log.renderMetadata) return res.status(404).end();

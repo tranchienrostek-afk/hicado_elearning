@@ -260,6 +260,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
     let message: any;
     let billId: string | null = null;
     let billDetail: Array<{ classId: string; className: string; teacherNames?: string[]; sessions: number; pricePerSession: number; subtotal: number; breakdown?: any[]; discountFromFormatted?: string }> = [];
+    let textMessage: string | null = null;
+    let renderMetadata: string | null = null;
 
     if (type === 'TUITION_REMINDER') {
       trace.push('①BILL...');
@@ -328,7 +330,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       const bankAccount = bm.BANK_ACC || process.env.BANK_ACC || '';
       const accountName = bm.BANK_NAME || '';
 
-      const textMessage = billItems.length > 1
+      textMessage = billItems.length > 1
         ? buildMultiClassTuitionMessage(student.name, billItems, totalDue, fmtFrom, fmtTo, fmtCollFrom, fmtCollTo, bankName, bankAccount, accountName, memo)
         : buildCustomTuitionMessage(student.name, {
             className: billItems[0]?.className ?? '',
@@ -345,7 +347,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
             bankName, bankAccount, accountName, memo,
           });
 
-      const renderMetadata = JSON.stringify({
+      renderMetadata = JSON.stringify({
         memo, qrData, bankName, bankAccount, accountName,
         fmtFrom, fmtTo, fmtCollFrom, fmtCollTo, billRef,
       });
