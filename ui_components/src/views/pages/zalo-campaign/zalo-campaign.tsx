@@ -124,6 +124,7 @@ export const ZaloCampaignPage = () => {
   const [multiClassPreview, setMultiClassPreview] = useState<MultiClassPreviewItem[]>([]);
   const [mergeOptions, setMergeOptions] = useState<Record<string, MergeOption>>({});
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [forceResendAllSkipped, setForceResendAllSkipped] = useState(false);
   const [resendConfirmStudents, setResendConfirmStudents] = useState<Array<{ id: string; name: string }>>([]);
 
   // ── Followers ──────────────────────────────────────────────────────────────
@@ -1393,7 +1394,38 @@ export const ZaloCampaignPage = () => {
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <button onClick={() => handleSendCampaign()} disabled={isSending}
+                  {(() => {
+                    const willBeSkipped = recipientPreview.filter(s => {
+                      const mc = multiClassPreview.find(p => p.studentId === s.id);
+                      if (!mc?.alreadySent) return false;
+                      return !mergeOptions[s.id]?.forceResend;
+                    });
+                    if (willBeSkipped.length === 0) return null;
+                    return (
+                      <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <p className="font-black text-amber-700 text-sm">
+                            ⚠ {willBeSkipped.length} học sinh sẽ bị bỏ qua (đã gửi kỳ {wizardBillingMonth})
+                          </p>
+                          <label className="flex items-center gap-2 text-xs font-bold text-amber-700 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={forceResendAllSkipped}
+                              onChange={e => setForceResendAllSkipped(e.target.checked)}
+                            />
+                            Gửi lại tất cả
+                          </label>
+                        </div>
+                        <details className="text-xs text-amber-700">
+                          <summary className="cursor-pointer font-bold">Danh sách HS bị bỏ qua</summary>
+                          <ul className="mt-2 pl-4 list-disc">
+                            {willBeSkipped.map(s => <li key={s.id}>{s.name}</li>)}
+                          </ul>
+                        </details>
+                      </div>
+                    );
+                  })()}
+                  <button onClick={() => handleSendCampaign(forceResendAllSkipped)} disabled={isSending}
                     className="w-full bg-hicado-navy text-white py-4 rounded-2xl font-black text-sm uppercase tracking-widest disabled:bg-hicado-slate/50 hover:scale-[1.02] transition-all shadow-lg">
                     {isSending ? '⏳ Đang gửi...' : `🚀 Gửi cho ${uidGroup.length + (wizardFallbackZNS && !wizardRequireZalo ? phoneGroup.length : 0)} người nhận`}
                   </button>

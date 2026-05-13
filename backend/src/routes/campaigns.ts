@@ -68,6 +68,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   const where: any = {};
   if (filters.tuitionStatuses?.length) where.tuitionStatus = { in: filters.tuitionStatuses };
   if (filters.requireZalo) where.zaloUserId = { not: null };
+  if (filters.classIds?.length) where.classes = { some: { classId: { in: filters.classIds } } };
 
   const from = filters.fromDate ? new Date(filters.fromDate) : null;
   const to = filters.toDate ? new Date(filters.toDate) : null;
