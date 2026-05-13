@@ -73,12 +73,15 @@ function buildTuitionClassBlock(
   subtotal: number,
   index: number
 ) {
+  // Đơn giá hiển thị phải khớp với subtotal/sessions để 4 số (buổi × đơn giá = thành tiền) nhất quán.
+  // Khi có date-range override, subtotal được tính theo split nên ≠ pricePerSession × sessions.
+  const displayPrice = sessions > 0 ? Math.round(subtotal / sessions) : pricePerSession;
   return [
     `${classIcon(index)} ${classTitle(className, teacherNames)}`,
     ``,
     `👨‍🏫 Giáo viên: ${teacherLabel(teacherNames)}`,
     `🗓️ Số buổi học: ${sessions}`,
-    `💵 Học phí: ${pricePerSession.toLocaleString('vi-VN')}đ/buổi`,
+    `💵 Học phí: ${displayPrice.toLocaleString('vi-VN')}đ/buổi`,
     `🏷️ Thành tiền: ${subtotal.toLocaleString('vi-VN')}đ`,
   ].join('\n');
 }
