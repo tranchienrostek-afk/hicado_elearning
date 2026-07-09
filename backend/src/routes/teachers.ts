@@ -26,7 +26,12 @@ router.get('/:id', authenticateToken, async (req, res) => {
       include: { classes: true }
     });
     if (!teacher) return res.status(404).json({ message: 'Không tìm thấy giáo viên' });
-    res.json(teacher);
+
+    const canSeeSalary = ['ADMIN', 'MANAGER'].includes((req as any).user?.role);
+    if (canSeeSalary) return res.json(teacher);
+
+    const { hourlyRate, salaryRate, ...safeTeacher } = teacher as any;
+    res.json(safeTeacher);
   } catch (error) {
     res.status(500).json({ message: 'Lỗi máy chủ' });
   }

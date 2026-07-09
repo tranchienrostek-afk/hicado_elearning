@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { expectedForStudentClass } from '../lib/financeMath';
 import { startOfDayUTC, endOfDayUTC, monthRangeUTC } from '../lib/dateRange';
 
@@ -228,7 +228,7 @@ router.get('/:classId', authenticateToken, async (req, res) => {
 });
 
 // Mark attendance
-router.post('/mark', authenticateToken, async (req, res) => {
+router.post('/mark', authenticateToken, authorizeRoles('ADMIN', 'MANAGER', 'TEACHER'), async (req, res) => {
   const { classId, studentId, date, status, note, slot = 'MORNING', sessionUnits = 1, reason } = req.body;
   const user = (req as any).user;
 
@@ -326,7 +326,7 @@ router.post('/mark', authenticateToken, async (req, res) => {
 });
 
 // Edit wrong attendance entry
-router.patch('/:id', authenticateToken, async (req, res) => {
+router.patch('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER', 'TEACHER'), async (req, res) => {
   const id = req.params.id as string;
   const { classId, studentId, date, slot, status, note, sessionUnits, reason } = req.body;
   const user = (req as any).user;
@@ -403,7 +403,7 @@ router.patch('/:id', authenticateToken, async (req, res) => {
 });
 
 // Delete wrong attendance entry and keep audit trail
-router.delete('/:id', authenticateToken, async (req, res) => {
+router.delete('/:id', authenticateToken, authorizeRoles('ADMIN', 'MANAGER', 'TEACHER'), async (req, res) => {
   const id = req.params.id as string;
   const { reason } = req.body || {};
   const user = (req as any).user;

@@ -56,6 +56,11 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
   const studentId = req.params.studentId as string;
   const classId = req.params.classId as string;
 
+  const requester = (req as any).user;
+  if (requester?.role === 'STUDENT' && requester.studentId !== studentId) {
+    return res.status(403).json({ message: 'Không có quyền xem QR của học sinh khác' });
+  }
+
   try {
     const [student, classItem, cs] = await Promise.all([
       prisma.student.findUnique({
