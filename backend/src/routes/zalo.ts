@@ -4,7 +4,7 @@ import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import { zaloApiClient, getZaloConfig, ZALO_OA_API } from '../lib/zaloAuth';
 import { buildCustomTuitionMessage, CustomTuitionPayload, buildZaloImageMessage, uploadZaloImage, buildMultiClassTuitionMessage } from '../lib/zaloMessage';
-import { generateBillCode } from '../lib/billCode';
+import { generateUniqueBillCode } from '../lib/billCode';
 import { buildMultiClassPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
 import { expectedForStudentClass } from '../lib/financeMath';
@@ -691,6 +691,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
           }];
         }
 
+        const referenceCode = await generateUniqueBillCode();
         const bill = await prisma.tuitionBill.create({
           data: {
             studentId: student.id,
@@ -699,7 +700,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
             toDate: to || new Date(),
             amount: total,
             sessionsDetail: JSON.stringify(billDetail),
-            referenceCode: generateBillCode(),
+            referenceCode,
             createdByName: user.name || user.username || 'System',
             billingMonth: billingMonth || null,
             notes: item.note

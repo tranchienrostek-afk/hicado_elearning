@@ -7,7 +7,7 @@ import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass, buildBillItemForClass, sumBillItems } from '../lib/financeMath';
 import { startOfDayUTC, endOfDayUTC } from '../lib/dateRange';
 
-import { generateBillCode } from '../lib/billCode';
+import { generateUniqueBillCode } from '../lib/billCode';
 
 const router = Router();
 
@@ -99,6 +99,12 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
     const amount = billAmount || billItem.subtotal;
     const memoPrefix = billRef ? `${billRef} ` : '';
     const memo = deaccent(`${memoPrefix}${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`).trim().toUpperCase().slice(0, 50);
+
+    if (amount <= 0) {
+      // Don't hand out an amount-less "pay whatever you like" QR when nothing is
+      // actually due — that's a valid EMVCo QR but a confusing one to show a parent.
+      return res.json({ qrImage: null, student: student.name, className: classItem.name, attended, amount: 0, memo, billRef, message: 'Không có số tiền cần thanh toán' });
+    }
 
     const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
     const qrImage = await QRCode.toDataURL(qrData, {
@@ -266,6 +272,11 @@ router.get('/public/student/:studentId', async (req, res) => {
         const periodLabel = fromDate && toDate ? ` ${from.slice(5)}den${to.slice(5)}` : '';
         const memo = deaccent(`${student.studentCode ?? student.id}${periodLabel} ${cls.classCode ?? cls.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
         
+        if (amount <= 0) {
+          // Nothing owed for this class this period — don't show an amount-less QR.
+          return { classId: cls.id, className: cls.name, classCode: cls.classCode, attended, amount: 0, memo, qrImage: null };
+        }
+
         const qrData = generateVietQRString(bankBin, accountNo, amount, memo);
         const qrImage = await QRCode.toDataURL(qrData, { margin: 1, color: { dark: '#000000', light: '#ffffff' } });
         return { classId: cls.id, className: cls.name, classCode: cls.classCode, attended, amount, memo, qrImage };
@@ -586,7 +597,7 @@ router.post('/cash-payment', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
       return res.status(400).json({ message: 'Số tiền phải lớn hơn 0' });
     }
 
-    const referenceCode = generateBillCode();
+    const referenceCode = await generateUniqueBillCode();
 
     const result = await prisma.$transaction(async (tx) => {
       const bill = await tx.tuitionBill.create({
@@ -665,6 +676,7 @@ router.post('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asy
     const amount = sumBillItems(detailItems);
     if (amount === 0) return res.status(400).json({ message: 'Hóa đơn có số tiền bằng 0, không thể tạo' });
 
+    const referenceCode = await generateUniqueBillCode();
     const bill = await prisma.tuitionBill.create({
       data: {
         studentId,
@@ -674,7 +686,7 @@ router.post('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asy
         dueDate: dueDate ? new Date(dueDate) : null,
         amount,
         sessionsDetail: JSON.stringify(detailItems),
-        referenceCode: generateBillCode(),
+        referenceCode,
         notes,
         createdByName: user.name || user.username || 'System',
         status: 'UNPAID'

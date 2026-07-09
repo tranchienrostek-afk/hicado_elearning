@@ -10,6 +10,19 @@ function normalizePaymentText(value: string): string {
   return value.toUpperCase().trim();
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// A plain substring check lets a shorter code that happens to be a prefix of another
+// student's code match the wrong student (e.g. code "HS1" is a substring of "HS123").
+// Require the identifier to appear as a whole token — bounded by the start/end of the
+// content or a non-alphanumeric separator — rather than anywhere inside a longer token.
+function containsWholeToken(content: string, identifier: string): boolean {
+  const pattern = new RegExp(`(?<![A-Z0-9])${escapeRegExp(identifier)}(?![A-Z0-9])`);
+  return pattern.test(content);
+}
+
 export function findStudentByPaymentContent<T extends PaymentStudent>(
   students: T[],
   content: string
@@ -21,7 +34,7 @@ export function findStudentByPaymentContent<T extends PaymentStudent>(
       .filter((value): value is string => Boolean(value))
       .map(normalizePaymentText);
 
-    return identifiers.some(identifier => normalized.includes(identifier));
+    return identifiers.some(identifier => containsWholeToken(normalized, identifier));
   });
 }
 

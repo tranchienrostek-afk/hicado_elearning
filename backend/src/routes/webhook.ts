@@ -178,6 +178,19 @@ async function processSepayTransaction(payload: {
   const combinedContent = `${sepayCode || ''} ${content || ''}`.toUpperCase().trim();
   console.log(`[SePay] Processing: amount=${transferAmount} content="${combinedContent}"`);
 
+  // Idempotency: SePay retries webhook delivery on timeout, and the Transaction
+  // upsert below only dedupes the Transaction row itself — everything after it
+  // (BillPayment, paidAmount increment, tuitionStatus) previously re-ran on every
+  // retry and double-counted the payment. Short-circuit before any side effect
+  // runs a second time for the same sepayId.
+  if (id != null) {
+    const existingTx = await prisma.transaction.findUnique({ where: { sepayId: id } as any });
+    if (existingTx) {
+      console.log(`[SePay] Duplicate delivery for sepayId=${id}, already processed — skipping`);
+      return { success: true, message: 'Already processed (duplicate webhook delivery)' };
+    }
+  }
+
   // Priority 1: match by TuitionBill referenceCode (HD-XXXXXX) — most precise
   const bill = await findBillByPaymentContent(combinedContent);
 
@@ -202,10 +215,8 @@ async function processSepayTransaction(payload: {
 
   console.log(`[SePay] Matched student=${matchedStudent.name} class=${matchedClass?.name ?? 'none'} bill=${bill?.referenceCode ?? 'none'}`);
 
-  const transaction = await prisma.transaction.upsert({
-    where: { sepayId: id ?? -1 } as any,
-    update: {},
-    create: {
+  const transaction = await prisma.transaction.create({
+    data: {
       sepayId: id ?? null,
       amount: transferAmount,
       date: transactionDate ? new Date(transactionDate) : new Date(),
@@ -220,9 +231,9 @@ async function processSepayTransaction(payload: {
   });
 
   // Link payment to TuitionBill if matched
+  let billStatus: 'PAID' | 'PARTIAL' | null = null;
   if (bill && bill.status !== 'CANCELLED') {
-    const newPaidAmount = bill.paidAmount + transferAmount;
-    const newStatus = newPaidAmount >= bill.amount ? 'PAID' : 'PARTIAL';
+    billStatus = (bill.paidAmount + transferAmount) >= bill.amount ? 'PAID' : 'PARTIAL';
 
     await prisma.$transaction([
       prisma.billPayment.create({
@@ -236,13 +247,19 @@ async function processSepayTransaction(payload: {
       }),
       prisma.tuitionBill.update({
         where: { id: bill.id },
-        data: { paidAmount: newPaidAmount, status: newStatus }
+        data: { paidAmount: { increment: transferAmount }, status: billStatus }
       })
     ]);
-    console.log(`[SePay] Linked to TuitionBill: ${bill.referenceCode} status=${newStatus}`);
+    console.log(`[SePay] Linked to TuitionBill: ${bill.referenceCode} status=${billStatus}`);
   }
 
-  await prisma.student.update({ where: { id: matchedStudent.id }, data: { tuitionStatus: 'PAID' } });
+  // Only flip the coarse tuitionStatus flag to PAID when there's no bill to track
+  // partial progress against, or the matched bill is now fully settled — a partial
+  // payment on a bill must not report the student as fully paid (TuitionStatus has
+  // no PARTIAL value, so a partial payment simply leaves the existing status alone).
+  if (!bill || billStatus === 'PAID') {
+    await prisma.student.update({ where: { id: matchedStudent.id }, data: { tuitionStatus: 'PAID' } });
+  }
 
   if (matchedClass) {
     await prisma.classStudent.upsert({

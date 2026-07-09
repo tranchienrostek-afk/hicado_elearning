@@ -7,7 +7,7 @@ import { formatPhone } from './zalo';
 import { buildPaymentSlipPNG, buildMultiClassPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildZaloImageMessage, uploadZaloImage, buildCustomTuitionMessage, buildMultiClassTuitionMessage } from '../lib/zaloMessage';
-import { generateBillCode } from '../lib/billCode';
+import { generateUniqueBillCode } from '../lib/billCode';
 import { expectedForStudentClass, breakdownForStudentClass } from '../lib/financeMath';
 import { summarizeCampaignLogs } from '../lib/campaignStats';
 import { startOfDayUTC, endOfDayUTC } from '../lib/dateRange';
@@ -345,6 +345,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
           continue;
         }
 
+        const referenceCode = await generateUniqueBillCode();
         const bill = await prisma.tuitionBill.create({
           data: {
             studentId: student.id,
@@ -353,7 +354,7 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
             toDate: to || new Date(),
             amount: totalDue,
             sessionsDetail: JSON.stringify(billDetail),
-            referenceCode: generateBillCode(),
+            referenceCode,
             createdByName: 'Campaign System',
             billingMonth: filters.billingMonth || null,
           }
