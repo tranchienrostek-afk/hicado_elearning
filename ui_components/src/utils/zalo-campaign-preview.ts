@@ -5,7 +5,12 @@ export function shouldLoadMultiClassPreview(
   step: number,
   wizardType: ZaloCampaignWizardType
 ) {
-  return activeTab === 'create' && wizardType === 'TUITION_REMINDER' && (step === 3 || step === 4);
+  if (activeTab !== 'create' || (step !== 3 && step !== 4)) return false;
+  // CUSTOM_TUITION also needs the backend's accurate, override-aware per-session
+  // price (mainClass.subtotal / mainClass.attended) to seed its suggested price —
+  // computing "is the discount active as of today" locally ignores the per-session
+  // date the backend actually bills against.
+  return wizardType === 'TUITION_REMINDER' || wizardType === 'CUSTOM_TUITION';
 }
 
 export function getUnconfirmedAlreadySentRecipients<T extends { id: string }>(

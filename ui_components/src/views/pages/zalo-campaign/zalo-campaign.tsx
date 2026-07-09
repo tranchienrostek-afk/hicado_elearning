@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useCenterStore, useAuthStore } from '@/store';
 import { getUnconfirmedAlreadySentRecipients, shouldLoadMultiClassPreview } from '@/utils/zalo-campaign-preview';
 
@@ -119,6 +119,11 @@ export const ZaloCampaignPage = () => {
   const [customGlobalSessions, setCustomGlobalSessions] = useState(8);
   const [customGlobalPrice, setCustomGlobalPrice] = useState(150000);
   const [customSendVia, setCustomSendVia] = useState<'AUTO' | 'CS' | 'ZNS'>('AUTO');
+  // Tracks which students' pricePerSession is still an auto-computed suggestion
+  // (not yet reviewed/edited by the operator) — lets the auto-populate effect
+  // refine the suggested price once the backend preview loads, without clobbering
+  // a value the operator already typed in.
+  const autoPricedStudentIds = useRef<Set<string>>(new Set());
 
   // Multi-class Deduplication State (Task #10)
   const [multiClassPreview, setMultiClassPreview] = useState<MultiClassPreviewItem[]>([]);
@@ -468,6 +473,7 @@ export const ZaloCampaignPage = () => {
     setWizardMessage(''); setSendResult(null); setCustomTuitionItems({}); setMergeOptions({}); setCustomSendVia('AUTO'); setResendConfirmStudents([]);
     setCollectionFromDate(new Date().toISOString().slice(0, 10));
     setCollectionToDate(new Date(new Date().getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+    autoPricedStudentIds.current.clear();
   };
 
   // ── Followers helpers ──────────────────────────────────────────────────────
@@ -551,33 +557,29 @@ export const ZaloCampaignPage = () => {
       let changed = false;
       
       recipientPreview.forEach(s => {
-        if (!next[s.id]) {
+        const isNewEntry = !next[s.id];
+        if (isNewEntry || autoPricedStudentIds.current.has(s.id)) {
           const cls = classes.find(c => c.id === primaryWizardClassId);
-          let price = cls?.tuitionPerSession || customGlobalPrice;
-          
-          const override = cls?.students?.find((cs: any) => cs.studentId === s.id);
-          if (override?.customTuitionPerSession != null) {
-            const now = new Date();
-            now.setHours(0, 0, 0, 0);
-            const from = override.discountFrom ? new Date(override.discountFrom) : null;
-            const to = override.discountTo ? new Date(override.discountTo) : null;
-            if (to) to.setHours(23, 59, 59, 999);
-            
-            const isAfterFrom = !from || now >= from;
-            const isBeforeTo = !to || now <= to;
-            
-            if (isAfterFrom && isBeforeTo) {
-              price = override.customTuitionPerSession;
-            }
-          }
+          // Prefer the backend's actual per-session-date breakdown (subtotal / attended)
+          // over a local "is the discount active as of today" guess — the discount
+          // window is evaluated per attendance date server-side, not against "now",
+          // so pricing by today's date disagrees with the amount actually billed
+          // whenever the period straddles the discount boundary. The preview loads
+          // asynchronously, so refine the suggested price once it arrives instead of
+          // only computing it once on the (still-empty) first render.
+          const mc = multiClassPreview.find(p => p.studentId === s.id)?.mainClass;
+          const price = mc && mc.attended > 0
+            ? Math.round(mc.subtotal / mc.attended)
+            : (cls?.tuitionPerSession || customGlobalPrice);
 
-          next[s.id] = { sessions: customGlobalSessions, pricePerSession: price };
+          next[s.id] = { sessions: next[s.id]?.sessions ?? customGlobalSessions, pricePerSession: price };
+          autoPricedStudentIds.current.add(s.id);
           changed = true;
         }
       });
       if (changed) setCustomTuitionItems(next);
     }
-  }, [activeTab, step, wizardType, recipientPreview, classes, primaryWizardClassId, customGlobalSessions, customGlobalPrice]);
+  }, [activeTab, step, wizardType, recipientPreview, classes, primaryWizardClassId, customGlobalSessions, customGlobalPrice, multiClassPreview]);
 
   useEffect(() => {
     if (shouldLoadMultiClassPreview(activeTab, step, wizardType)) {
@@ -1045,9 +1047,14 @@ export const ZaloCampaignPage = () => {
                 </div>
               )}
 
+              {wizardType === 'TUITION_REMINDER' && wizardClassIds.length === 0 && (
+                <p className="text-xs text-rose-500 font-bold">Vui lòng chọn ít nhất một lớp — chiến dịch nhắc học phí không thể gửi cho toàn bộ trung tâm.</p>
+              )}
               <div className="flex gap-3">
                 <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-2xl border border-hicado-slate font-black text-sm text-hicado-navy/40 hover:bg-hicado-slate transition-all">← Quay lại</button>
-                <button onClick={() => setStep(3)} className="flex-1 bg-hicado-navy text-white py-3 rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-[1.02] transition-all">Xem danh sách →</button>
+                <button onClick={() => setStep(3)}
+                  disabled={wizardType === 'TUITION_REMINDER' && wizardClassIds.length === 0}
+                  className="flex-1 bg-hicado-navy text-white py-3 rounded-2xl font-black text-sm uppercase tracking-widest hover:scale-[1.02] transition-all disabled:opacity-40 disabled:hover:scale-100 disabled:cursor-not-allowed">Xem danh sách →</button>
               </div>
             </div>
           )}
@@ -1092,6 +1099,7 @@ export const ZaloCampaignPage = () => {
                       const next = { ...customTuitionItems };
                       recipientPreview.forEach(s => {
                         next[s.id] = { ...next[s.id], sessions: customGlobalSessions, pricePerSession: customGlobalPrice };
+                        autoPricedStudentIds.current.delete(s.id);
                       });
                       setCustomTuitionItems(next);
                     }} className="bg-hicado-navy text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase self-end h-[38px]">Áp dụng</button>
@@ -1171,7 +1179,10 @@ export const ZaloCampaignPage = () => {
                                   className="w-full bg-hicado-slate/20 rounded-lg px-2 py-1 text-xs font-bold outline-none" />
                               </td>
                               <td className="px-4 py-3">
-                                <input type="number" min={0} value={item.pricePerSession} onChange={e => setCustomTuitionItems(prev => ({ ...prev, [s.id]: { ...item, pricePerSession: Math.max(0, Number(e.target.value) || 0), totalOverride: undefined } }))}
+                                <input type="number" min={0} value={item.pricePerSession} onChange={e => {
+                                    autoPricedStudentIds.current.delete(s.id);
+                                    setCustomTuitionItems(prev => ({ ...prev, [s.id]: { ...item, pricePerSession: Math.max(0, Number(e.target.value) || 0), totalOverride: undefined } }));
+                                  }}
                                   className="w-full bg-hicado-slate/20 rounded-lg px-2 py-1 text-xs font-bold outline-none" />
                               </td>
                               <td className="px-4 py-3 text-right">

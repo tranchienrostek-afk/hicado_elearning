@@ -7,11 +7,16 @@ describe('zalo campaign preview state', () => {
     expect(shouldLoadMultiClassPreview('create', 4, 'TUITION_REMINDER')).toBe(true);
   });
 
-  it('does not keep tuition preview data outside the create tuition reminder flow', () => {
+  it('also loads it for CUSTOM_TUITION so the suggested price is override-accurate', () => {
+    expect(shouldLoadMultiClassPreview('create', 3, 'CUSTOM_TUITION')).toBe(true);
+    expect(shouldLoadMultiClassPreview('create', 4, 'CUSTOM_TUITION')).toBe(true);
+  });
+
+  it('does not keep tuition preview data outside the create wizard flow', () => {
     expect(shouldLoadMultiClassPreview('mapping', 4, 'TUITION_REMINDER')).toBe(false);
-    expect(shouldLoadMultiClassPreview('create', 4, 'CUSTOM_TUITION')).toBe(false);
     expect(shouldLoadMultiClassPreview('create', 2, 'TUITION_REMINDER')).toBe(false);
     expect(shouldLoadMultiClassPreview('create', 5, 'TUITION_REMINDER')).toBe(false);
+    expect(shouldLoadMultiClassPreview('create', 2, 'CUSTOM_TUITION')).toBe(false);
   });
 });
 
