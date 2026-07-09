@@ -2,6 +2,7 @@ import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken } from '../middleware/auth';
 import { expectedForStudentClass } from '../lib/financeMath';
+import { startOfDayUTC, endOfDayUTC, monthRangeUTC } from '../lib/dateRange';
 
 const router = Router();
 const allowedSlots = ['MORNING', 'AFTERNOON', 'EVENING', 'CUSTOM'] as const;
@@ -11,10 +12,9 @@ router.get('/monthly-report', authenticateToken, async (req, res) => {
   const { classId, month } = req.query as { classId: string; month: string };
   if (!classId || !month) return res.status(400).json({ message: 'Thiếu classId hoặc month' });
 
-  // month = "2026-05" → dateFrom = 2026-05-01, dateTo = 2026-05-31
+  // month = "2026-05" → dateFrom = 2026-05-01, dateTo = 2026-05-31 (UTC — attendance dates are stored at UTC midnight)
   const [year, mon] = month.split('-').map(Number);
-  const dateFrom = new Date(year, mon - 1, 1);
-  const dateTo = new Date(year, mon, 0, 23, 59, 59); // last day of month
+  const { from: dateFrom, to: dateTo } = monthRangeUTC(year, mon);
 
   try {
     const [cls, records] = await Promise.all([
@@ -112,10 +112,13 @@ router.get('/overview', authenticateToken, async (req, res) => {
   if (!classId || !fromDate || !toDate)
     return res.status(400).json({ message: 'Thiếu classId, fromDate hoặc toDate' });
 
-  const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
-  const to   = new Date(toDate);   to.setHours(23, 59, 59, 999);
-  if (isNaN(from.getTime()) || isNaN(to.getTime()))
+  let from: Date, to: Date;
+  try {
+    from = startOfDayUTC(fromDate);
+    to = endOfDayUTC(toDate);
+  } catch {
     return res.status(400).json({ message: 'fromDate hoặc toDate không hợp lệ' });
+  }
   if (from > to)
     return res.status(400).json({ message: 'fromDate phải trước toDate' });
 
@@ -240,12 +243,19 @@ router.post('/mark', authenticateToken, async (req, res) => {
       await prisma.user.findUnique({ where: { id: user.id }, select: { name: true } })
     )?.name;
 
+    let normalizedDate: Date;
+    try {
+      normalizedDate = startOfDayUTC(date);
+    } catch {
+      return res.status(400).json({ message: 'date khong hop le' });
+    }
+
     const existing = await prisma.attendance.findUnique({
       where: {
         classId_studentId_date_slot: {
           classId,
           studentId,
-          date: new Date(date),
+          date: normalizedDate,
           slot: normalizedSlot,
         }
       }
@@ -256,7 +266,7 @@ router.post('/mark', authenticateToken, async (req, res) => {
         classId_studentId_date_slot: {
           classId,
           studentId,
-          date: new Date(date),
+          date: normalizedDate,
           slot: normalizedSlot,
         }
       },
@@ -272,7 +282,7 @@ router.post('/mark', authenticateToken, async (req, res) => {
       create: {
         classId,
         studentId,
-        date: new Date(date),
+        date: normalizedDate,
         slot: normalizedSlot,
         sessionUnits: normalizedSessionUnits,
         status,
@@ -335,12 +345,21 @@ router.patch('/:id', authenticateToken, async (req, res) => {
       return res.status(400).json({ message: 'sessionUnits phai lon hon 0' });
     }
 
+    let nextDate = existing.date;
+    if (date) {
+      try {
+        nextDate = startOfDayUTC(date);
+      } catch {
+        return res.status(400).json({ message: 'date khong hop le' });
+      }
+    }
+
     const updated = await prisma.attendance.update({
       where: { id },
       data: {
         classId: classId ?? existing.classId,
         studentId: studentId ?? existing.studentId,
-        date: date ? new Date(date) : existing.date,
+        date: nextDate,
         slot: nextSlot,
         status: status ?? existing.status,
         note: note ?? existing.note,

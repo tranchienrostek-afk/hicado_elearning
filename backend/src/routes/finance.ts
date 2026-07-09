@@ -4,7 +4,8 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import QRCode from 'qrcode';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
-import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass } from '../lib/financeMath';
+import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass, buildBillItemForClass, sumBillItems } from '../lib/financeMath';
+import { startOfDayUTC, endOfDayUTC } from '../lib/dateRange';
 
 import { generateBillCode } from '../lib/billCode';
 
@@ -56,7 +57,7 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
   const classId = req.params.classId as string;
 
   try {
-    const [student, classItem] = await Promise.all([
+    const [student, classItem, cs] = await Promise.all([
       prisma.student.findUnique({
         where: { id: studentId },
         select: { id: true, studentCode: true, name: true }
@@ -64,7 +65,8 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
       prisma.class.findUnique({
         where: { id: classId },
         select: { id: true, classCode: true, name: true, tuitionPerSession: true, totalSessions: true }
-      })
+      }),
+      prisma.classStudent.findUnique({ where: { classId_studentId: { classId, studentId } } })
     ]);
 
     if (!student || !classItem) {
@@ -75,7 +77,7 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
     const bankCfgMap = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
     const bankBin = bankCfgMap.BANK_BIN || process.env.BANK_BIN || '970436';
     const accountNo = bankCfgMap.BANK_ACC || process.env.BANK_ACC || '123456789';
-    
+
     // Check if we have a specific bill
     const billId = req.query.billId as string;
     let billRef = '';
@@ -88,12 +90,13 @@ router.get('/qr/:studentId/:classId', authenticateToken, async (req, res) => {
       }
     }
 
-    const attendedAgg = await prisma.attendance.aggregate({
-      _sum: { sessionUnits: true },
+    const attendanceRecords = await prisma.attendance.findMany({
       where: { studentId, classId, status: 'PRESENT' },
+      select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true },
     });
-    const attended = attendedAgg._sum.sessionUnits || 0;
-    const amount = billAmount || (classItem.tuitionPerSession * attended);
+    const billItem = buildBillItemForClass(classItem as any, studentId, attendanceRecords as any, cs || undefined);
+    const attended = billItem.sessions;
+    const amount = billAmount || billItem.subtotal;
     const memoPrefix = billRef ? `${billRef} ` : '';
     const memo = deaccent(`${memoPrefix}${student.studentCode ?? ''} ${classItem.classCode ?? ''} ${student.name}`).trim().toUpperCase().slice(0, 50);
 
@@ -231,21 +234,19 @@ router.get('/public/student/:studentId', async (req, res) => {
     const bankName = bm.BANK_LABEL || '';
 
     const { from, to } = req.query as Record<string, string>;
-    const fromDate = from ? new Date(from) : null;
-    const toDate = to ? new Date(to) : null;
-    if (fromDate) fromDate.setHours(0,0,0,0);
-    if (toDate) toDate.setHours(23,59,59,999);
+    const fromDate = from ? startOfDayUTC(from) : null;
+    const toDate = to ? endOfDayUTC(to) : null;
 
     const classQRs = await Promise.all(
       student.classes.map(async cs => {
         const cls = cs.class;
-        const [attendedAgg, adjustmentAgg] = await Promise.all([
-          prisma.attendance.aggregate({
-            _sum: { sessionUnits: true },
-            where: { 
+        const [attendanceRecords, adjustmentAgg] = await Promise.all([
+          prisma.attendance.findMany({
+            where: {
               studentId: student.id, classId: cls.id, status: 'PRESENT',
               ...(fromDate || toDate ? { date: { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) } } : {})
             },
+            select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true },
           }),
           prisma.paymentAdjustment.aggregate({
             _sum: { amount: true },
@@ -256,8 +257,9 @@ router.get('/public/student/:studentId', async (req, res) => {
           })
         ]);
 
-        const attended = attendedAgg._sum.sessionUnits || 0;
-        let amount = cls.tuitionPerSession * attended;
+        const billItem = buildBillItemForClass(cls as any, student.id, attendanceRecords as any, cs as any);
+        const attended = billItem.sessions;
+        let amount = billItem.subtotal;
         const paidOrAdj = adjustmentAgg._sum.amount || 0;
         amount = Math.max(0, amount - paidOrAdj);
 
@@ -280,29 +282,32 @@ router.get('/public/student/:studentId', async (req, res) => {
   }
 });
 
-// Public payment-slip image — navy header + info + QR in one PNG, used in Zalo image messages
-router.get('/qr-png/:studentId/:classId', async (req, res) => {
+// Payment-slip image — navy header + info + QR in one PNG, used in Zalo image messages
+router.get('/qr-png/:studentId/:classId', authenticateToken, async (req, res) => {
   try {
-    const [student, classItem, bankCfg] = await Promise.all([
-      prisma.student.findUnique({ where: { id: req.params.studentId }, select: { id: true, studentCode: true, name: true } }),
-      prisma.class.findUnique({ where: { id: req.params.classId }, select: { id: true, classCode: true, name: true, tuitionPerSession: true, totalSessions: true } }),
+    const studentIdParam = req.params.studentId as string;
+    const classIdParam = req.params.classId as string;
+    const [student, classItem, cs, bankCfg] = await Promise.all([
+      prisma.student.findUnique({ where: { id: studentIdParam }, select: { id: true, studentCode: true, name: true } }),
+      prisma.class.findUnique({ where: { id: classIdParam }, select: { id: true, classCode: true, name: true, tuitionPerSession: true, totalSessions: true } }),
+      prisma.classStudent.findUnique({ where: { classId_studentId: { classId: classIdParam, studentId: studentIdParam } } }),
       prisma.systemConfig.findMany({ where: { key: { in: ['BANK_BIN', 'BANK_ACC'] } } }),
     ]);
     if (!student || !classItem) return res.status(404).end();
     const bm = bankCfg.reduce((a, r) => { a[r.key] = r.value; return a; }, {} as Record<string, string>);
-    const attendedFromQuery = req.query.attended != null ? Number(req.query.attended) : null;
-    const attendedAgg = attendedFromQuery == null ? await prisma.attendance.aggregate({
-      _sum: { sessionUnits: true },
+    const attendanceRecords = await prisma.attendance.findMany({
       where: { studentId: student.id, classId: classItem.id, status: 'PRESENT' },
-    }) : null;
-    const attended = attendedFromQuery ?? attendedAgg?._sum.sessionUnits ?? 0;
-    const amount = classItem.tuitionPerSession * attended;
+      select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true },
+    });
+    const billItem = buildBillItemForClass(classItem as any, student.id, attendanceRecords as any, cs || undefined);
+    const attended = billItem.sessions;
+    const amount = billItem.subtotal;
     const memo = deaccent(`${student.studentCode ?? student.id} ${classItem.classCode ?? classItem.id} ${student.name}`).trim().toUpperCase().slice(0, 50);
     const qrData = generateVietQRString(bm.BANK_BIN || process.env.BANK_BIN || '970436', bm.BANK_ACC || process.env.BANK_ACC || '', amount, memo);
     const pngBuffer = await buildPaymentSlipPNG({
       studentName: student.name, studentCode: student.studentCode ?? student.id,
       className: classItem.name, classCode: classItem.classCode ?? '',
-      attended, tuitionPerSession: classItem.tuitionPerSession, amount, memo, qrData,
+      attended, tuitionPerSession: billItem.pricePerSession, amount, memo, qrData,
     });
     res.type('png').send(pngBuffer);
   } catch (err) {
@@ -319,8 +324,8 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
     const txWhere: any = { status: 'SUCCESS' };
     if (dateFrom || dateTo) {
       txWhere.date = {};
-      if (dateFrom) txWhere.date.gte = new Date(dateFrom);
-      if (dateTo) { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); txWhere.date.lte = d; }
+      if (dateFrom) txWhere.date.gte = startOfDayUTC(dateFrom);
+      if (dateTo) txWhere.date.lte = endOfDayUTC(dateTo);
     }
 
     // Load students (optionally filtered by class)
@@ -332,17 +337,17 @@ router.get('/payment-tracking', authenticateToken, authorizeRoles('ADMIN', 'MANA
         where: studentWhere,
         include: {
           classes: { include: { class: { select: { id: true, name: true, classCode: true, tuitionPerSession: true, totalSessions: true } } } },
-          attendances: { 
-            where: { 
+          attendances: {
+            where: {
               status: 'PRESENT',
-              ...(dateFrom || dateTo ? { 
-                date: { 
-                  ...(dateFrom ? { gte: new Date(dateFrom) } : {}), 
-                  ...(dateTo ? { lte: (() => { const d = new Date(dateTo); d.setHours(23, 59, 59, 999); return d; })() } : {})
-                } 
+              ...(dateFrom || dateTo ? {
+                date: {
+                  ...(dateFrom ? { gte: startOfDayUTC(dateFrom) } : {}),
+                  ...(dateTo ? { lte: endOfDayUTC(dateTo) } : {})
+                }
               } : {})
-            }, 
-            select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true } 
+            },
+            select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true }
           },
         },
         orderBy: { name: 'asc' },
@@ -506,10 +511,8 @@ router.post('/bills/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGE
   }
 
   try {
-    const from = new Date(fromDate);
-    const to = new Date(toDate);
-    from.setHours(0,0,0,0);
-    to.setHours(23,59,59,999);
+    const from = startOfDayUTC(fromDate);
+    const to = endOfDayUTC(toDate);
 
     const classes = await prisma.class.findMany({
       where: { id: { in: coveredClassIds } }
@@ -524,26 +527,16 @@ router.post('/bills/preview', authenticateToken, authorizeRoles('ADMIN', 'MANAGE
           date: { gte: from, lte: to }
         }
       });
-      
+
       const cs = await prisma.classStudent.findUnique({
         where: { classId_studentId: { classId: cls.id, studentId } }
       });
 
-      const sessions = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
-      const subtotal = expectedForStudentClass(cls as any, studentId, attendances as any, cs || undefined);
-      
-      return {
-        classId: cls.id,
-        className: cls.name,
-        sessions,
-        pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession,
-        subtotal
-      };
+      return buildBillItemForClass(cls as any, studentId, attendances as any, cs || undefined);
     }));
 
-
-    const amount = sessionsDetail.reduce((sum, item) => sum + item.subtotal, 0);
-    res.json({ sessionsDetail, amount });
+    const amount = sumBillItems(sessionsDetail);
+    res.json({ sessionsDetail, amount, isZero: amount <= 0 });
   } catch (error) {
     res.status(500).json({ message: 'Lỗi preview hóa đơn' });
   }
@@ -568,8 +561,8 @@ router.post('/cash-payment', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
   }
 
   try {
-    const from = new Date(fromDate); from.setHours(0, 0, 0, 0);
-    const to = new Date(toDate); to.setHours(23, 59, 59, 999);
+    const from = startOfDayUTC(fromDate);
+    const to = endOfDayUTC(toDate);
     const paidAt = date ? new Date(date) : new Date();
 
     const classes = await prisma.class.findMany({ where: { id: { in: coveredClassIds } } });
@@ -583,20 +576,10 @@ router.post('/cash-payment', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
         where: { classId_studentId: { classId: cls.id, studentId } }
       });
 
-      const sessions = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
-      const subtotal = expectedForStudentClass(cls as any, studentId, attendances as any, cs || undefined);
-
-      return { 
-        classId: cls.id, 
-        className: cls.name, 
-        sessions, 
-        pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession, 
-        subtotal 
-      };
+      return buildBillItemForClass(cls as any, studentId, attendances as any, cs || undefined);
     }));
 
-
-    const calculatedAmount = sessionsDetail.reduce((sum, it) => sum + it.subtotal, 0);
+    const calculatedAmount = sumBillItems(sessionsDetail);
     const amount = totalAmountOverride ?? calculatedAmount;
 
     if (amount <= 0) {
@@ -660,10 +643,8 @@ router.post('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asy
   const { studentId, coveredClassIds, fromDate, toDate, dueDate, notes } = req.body;
 
   try {
-    const from = new Date(fromDate);
-    const to = new Date(toDate);
-    from.setHours(0,0,0,0);
-    to.setHours(23,59,59,999);
+    const from = startOfDayUTC(fromDate);
+    const to = endOfDayUTC(toDate);
 
     const classes = await prisma.class.findMany({
       where: { id: { in: coveredClassIds } }
@@ -678,18 +659,10 @@ router.post('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asy
           where: { classId_studentId: { classId: cls.id, studentId } }
         }),
       ]);
-      const sessions = attendances.reduce((sum, att) => sum + (att.sessionUnits || 1), 0);
-      const subtotal = expectedForStudentClass(cls as any, studentId, attendances as any, cs || undefined);
-      return {
-        classId: cls.id,
-        className: cls.name,
-        sessions,
-        pricePerSession: (cs?.customTuitionPerSession != null) ? cs.customTuitionPerSession : cls.tuitionPerSession,
-        subtotal
-      };
+      return buildBillItemForClass(cls as any, studentId, attendances as any, cs || undefined);
     }));
 
-    const amount = detailItems.reduce((sum, item) => sum + item.subtotal, 0);
+    const amount = sumBillItems(detailItems);
     if (amount === 0) return res.status(400).json({ message: 'Hóa đơn có số tiền bằng 0, không thể tạo' });
 
     const bill = await prisma.tuitionBill.create({
@@ -723,8 +696,8 @@ router.get('/bills', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), asyn
   if (status && status !== 'ALL') where.status = status as any;
   if (from || to) {
     where.createdAt = {};
-    if (from) where.createdAt.gte = new Date(from as string);
-    if (to) { const d = new Date(to as string); d.setHours(23, 59, 59, 999); where.createdAt.lte = d; }
+    if (from) where.createdAt.gte = startOfDayUTC(from as string);
+    if (to) where.createdAt.lte = endOfDayUTC(to as string);
   }
 
   try {
@@ -790,6 +763,9 @@ router.post('/bills/:id/manual-payment', authenticateToken, authorizeRoles('ADMI
     if (!bill) return res.status(404).json({ message: 'Không tìm thấy hóa đơn' });
 
     const paidVal = Number(amount);
+    if (!Number.isFinite(paidVal) || paidVal <= 0) {
+      return res.status(400).json({ message: 'Số tiền thanh toán phải lớn hơn 0' });
+    }
     const newPaidAmount = bill.paidAmount + paidVal;
     let newStatus: any = 'PARTIAL';
     if (newPaidAmount >= bill.amount) newStatus = 'PAID';

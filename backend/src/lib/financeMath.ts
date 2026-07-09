@@ -1,3 +1,5 @@
+import { startOfDayUTC, endOfDayUTC } from './dateRange';
+
 type StudentLike = {
   id: string;
   name: string;
@@ -36,19 +38,6 @@ type AttendanceLike = {
   sessionUnits?: number;
 };
 
-function attendedSessions(classItem: ClassLike, studentId: string, attendances?: AttendanceLike[]): number {
-
-  if (!attendances) return classItem.totalSessions;
-  return attendances
-    .filter(
-      attendance =>
-        attendance.classId === classItem.id &&
-        attendance.studentId === studentId &&
-        attendance.status === 'PRESENT'
-    )
-    .reduce((sum, item) => sum + (item.sessionUnits ?? 1), 0);
-}
-
 export type TuitionRateGroup = {
   pricePerSession: number;
   sessions: number;
@@ -67,12 +56,16 @@ export function breakdownForStudentClass(
   }
 ): { total: number; groups: TuitionRateGroup[] } {
   if (!attendances) {
+    // No attendance data supplied — fall back to the planned totalSessions.
+    // There are no per-session dates here, so the discount window cannot be
+    // split; the override (if any) applies to the whole planned total.
     const hasOverride = override?.customTuitionPerSession != null;
     const price = hasOverride ? (override!.customTuitionPerSession as number) : classItem.tuitionPerSession;
     const sessions = classItem.totalSessions;
+    const subtotal = Math.round(price * sessions);
     return {
-      total: price * sessions,
-      groups: [{ pricePerSession: price, sessions, subtotal: price * sessions, label: hasOverride ? 'OVERRIDE' : 'CLASS_DEFAULT' }],
+      total: subtotal,
+      groups: [{ pricePerSession: price, sessions, subtotal, label: hasOverride ? 'OVERRIDE' : 'CLASS_DEFAULT' }],
     };
   }
 
@@ -83,10 +76,11 @@ export function breakdownForStudentClass(
       attendance.status === 'PRESENT'
   );
 
-  const from = override?.discountFrom ? new Date(override.discountFrom) : null;
-  if (from) from.setHours(0, 0, 0, 0);
-  const to = override?.discountTo ? new Date(override.discountTo) : null;
-  if (to) to.setHours(23, 59, 59, 999);
+  // Discount window boundaries are compared in UTC to match how attendance
+  // dates are persisted (UTC midnight) — local setHours() would shift the
+  // window by the server's timezone offset.
+  const from = override?.discountFrom ? startOfDayUTC(override.discountFrom) : null;
+  const to = override?.discountTo ? endOfDayUTC(override.discountTo) : null;
 
   const groupMap = new Map<string, TuitionRateGroup>();
   for (const att of studentAttendances) {
@@ -98,8 +92,7 @@ export function breakdownForStudentClass(
         price = override.customTuitionPerSession;
         label = 'OVERRIDE';
       } else {
-        const attDate = new Date(att.date);
-        attDate.setHours(0, 0, 0, 0);
+        const attDate = startOfDayUTC(att.date);
         const isAfterFrom = !from || attDate >= from;
         const isBeforeTo = !to || attDate <= to;
         if (isAfterFrom && isBeforeTo) {
@@ -120,11 +113,13 @@ export function breakdownForStudentClass(
     }
   }
 
-  const groups = Array.from(groupMap.values()).sort((a, b) => {
-    if (a.label === 'OVERRIDE' && b.label !== 'OVERRIDE') return -1;
-    if (b.label === 'OVERRIDE' && a.label !== 'OVERRIDE') return 1;
-    return a.pricePerSession - b.pricePerSession;
-  });
+  const groups = Array.from(groupMap.values())
+    .map(g => ({ ...g, subtotal: Math.round(g.subtotal) }))
+    .sort((a, b) => {
+      if (a.label === 'OVERRIDE' && b.label !== 'OVERRIDE') return -1;
+      if (b.label === 'OVERRIDE' && a.label !== 'OVERRIDE') return 1;
+      return a.pricePerSession - b.pricePerSession;
+    });
   const total = groups.reduce((sum, g) => sum + g.subtotal, 0);
   return { total, groups };
 }
@@ -142,10 +137,105 @@ export function expectedForStudentClass(
   return breakdownForStudentClass(classItem, studentId, attendances, override).total;
 }
 
+export type BillItem = {
+  classId: string;
+  className: string;
+  sessions: number;
+  pricePerSession: number;
+  subtotal: number;
+  breakdown: TuitionRateGroup[];
+};
 
-function transactionBelongsToClass(tx: TransactionLike, classItem: ClassLike): boolean {
-  if (tx.classId) return tx.classId === classItem.id;
-  return classItem.students.some(cs => cs.student.id === tx.studentId);
+// Single source of truth for "one line of a tuition bill" — replaces the
+// hand-rolled { sessions, pricePerSession, subtotal } construction that used
+// to be duplicated (and drift) across finance.ts, campaigns.ts and zalo.ts.
+// pricePerSession/subtotal always come from the same override-aware
+// calculation, and the full per-rate breakdown travels with the item so
+// callers can render a mixed-price line (see breakdown) instead of a single
+// price that disagrees with the total when a discount window splits the period.
+export function buildBillItemForClass(
+  classItem: ClassLike,
+  studentId: string,
+  attendances: AttendanceLike[],
+  override?: {
+    customTuitionPerSession?: number | null;
+    discountFrom?: string | Date | null;
+    discountTo?: string | Date | null;
+  }
+): BillItem {
+  const { total: subtotal, groups } = breakdownForStudentClass(classItem, studentId, attendances, override);
+  const sessions = groups.reduce((sum, g) => sum + g.sessions, 0);
+  return {
+    classId: classItem.id,
+    className: classItem.name,
+    sessions,
+    pricePerSession: groups[0]?.pricePerSession ?? classItem.tuitionPerSession,
+    subtotal,
+    breakdown: groups,
+  };
+}
+
+export function sumBillItems(items: BillItem[]): number {
+  return Math.round(items.reduce((sum, item) => sum + item.subtotal, 0));
+}
+
+
+// A transaction with no classId cannot be attributed to every class the
+// student belongs to (that double-counts it in per-class stats when a
+// student is enrolled in more than one class). Resolve each untagged
+// transaction to exactly one class: the first (in roster order) that the
+// student still owes money on, tracking amounts already allocated so
+// repeated untagged transactions for the same student don't all pile onto
+// the same class.
+function resolveTransactionClassIds(
+  classes: ClassLike[],
+  transactions: TransactionLike[],
+  attendances?: AttendanceLike[]
+): TransactionLike[] {
+  const studentClassIds = new Map<string, string[]>();
+  const classById = new Map(classes.map(c => [c.id, c]));
+  for (const cls of classes) {
+    for (const cs of cls.students) {
+      const arr = studentClassIds.get(cs.student.id) ?? [];
+      arr.push(cls.id);
+      studentClassIds.set(cs.student.id, arr);
+    }
+  }
+
+  const expectedCache = new Map<string, number>();
+  const expectedFor = (studentId: string, classId: string): number => {
+    const key = `${studentId}:${classId}`;
+    const cached = expectedCache.get(key);
+    if (cached != null) return cached;
+    const cls = classById.get(classId);
+    const cs = cls?.students.find(s => s.student.id === studentId);
+    const value = cls ? expectedForStudentClass(cls, studentId, attendances, cs) : 0;
+    expectedCache.set(key, value);
+    return value;
+  };
+
+  const allocated = new Map<string, number>();
+  const allocKey = (studentId: string, classId: string) => `${studentId}:${classId}`;
+  for (const tx of transactions) {
+    if (!tx.classId) continue;
+    const k = allocKey(tx.studentId, tx.classId);
+    allocated.set(k, (allocated.get(k) ?? 0) + tx.amount);
+  }
+
+  return transactions.map(tx => {
+    if (tx.classId) return tx;
+    const classIds = studentClassIds.get(tx.studentId) ?? [];
+    if (classIds.length === 0) return tx;
+
+    let target = classIds[0];
+    for (const cid of classIds) {
+      const owed = expectedFor(tx.studentId, cid) - (allocated.get(allocKey(tx.studentId, cid)) ?? 0);
+      if (owed > 0) { target = cid; break; }
+    }
+    const k = allocKey(tx.studentId, target);
+    allocated.set(k, (allocated.get(k) ?? 0) + tx.amount);
+    return { ...tx, classId: target };
+  });
 }
 
 export function buildClassCollectionStats(
@@ -153,14 +243,16 @@ export function buildClassCollectionStats(
   transactions: TransactionLike[],
   attendances?: AttendanceLike[]
 ) {
+  const resolvedTransactions = resolveTransactionClassIds(classes, transactions, attendances);
+
   return classes.map(classItem => {
     const expected = classItem.students.reduce(
       (sum, cs) => sum + expectedForStudentClass(classItem, cs.student.id, attendances, cs),
       0
     );
 
-    const collected = transactions
-      .filter(tx => transactionBelongsToClass(tx, classItem))
+    const collected = resolvedTransactions
+      .filter(tx => tx.classId === classItem.id)
       .reduce((sum, tx) => sum + tx.amount, 0);
 
     let paidCount = 0;
@@ -168,8 +260,8 @@ export function buildClassCollectionStats(
     for (const cs of classItem.students) {
       const studentExpected = expectedForStudentClass(classItem, cs.student.id, attendances, cs);
 
-      const studentPaid = transactions
-        .filter(tx => tx.studentId === cs.student.id && transactionBelongsToClass(tx, classItem))
+      const studentPaid = resolvedTransactions
+        .filter(tx => tx.studentId === cs.student.id && tx.classId === classItem.id)
         .reduce((sum, tx) => sum + tx.amount, 0);
       if (studentExpected > 0 && studentPaid >= studentExpected) paidCount++;
       else if (studentPaid > 0) partialCount++;
