@@ -4,8 +4,8 @@ import { authenticateToken, authorizeRoles } from '../middleware/auth';
 import QRCode from 'qrcode';
 import { generateVietQRString } from '../lib/vietqr';
 import { buildPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
-import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass, buildBillItemForClass, sumBillItems } from '../lib/financeMath';
-import { startOfDayUTC, endOfDayUTC } from '../lib/dateRange';
+import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass, buildBillItemForClass, sumBillItems, resolveTeacherShareRate, computeTeacherClassPayout } from '../lib/financeMath';
+import { startOfDayUTC, endOfDayUTC, monthRangeUTC } from '../lib/dateRange';
 
 import { generateUniqueBillCode } from '../lib/billCode';
 
@@ -829,6 +829,97 @@ router.post('/bills/:id/manual-payment', authenticateToken, authorizeRoles('ADMI
   } catch (error) {
     console.error('[Manual Payment]', error);
     res.status(500).json({ message: 'Lỗi ghi nhận thanh toán' });
+  }
+});
+
+// Teacher payout for a billing month — the single backend-authoritative source for
+// teacher salary. Base salary is attendance-driven and override-aware (same
+// breakdownForStudentClass used everywhere else in finance), the revenue-split rate
+// resolves class override -> teacher default -> 0.8, and the attendance-rate bonus
+// is computed here instead of only in the frontend. The frontend should render this
+// response rather than recomputing any of it client-side.
+router.get('/teacher-payout', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (req, res) => {
+  const month = req.query.month as string;
+  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+    return res.status(400).json({ message: 'Thiếu hoặc sai định dạng month (YYYY-MM)' });
+  }
+
+  try {
+    const [year, mon] = month.split('-').map(Number);
+    const { from, to } = monthRangeUTC(year, mon);
+
+    const teachers = await prisma.teacher.findMany({
+      where: { isActive: true },
+      include: {
+        classes: {
+          include: {
+            students: { select: { studentId: true, customTuitionPerSession: true, discountFrom: true, discountTo: true } },
+          },
+        },
+      },
+    });
+
+    const classIds = teachers.flatMap(t => t.classes.map(c => c.id));
+    const attendances = classIds.length ? await prisma.attendance.findMany({
+      where: { classId: { in: classIds }, date: { gte: from, lte: to } },
+      select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true, slot: true },
+    }) : [];
+
+    const payout = teachers.map(teacher => {
+      const classRows = teacher.classes.map(cls => {
+        const classAtts = attendances.filter(a => a.classId === cls.id);
+        const presentAtts = classAtts.filter(a => a.status === 'PRESENT');
+
+        const totalTuition = cls.students.reduce(
+          (sum, cs) => sum + expectedForStudentClass(cls as any, cs.studentId, presentAtts as any, cs as any),
+          0
+        );
+
+        const sessionCount = new Set(presentAtts.map(a => `${new Date(a.date).toISOString().slice(0, 10)}__${a.slot}`)).size;
+        const uniqueDates = new Set(classAtts.map(a => `${new Date(a.date).toISOString().slice(0, 10)}__${a.slot}`)).size;
+        const expectedSlots = uniqueDates * cls.students.length;
+        const attendanceRate = expectedSlots > 0 ? presentAtts.length / expectedSlots : 0;
+
+        const shareRate = resolveTeacherShareRate(cls.teacherShare, teacher.salaryRate);
+        const { baseSalary, bonusRate, bonus, total } = computeTeacherClassPayout({
+          salaryType: teacher.salaryType,
+          hourlyRate: teacher.hourlyRate,
+          sessionCount,
+          totalTuition,
+          shareRate,
+          attendanceRate,
+        });
+
+        return {
+          classId: cls.id,
+          className: cls.name,
+          studentCount: cls.students.length,
+          sessionCount,
+          totalTuition,
+          shareRate,
+          attendanceRate: Math.round(attendanceRate * 1000) / 10,
+          baseSalary,
+          bonusRate,
+          bonus,
+          total,
+        };
+      });
+
+      return {
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        salaryType: teacher.salaryType,
+        classes: classRows,
+        totalBaseSalary: classRows.reduce((sum, c) => sum + c.baseSalary, 0),
+        totalBonus: classRows.reduce((sum, c) => sum + c.bonus, 0),
+        totalPayout: classRows.reduce((sum, c) => sum + c.total, 0),
+      };
+    });
+
+    res.json({ month, teachers: payout });
+  } catch (err) {
+    console.error('[Teacher Payout]', err);
+    res.status(500).json({ message: 'Lỗi khi tính lương giáo viên' });
   }
 });
 

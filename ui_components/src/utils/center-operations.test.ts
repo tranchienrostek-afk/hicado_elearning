@@ -1,21 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { Attendance, Class, Teacher, Transaction } from '@/store';
+import type { Attendance, Class, Transaction } from '@/store';
 import {
   assessProfileDeletion,
   buildBulkAttendancePlan,
   calculateStudentTuitionDue,
-  calculateTeacherSalaryByUnits,
   sumPresentSessionUnits,
 } from './center-operations';
-
-const teacher: Teacher = {
-  id: 'T1',
-  name: 'Co Lan',
-  phone: '0900000000',
-  bankAccount: '123',
-  bankName: 'VCB',
-  salaryRate: 0.7,
-};
 
 const classes: Class[] = [
   {
@@ -68,10 +58,6 @@ describe('center operations', () => {
 
   it('calculates student tuition from present session units', () => {
     expect(calculateStudentTuitionDue('S1', classes, attendance)).toBe(300000);
-  });
-
-  it('calculates teacher salary from class session units and teacher share', () => {
-    expect(calculateTeacherSalaryByUnits('T1', classes, attendance, [teacher], '2026-05')).toBe(560000);
   });
 
   it('blocks hard delete when a student has class, attendance, or transaction references', () => {

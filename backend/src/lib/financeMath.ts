@@ -179,6 +179,59 @@ export function sumBillItems(items: BillItem[]): number {
   return Math.round(items.reduce((sum, item) => sum + item.subtotal, 0));
 }
 
+export const DEFAULT_TEACHER_SHARE_RATE = 0.8;
+
+// Single source of truth for the teacher revenue-split rate: a per-class override
+// (Class.teacherShare) takes precedence over the teacher's own default rate
+// (Teacher.salaryRate), falling back to 0.8 when neither is set. Previously the
+// backend's own attendance reports ignored the class-level override entirely
+// (always teacher.salaryRate || 0.8), while the frontend checked the override but
+// defaulted to 0 instead of 0.8 — the same class produced two different payout
+// numbers depending on which one computed it.
+export function resolveTeacherShareRate(
+  classTeacherShare: number | null | undefined,
+  teacherSalaryRate: number | null | undefined
+): number {
+  return classTeacherShare ?? teacherSalaryRate ?? DEFAULT_TEACHER_SHARE_RATE;
+}
+
+// Attendance-rate bonus on top of the base salary, keyed on the fraction (0..1) of
+// expected attendance slots actually filled for the period. Thresholds match the
+// values the frontend previously computed client-side and nowhere else.
+export type AttendanceBonusTier = { minRate: number; bonus: number };
+export const DEFAULT_ATTENDANCE_BONUS_TIERS: AttendanceBonusTier[] = [
+  { minRate: 0.95, bonus: 0.05 },
+  { minRate: 0.85, bonus: 0.03 },
+];
+
+export function resolveAttendanceBonusRate(
+  attendanceRate: number,
+  tiers: AttendanceBonusTier[] = DEFAULT_ATTENDANCE_BONUS_TIERS
+): number {
+  for (const tier of tiers) {
+    if (attendanceRate >= tier.minRate) return tier.bonus;
+  }
+  return 0;
+}
+
+export function computeTeacherClassPayout(params: {
+  salaryType: string;
+  hourlyRate?: number | null;
+  sessionCount: number;
+  totalTuition: number;
+  shareRate: number;
+  attendanceRate?: number;
+}): { baseSalary: number; bonusRate: number; bonus: number; total: number } {
+  const baseSalary = params.salaryType === 'HOURLY'
+    ? params.sessionCount * (params.hourlyRate || 0)
+    : Math.round(params.totalTuition * params.shareRate);
+
+  const bonusRate = resolveAttendanceBonusRate(params.attendanceRate ?? 0);
+  const bonus = Math.round(baseSalary * bonusRate);
+
+  return { baseSalary, bonusRate, bonus, total: baseSalary + bonus };
+}
+
 
 // A transaction with no classId cannot be attributed to every class the
 // student belongs to (that double-counts it in per-class stats when a

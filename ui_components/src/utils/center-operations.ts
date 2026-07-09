@@ -1,13 +1,8 @@
 import { attendanceSameDay } from './attendance-date';
-import type { Attendance, Class, Teacher, Transaction } from '@/store';
+import type { Attendance, Class, Transaction } from '@/store';
 
 type AttendanceStatus = Attendance['status'];
 type AttendanceSlot = Attendance['slot'];
-
-export const normalizeShareRate = (rate?: number) => {
-  if (!rate) return 0;
-  return rate > 1 ? rate / 100 : rate;
-};
 
 export const sumPresentSessionUnits = (records: Attendance[]) =>
   Number(
@@ -59,30 +54,6 @@ export const calculateStudentTuitionDue = (
     }, 0);
   }, 0);
 
-
-export const calculateTeacherSalaryByUnits = (
-  teacherId: string,
-  classes: Class[],
-  attendance: Attendance[],
-  teachers: Teacher[],
-  month?: string
-) => {
-  const teacher = teachers.find((item) => item.id === teacherId);
-  if (!teacher) return 0;
-
-  return classes
-    .filter((cls) => cls.teacherId === teacherId)
-    .reduce((total, cls) => {
-      const shareRate = normalizeShareRate(cls.teacherShare ?? teacher.salaryRate);
-      const records = attendance.filter(
-        (item) =>
-          item.classId === cls.id &&
-          item.status === 'PRESENT' &&
-          (!month || item.date.startsWith(month))
-      );
-      return total + sumPresentSessionUnits(records) * cls.tuitionPerSession * shareRate;
-    }, 0);
-};
 
 export const assessProfileDeletion = (
   kind: 'STUDENT' | 'TEACHER',

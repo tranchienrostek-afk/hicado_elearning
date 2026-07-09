@@ -125,7 +125,6 @@ export interface CenterStore {
   updateAttendance: (id: string, updates: Partial<Attendance> & { reason?: string }) => Promise<void>;
   deleteAttendance: (id: string, reason?: string) => Promise<void>;
   updateTuitionStatus: (studentId: string, status: Student['tuitionStatus']) => void;
-  calculateTeacherSalary: (teacherId: string, month: number) => number;
   importStudents: (newStudents: Student[]) => void;
   importTeachers: (newTeachers: Teacher[]) => void;
   

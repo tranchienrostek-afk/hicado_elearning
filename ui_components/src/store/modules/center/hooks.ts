@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { CenterStore } from './types';
 import { useAuthStore } from '../auth';
 import { attendanceDateKey } from '@/utils/attendance-date';
-import { calculateTeacherSalaryByUnits } from '@/utils/center-operations';
 
 const fetchWithAuth = (url: string, options: RequestInit = {}): Promise<Response> => {
   const token = useAuthStore.getState().auth?.token;
@@ -144,11 +143,6 @@ export const useCenterStore = create<CenterStore>()((set, get) => ({
   updateTuitionStatus: (studentId, status) => set((state) => ({
     students: state.students.map(s => s.id === studentId ? { ...s, tuitionStatus: status } : s)
   })),
-
-  calculateTeacherSalary: (teacherId, _month) => {
-    const state = get();
-    return calculateTeacherSalaryByUnits(teacherId, state.classes, state.attendance, state.teachers);
-  },
 
   importStudents: (newStudents) => set((state) => ({
     students: [...state.students, ...newStudents.filter(ns => !state.students.some(s => s.id === ns.id))]

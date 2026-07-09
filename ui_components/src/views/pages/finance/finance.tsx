@@ -70,6 +70,32 @@ interface TuitionBill {
   payments?: BillPayment[];
 }
 
+interface TeacherPayoutClassRow {
+  classId: string;
+  className: string;
+  studentCount: number;
+  sessionCount: number;
+  totalTuition: number;
+  shareRate: number;
+  attendanceRate: number; // percent, e.g. 96.5
+  baseSalary: number;
+  bonusRate: number;
+  bonus: number;
+  total: number;
+}
+interface TeacherPayoutResponse {
+  month: string;
+  teachers: {
+    teacherId: string;
+    teacherName: string;
+    salaryType: string;
+    classes: TeacherPayoutClassRow[];
+    totalBaseSalary: number;
+    totalBonus: number;
+    totalPayout: number;
+  }[];
+}
+
 interface FinanceRow {
   classId: string;
   className: string;
@@ -97,8 +123,6 @@ const getCurrentMonth = () => {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 };
 
-const countUniqueDates = (dates: string[]) => new Set(dates).size;
-
 const formatMoney = (value: number) => value.toLocaleString('vi-VN');
 const formatPercent = (value: number) => {
   if (value > 0 && value < 1) return `${value.toFixed(1)}%`;
@@ -120,6 +144,7 @@ export const FinancialPage = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
   const [financeStats, setFinanceStats] = useState<FinanceStats | null>(null);
+  const [teacherPayout, setTeacherPayout] = useState<TeacherPayoutResponse | null>(null);
 
   // ── Payment Tracking state ────────────────────────────────────────────────
   const [trackingData, setTrackingData] = useState<{ students: TrackingStudent[]; summary: TrackingSummary } | null>(null);
@@ -207,6 +232,27 @@ export const FinancialPage = () => {
     fetchBills();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auth?.token, isTeacher]);
+
+  // Backend is the single source of truth for teacher salary — attendance-driven,
+  // override-aware base salary plus the attendance-rate bonus, all computed once
+  // server-side instead of being reimplemented (and drifting) here.
+  useEffect(() => {
+    if (isTeacher) return;
+    const token = auth?.token;
+    if (!token) return;
+    fetch(`/api/finance/teacher-payout?month=${selectedMonth}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setTeacherPayout(data); })
+      .catch(() => toast.error('Lỗi tải dữ liệu lương giáo viên'));
+  }, [auth?.token, isTeacher, selectedMonth]);
+
+  const payoutByClassId = useMemo(() => {
+    const map = new Map<string, TeacherPayoutClassRow>();
+    for (const teacher of teacherPayout?.teachers ?? []) {
+      for (const cls of teacher.classes) map.set(cls.classId, cls);
+    }
+    return map;
+  }, [teacherPayout]);
 
   const fetchBills = () => {
     const token = auth?.token;
@@ -380,34 +426,29 @@ export const FinancialPage = () => {
         const room = rooms.find((item) => item.id === cls.roomId);
         const classStudents = students.filter((item) => cls.studentIds?.includes(item.id));
 
-        const salaryRate = cls.teacherShare ?? teacher?.salaryRate ?? 0;
-
         const presentRecords = attendance.filter(
           (item) => item.classId === cls.id && item.status === 'PRESENT'
         );
-        const monthPresentRecords = presentRecords.filter((item) =>
-          item.date.startsWith(selectedMonth)
-        );
-
         const allSessionCount = sumPresentSessionUnits(presentRecords);
-        const monthSessionCount = sumPresentSessionUnits(monthPresentRecords);
 
         const statsRow = financeStats?.collectionByClass.find((item) => item.classId === cls.id);
         const expectedRevenue = statsRow?.expected ?? cls.tuitionPerSession * cls.totalSessions * classStudents.length;
         const paidRevenue = statsRow?.collected ?? 0;
 
+        // Salary — backend (GET /finance/teacher-payout) is the single source of
+        // truth: attendance-driven, override-aware base salary, the class-override
+        // -> teacher-default -> 0.8 share rate, and the attendance bonus, all
+        // computed once server-side. Nothing here recomputes any of that.
+        const payout = payoutByClassId.get(cls.id);
+        const salaryRate = payout?.shareRate ?? 0;
+        const monthSessionCount = payout?.sessionCount ?? 0;
+        const monthAttendanceRate = (payout?.attendanceRate ?? 0) / 100;
+        const monthBaseSalary = payout?.baseSalary ?? 0;
+        const monthBonus = payout?.bonus ?? 0;
+        const monthPayout = payout?.total ?? 0;
+
         const salaryAllTime = paidRevenue * salaryRate;
         const centerProfit = paidRevenue - salaryAllTime;
-
-        const monthBaseSalary = cls.tuitionPerSession * monthSessionCount * salaryRate;
-        const expectedMonthAttendance = countUniqueDates(monthPresentRecords.map((item) => item.date)) * classStudents.length;
-        const monthAttendanceRate =
-          expectedMonthAttendance > 0
-            ? monthPresentRecords.length / expectedMonthAttendance
-            : 0;
-        const bonusRate = monthAttendanceRate >= 0.95 ? 0.05 : monthAttendanceRate >= 0.85 ? 0.03 : 0;
-        const monthBonus = monthBaseSalary * bonusRate;
-        const monthPayout = monthBaseSalary + monthBonus;
 
         return {
           classId: cls.id,
@@ -433,7 +474,7 @@ export const FinancialPage = () => {
           monthPayout,
         };
       }),
-    [attendance, financeStats?.collectionByClass, rooms, scopedClasses, selectedMonth, students, teachers]
+    [attendance, financeStats?.collectionByClass, payoutByClassId, rooms, scopedClasses, students, teachers]
   );
 
   const totalExpectedAll = financeStats?.totalExpected ?? financeData.reduce((acc, row) => acc + row.expectedRevenue, 0);

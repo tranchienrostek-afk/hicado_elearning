@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import prisma from '../lib/prisma';
 import { authenticateToken, authorizeRoles } from '../middleware/auth';
-import { expectedForStudentClass } from '../lib/financeMath';
+import { expectedForStudentClass, resolveTeacherShareRate } from '../lib/financeMath';
 import { startOfDayUTC, endOfDayUTC, monthRangeUTC } from '../lib/dateRange';
 
 const router = Router();
@@ -67,9 +67,10 @@ router.get('/monthly-report', authenticateToken, async (req, res) => {
     });
 
     const totalTuition = students.reduce((sum, s) => sum + s.tuitionDue, 0);
+    const shareRate = resolveTeacherShareRate((cls as any).teacherShare, cls.teacher.salaryRate);
     const teacherSalary = cls.teacher.salaryType === 'HOURLY'
       ? sessions.length * (cls.teacher.hourlyRate || 0)
-      : Math.round(totalTuition * (cls.teacher.salaryRate || 0.8));
+      : Math.round(totalTuition * shareRate);
 
     const totalUniqueDates = new Set(sessions.map(s => s.date)).size;
     const totalPresentCount = students.reduce((sum, s) => sum + s.totalPresent, 0);
@@ -197,7 +198,7 @@ router.get('/overview', authenticateToken, async (req, res) => {
         totalAmount:   students.reduce((sum, s) => sum + s.amount, 0),
         teacherSalary: cls.teacher.salaryType === 'HOURLY'
           ? sessions.length * (cls.teacher.hourlyRate || 0)
-          : Math.round(students.reduce((sum, s) => sum + s.amount, 0) * (cls.teacher.salaryRate || 0.8))
+          : Math.round(students.reduce((sum, s) => sum + s.amount, 0) * resolveTeacherShareRate((cls as any).teacherShare, cls.teacher.salaryRate))
       },
       students,
     });

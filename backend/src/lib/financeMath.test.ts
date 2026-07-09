@@ -1,5 +1,5 @@
 import assert from 'assert';
-import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass, breakdownForStudentClass, buildBillItemForClass, sumBillItems } from './financeMath';
+import { buildClassCollectionStats, buildStudentPaymentRows, expectedForStudentClass, breakdownForStudentClass, buildBillItemForClass, sumBillItems, resolveTeacherShareRate, resolveAttendanceBonusRate, computeTeacherClassPayout } from './financeMath';
 
 const classItem = {
   id: 'class-toan-1',
@@ -156,6 +156,50 @@ assert.strictEqual(
   const stats = buildClassCollectionStats([classA, classB], untaggedTx as any, atts as any);
   const totalCollected = stats.reduce((sum, c) => sum + c.collected, 0);
   assert.strictEqual(totalCollected, 100000, 'untagged transaction must be counted once, not once per class');
+}
+
+// --- resolveTeacherShareRate: class override beats teacher default beats 0.8 ---
+{
+  assert.strictEqual(resolveTeacherShareRate(0.7, 0.6), 0.7, 'class-level override takes precedence');
+  assert.strictEqual(resolveTeacherShareRate(null, 0.6), 0.6, 'falls back to teacher default when no override');
+  assert.strictEqual(resolveTeacherShareRate(null, null), 0.8, 'falls back to 0.8 when neither is set');
+  assert.strictEqual(resolveTeacherShareRate(0, 0.6), 0, 'an explicit 0% override must not be treated as unset');
+}
+
+// --- resolveAttendanceBonusRate: tiered thresholds ---
+{
+  assert.strictEqual(resolveAttendanceBonusRate(0.96), 0.05);
+  assert.strictEqual(resolveAttendanceBonusRate(0.95), 0.05);
+  assert.strictEqual(resolveAttendanceBonusRate(0.90), 0.03);
+  assert.strictEqual(resolveAttendanceBonusRate(0.85), 0.03);
+  assert.strictEqual(resolveAttendanceBonusRate(0.50), 0);
+}
+
+// --- computeTeacherClassPayout: PERCENTAGE vs HOURLY, with bonus applied ---
+{
+  const percentagePayout = computeTeacherClassPayout({
+    salaryType: 'PERCENTAGE',
+    sessionCount: 10,
+    totalTuition: 2000000,
+    shareRate: 0.8,
+    attendanceRate: 0.96,
+  });
+  assert.strictEqual(percentagePayout.baseSalary, 1600000);
+  assert.strictEqual(percentagePayout.bonusRate, 0.05);
+  assert.strictEqual(percentagePayout.bonus, 80000);
+  assert.strictEqual(percentagePayout.total, 1680000);
+
+  const hourlyPayout = computeTeacherClassPayout({
+    salaryType: 'HOURLY',
+    hourlyRate: 150000,
+    sessionCount: 8,
+    totalTuition: 999999, // irrelevant for HOURLY
+    shareRate: 0.8, // irrelevant for HOURLY
+    attendanceRate: 0.5,
+  });
+  assert.strictEqual(hourlyPayout.baseSalary, 1200000);
+  assert.strictEqual(hourlyPayout.bonus, 0);
+  assert.strictEqual(hourlyPayout.total, 1200000);
 }
 
 console.log('financeMath tests passed');
