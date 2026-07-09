@@ -10,6 +10,7 @@ import { buildZaloImageMessage, uploadZaloImage, buildCustomTuitionMessage, buil
 import { generateBillCode } from '../lib/billCode';
 import { expectedForStudentClass, breakdownForStudentClass } from '../lib/financeMath';
 import { summarizeCampaignLogs } from '../lib/campaignStats';
+import { startOfDayUTC, endOfDayUTC } from '../lib/dateRange';
 
 const router = Router();
 
@@ -56,10 +57,18 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
       collectionToDate?: string;
       studentCoveredClasses?: Record<string, string[]>;
       forceResendStudentIds?: string[];
+      forceResendAll?: boolean;
       billingMonth?: string;
     };
   };
   if (!name || !type) return res.status(400).json({ message: 'Thiếu tên hoặc loại chiến dịch' });
+  // An empty classIds selection for a tuition reminder would otherwise fall through to
+  // `where = {}` below and match every student in the database (see the 5-sent/69-failed
+  // bug report: the campaign silently notified/failed the entire school, not the selected
+  // class). Require an explicit non-empty class selection for this campaign type.
+  if (type === 'TUITION_REMINDER' && !filters.classIds?.length) {
+    return res.status(400).json({ message: 'Vui lòng chọn ít nhất một lớp để gửi thông báo học phí' });
+  }
 
   const cfg = await getZaloConfig();
   if (!cfg.ZALO_ACCESS_TOKEN) return res.status(400).json({ message: 'Chưa cấu hình Zalo Access Token' });
@@ -70,10 +79,8 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   if (filters.requireZalo) where.zaloUserId = { not: null };
   if (filters.classIds?.length) where.classes = { some: { classId: { in: filters.classIds } } };
 
-  const from = filters.fromDate ? new Date(filters.fromDate) : null;
-  const to = filters.toDate ? new Date(filters.toDate) : null;
-  if (from) from.setHours(0,0,0,0);
-  if (to) to.setHours(23,59,59,999);
+  const from = filters.fromDate ? startOfDayUTC(filters.fromDate) : null;
+  const to = filters.toDate ? endOfDayUTC(filters.toDate) : null;
 
   const students = await prisma.student.findMany({
     where,
@@ -111,13 +118,20 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
   let skippedCount = 0;
   const headers = { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' };
   const forceResendSet = new Set(filters.forceResendStudentIds ?? []);
-  const sentAtFilter = from && to
-    ? Prisma.sql`AND "sentAt" BETWEEN ${from} AND ${to}`
-    : from
-      ? Prisma.sql`AND "sentAt" >= ${from}`
-      : to
-        ? Prisma.sql`AND "sentAt" <= ${to}`
-        : Prisma.empty;
+  const forceResendAll = !!filters.forceResendAll;
+  // Dedup key is billingMonth when supplied (matches the manual-send path in zalo.ts);
+  // falls back to the fromDate/toDate range only when no billing month is set — never
+  // an unbounded "all time" dedup, which previously happened whenever a campaign had
+  // no date range at all.
+  const dedupFilter = filters.billingMonth
+    ? Prisma.sql`AND "billingMonth" = ${filters.billingMonth}`
+    : from && to
+      ? Prisma.sql`AND "sentAt" BETWEEN ${from} AND ${to}`
+      : from
+        ? Prisma.sql`AND "sentAt" >= ${from}`
+        : to
+          ? Prisma.sql`AND "sentAt" <= ${to}`
+          : Prisma.empty;
 
   // due_date
   const now = new Date();
@@ -147,15 +161,22 @@ router.post('/', authenticateToken, authorizeRoles('ADMIN', 'MANAGER'), async (r
 
     const primaryClassId = student.classes[0]?.class?.id ?? null;
     const phone = student.parentPhone || student.studentPhone || '';
-    const coveredClassIds = filters.studentCoveredClasses?.[student.id] ?? (primaryClassId ? [primaryClassId] : []);
+    // student.classes is already scoped to filters.classIds by the query above, so when
+    // the frontend doesn't supply an explicit per-student class mapping, falling back to
+    // *all* of student.classes (the union of every selected class the student belongs to)
+    // is correct — falling back to just primaryClassId would silently drop the other
+    // selected classes a multi-class student is enrolled in (e.g. student in both class A
+    // and class B, both selected → must be billed/notified for both, not just A).
+    const coveredClassIds = filters.studentCoveredClasses?.[student.id]
+      ?? student.classes.map((c: any) => c.class.id);
 
-    if (type === 'TUITION_REMINDER' && coveredClassIds.length > 0 && !forceResendSet.has(student.id)) {
+    if (type === 'TUITION_REMINDER' && coveredClassIds.length > 0 && !(forceResendAll || forceResendSet.has(student.id))) {
       const existing = await prisma.$queryRaw<Array<{ id: string }>>`
         SELECT id FROM "ZaloMessageLog"
         WHERE "studentId" = ${student.id}
           AND status = 'SENT'
           AND "coveredClassIds" && ARRAY[${Prisma.join(coveredClassIds)}]::text[]
-          ${sentAtFilter}
+          ${dedupFilter}
         LIMIT 1
       `;
       if (existing.length > 0) {

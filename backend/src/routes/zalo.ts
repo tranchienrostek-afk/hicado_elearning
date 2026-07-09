@@ -8,6 +8,7 @@ import { generateBillCode } from '../lib/billCode';
 import { buildMultiClassPaymentSlipPNG, deaccent } from '../lib/paymentSlip';
 import { generateVietQRString } from '../lib/vietqr';
 import { expectedForStudentClass } from '../lib/financeMath';
+import { startOfDayUTC, endOfDayUTC } from '../lib/dateRange';
 
 
 export const formatPhone = (p: string) => {
@@ -447,12 +448,14 @@ const isNonEmptyString = (value: unknown): value is string => typeof value === '
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
 
 const normalizeDateRange = (fromDate?: string, toDate?: string) => {
-  const from = fromDate ? new Date(fromDate) : null;
-  const to = toDate ? new Date(toDate) : null;
-  if (from && Number.isNaN(from.getTime())) throw new Error('Invalid fromDate');
-  if (to && Number.isNaN(to.getTime())) throw new Error('Invalid toDate');
-  if (from) from.setHours(0, 0, 0, 0);
-  if (to) to.setHours(23, 59, 59, 999);
+  let from: Date | null = null;
+  let to: Date | null = null;
+  try {
+    from = fromDate ? startOfDayUTC(fromDate) : null;
+    to = toDate ? endOfDayUTC(toDate) : null;
+  } catch {
+    throw new Error(fromDate && Number.isNaN(new Date(fromDate).getTime()) ? 'Invalid fromDate' : 'Invalid toDate');
+  }
   return { from, to };
 };
 
@@ -478,6 +481,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     collectionToDate,
     studentCoveredClasses = {},
     forceResendStudentIds = [],
+    forceResendAll = false,
     billingMonth
   } = req.body as {
     items: CustomTuitionItemInput[];
@@ -491,6 +495,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
     collectionToDate?: string;
     studentCoveredClasses?: Record<string, string[]>;
     forceResendStudentIds?: string[];
+    forceResendAll?: boolean;
     billingMonth?: string;
   };
 
@@ -579,17 +584,28 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
         note: item.note,
       };
 
-      if (billingMonth && coveredClassIds.length > 0 && !forceSet.has(student.id)) {
-        // Check 1: already sent a Zalo message this billing period
-        const sentLog = await prisma.zaloMessageLog.findFirst({
-          where: { studentId: student.id, status: 'SENT', billingMonth, coveredClassIds: { hasSome: coveredClassIds } }
-        });
+      // Dedup key is billingMonth when supplied (matches the campaign path); falls back
+      // to the fromDate/toDate range so a manual send without a billing month still
+      // dedups consistently instead of skipping the check entirely.
+      if (coveredClassIds.length > 0 && !(forceResendAll || forceSet.has(student.id))) {
+        const sentLog = billingMonth
+          ? await prisma.zaloMessageLog.findFirst({
+              where: { studentId: student.id, status: 'SENT', billingMonth, coveredClassIds: { hasSome: coveredClassIds } }
+            })
+          : await prisma.zaloMessageLog.findFirst({
+              where: {
+                studentId: student.id, status: 'SENT', coveredClassIds: { hasSome: coveredClassIds },
+                ...(from || to ? { sentAt: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
+              }
+            });
 
         // Check 2: student already has a paid/partial TuitionBill for this period (e.g. cash payment)
         const paidBill = !sentLog ? await prisma.tuitionBill.findFirst({
           where: {
             studentId: student.id,
-            billingMonth,
+            ...(billingMonth
+              ? { billingMonth }
+              : (from || to ? { fromDate: { ...(from ? { gte: from } : {}) }, toDate: { ...(to ? { lte: to } : {}) } } : {})),
             status: { in: ['PAID', 'PARTIAL'] },
             coveredClassIds: { hasSome: coveredClassIds }
           },
@@ -597,7 +613,7 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
         }) : null;
 
         const skipReason = sentLog
-          ? `Already sent billing notice for ${billingMonth}`
+          ? `Already sent billing notice for ${billingMonth || 'this period'}`
           : paidBill
             ? `Cash payment already recorded (${paidBill.referenceCode})`
             : null;
@@ -628,14 +644,52 @@ router.post('/send/custom-tuition', authenticateToken, authorizeRoles('ADMIN', '
       // Phase 3: Pre-create TuitionBill. This endpoint is intentionally manual:
       // the operator-provided sessions, unit price, and override total are the source of truth.
       try {
-        billDetail = [{
-          classId: coveredClassIds[0] || '',
-          className: coveredClassName,
-          teacherNames,
-          sessions: item.sessions,
-          pricePerSession: item.pricePerSession,
-          subtotal: total,
-        }];
+        if (coveredClasses.length > 1) {
+          // The operator enters one blended sessions/price/total for the whole
+          // covered period. Split the display rows proportionally by each
+          // class's actual PRESENT session count so the message/payment-slip
+          // shows a real per-class breakdown instead of collapsing everything
+          // into a single merged line — the operator's total remains the
+          // source of truth for the amount actually billed (subtotals always
+          // sum to it exactly).
+          const sessionSums = await Promise.all(coveredClasses.map(cls =>
+            prisma.attendance.aggregate({
+              _sum: { sessionUnits: true },
+              where: {
+                studentId: student.id, classId: cls.id, status: 'PRESENT',
+                ...(from || to ? { date: { ...(from ? { gte: from } : {}), ...(to ? { lte: to } : {}) } } : {})
+              },
+            })
+          ));
+          const rawSessions = sessionSums.map(agg => agg._sum.sessionUnits || 0);
+          const totalRawSessions = rawSessions.reduce((sum, v) => sum + v, 0);
+          const evenShare = 1 / coveredClasses.length;
+          let allocated = 0;
+          billDetail = coveredClasses.map((cls, i) => {
+            const sessions = rawSessions[i] > 0 ? rawSessions[i] : item.sessions * evenShare;
+            const proportion = totalRawSessions > 0 ? rawSessions[i] / totalRawSessions : evenShare;
+            const isLast = i === coveredClasses.length - 1;
+            const subtotal = isLast ? Math.round(total - allocated) : Math.round(total * proportion);
+            allocated += subtotal;
+            return {
+              classId: cls.id,
+              className: cls.name,
+              teacherNames: cls.teacher?.name ? [cls.teacher.name] : [],
+              sessions,
+              pricePerSession: sessions > 0 ? Math.round(subtotal / sessions) : item.pricePerSession,
+              subtotal,
+            };
+          });
+        } else {
+          billDetail = [{
+            classId: coveredClassIds[0] || '',
+            className: coveredClassName,
+            teacherNames,
+            sessions: item.sessions,
+            pricePerSession: item.pricePerSession,
+            subtotal: total,
+          }];
+        }
 
         const bill = await prisma.tuitionBill.create({
           data: {
@@ -858,10 +912,13 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
   let to: Date | null = null;
   try { ({ from, to } = normalizeDateRange(fromDate, toDate)); } catch (err: any) { return res.status(400).json({ message: err.message }); }
 
-  const classIds = classIdsRaw ? classIdsRaw.split(',') : (classId ? [classId] : []);
+  const classIds = classIdsRaw ? classIdsRaw.split(',').filter(Boolean) : (classId ? [classId] : []);
+  if (classIds.length === 0) {
+    return res.status(400).json({ message: 'Vui lòng chọn ít nhất một lớp' });
+  }
 
   const classStudents = await prisma.classStudent.findMany({
-    where: classIds.length > 0 ? { classId: { in: classIds } } : {},
+    where: { classId: { in: classIds } },
     include: {
       student: {
         include: {
@@ -910,8 +967,12 @@ router.get('/tuition/preview-multiclass', authenticateToken, authorizeRoles('ADM
     const mainClassAtts = s.attendances.filter(a => a.classId === primaryId);
     const mainAttended = mainClassAtts.reduce((sum, a) => sum + (a.sessionUnits ?? 1), 0);
     
+    // Use mainClass's own ClassStudent row for the override (customTuitionPerSession/
+    // discountFrom/To) — `cs` is whichever ClassStudent row survived the dedup above
+    // and may belong to a *different* selected class than primaryId when a student
+    // is enrolled in more than one of the selected classes.
     const mainSubtotal = expectedForStudentClass(
-      mainClass?.class as any, s.id, mainClassAtts as any, cs
+      mainClass?.class as any, s.id, mainClassAtts as any, mainClass as any
     );
 
     const otherClasses = s.classes
@@ -995,7 +1056,11 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
   try {
     const students = await prisma.student.findMany({
       where: { id: { in: studentIds } },
-      include: { classes: { include: { class: true } } }
+      include: {
+        classes: { include: { class: true } },
+        attendances: { where: { status: 'PRESENT' }, select: { classId: true, studentId: true, status: true, sessionUnits: true, date: true } },
+        paymentAdjustments: { select: { amount: true } },
+      }
     });
 
     let sentCount = 0;
@@ -1026,11 +1091,25 @@ router.post('/send/tuition', authenticateToken, authorizeRoles('ADMIN', 'MANAGER
       const formattedPhone = formatPhone(phoneToUse);
       const trackingId = `TUITION_${student.id}_${Date.now()}`;
 
+      // Compute the student's real outstanding balance instead of a placeholder
+      // amount/due_date — this generic ZNS send has no class/date selection, so
+      // it sums every class the student belongs to (all-time PRESENT attendance).
+      let totalDue = 0;
+      for (const cs of student.classes as any[]) {
+        const classAtts = (student as any).attendances.filter((a: any) => a.classId === cs.classId);
+        totalDue += expectedForStudentClass(cs.class as any, student.id, classAtts as any, cs as any);
+      }
+      const totalAdjustments = (student as any).paymentAdjustments.reduce((sum: number, adj: any) => sum + adj.amount, 0);
+      totalDue = Math.max(0, totalDue - totalAdjustments);
+      const now = new Date();
+      const lastDayOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
+      const dueDateStr = `${String(lastDayOfMonth.getUTCDate()).padStart(2, '0')}/${String(lastDayOfMonth.getUTCMonth() + 1).padStart(2, '0')}/${lastDayOfMonth.getUTCFullYear()}`;
+
       try {
         const r = await zaloApiClient.post<any>('https://business.openapi.zalo.me/message/template', {
           phone: formattedPhone,
           template_id: templateId,
-          template_data: { student_name: student.name, amount: '150,000 VND', due_date: '30/06/2026' },
+          template_data: { student_name: student.name, amount: totalDue.toLocaleString('vi-VN') + ' VND', due_date: dueDateStr },
           tracking_id: trackingId
         }, { headers: { access_token: cfg.ZALO_ACCESS_TOKEN, 'Content-Type': 'application/json' } });
 
