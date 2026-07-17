@@ -4,6 +4,7 @@ dotenv.config();
 import express from 'express';
 import path from 'path';
 import cors from 'cors';
+import prisma from './lib/prisma';
 import authRoutes from './routes/auth';
 import teacherRoutes from './routes/teachers';
 import studentRoutes from './routes/students';
@@ -39,8 +40,17 @@ app.use('/api/zalo', zaloRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/campaigns', campaignRoutes);
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Verifies the database is actually reachable — a static "ok" here previously
+// masked a fully-down database (Render's health check kept reporting the
+// deploy as healthy while every DB-backed request was failing with P1001).
+app.get('/health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.json({ status: 'ok', database: 'ok', timestamp: new Date().toISOString() });
+  } catch (err: any) {
+    console.error('[Health] Database check failed:', err.message);
+    res.status(503).json({ status: 'error', database: 'unreachable', timestamp: new Date().toISOString() });
+  }
 });
 
 // Serve React frontend in production

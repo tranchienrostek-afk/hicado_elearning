@@ -1,8 +1,3 @@
-databases:
-  - name: elearning-db
-    databaseName: elearning
-    plan: free
-
 services:
   # Backend API (Docker)
   - type: web
@@ -11,10 +6,16 @@ services:
     plan: starter
     healthCheckPath: /health
     envVars:
+      # Database now hosted on Supabase (not a Render-managed Postgres) — set both
+      # manually in the Render dashboard from the Supabase project's connection info:
+      #   DATABASE_URL — the pooled/Supavisor connection string (port 6543, ?pgbouncer=true),
+      #                  used by the running app.
+      #   DIRECT_URL   — the direct connection string (port 5432), used only for
+      #                  `prisma migrate deploy` at container startup.
       - key: DATABASE_URL
-        fromDatabase:
-          name: elearning-db
-          property: connectionString
+        sync: false
+      - key: DIRECT_URL
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: PORT
